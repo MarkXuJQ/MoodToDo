@@ -1,0 +1,73 @@
+:root {
+  --surface: #f6f7f4;
+  --panel: #ffffff;
+  --panel-alt: #f0f4f1;
+  --field: #fbfcfa;
+  --text: #24302d;
+  --text-strong: #111816;
+  --muted: #68736f;
+  --muted-strong: #48534f;
+  --line: #d9e0dc;
+  --line-strong: #bfc9c4;
+  --accent: #1f766f;
+  --accent-soft: #b9ddd7;
+  --focus: #0d9488;
+  --teal: #168a7a;
+  --blue: #3867b7;
+  --amber: #c88915;
+  --amber-strong: #9b6200;
+  --coral: #c34a37;
+  --violet: #7753b8;
+  --font-sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  color: var(--text);
+  background: var(--surface);
+  font: 16px/1.45 var(--font-sans);
+  letter-spacing: 0;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--surface);
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1 {
+  color: var(--text-strong);
+  font-size: 1.9rem;
+  line-height: 1.12;
+  letter-spacing: 0;
+}
+
+h2 {
+  color: var(--text-strong);
+  font-size: 1.12rem;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
