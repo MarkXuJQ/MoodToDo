@@ -62,11 +62,21 @@ export type EntryDraft = {
   tags: string[]
 }
 
+export type WeeklySummary = {
+  weekKey: string
+  content: string
+  model: string
+  provider: string
+  createdAt: string
+  updatedAt: string
+}
+
 class LocalTodoDatabase extends Dexie {
   entries!: Table<JournalEntry, string>
   todos!: Table<TodoItem, string>
   attachments!: Table<AttachmentRecord, string>
   changes!: Table<ChangeLogRecord, number>
+  weeklySummaries!: Table<WeeklySummary, string>
 
   constructor() {
     super('xinxiangyi_local')
@@ -75,6 +85,13 @@ class LocalTodoDatabase extends Dexie {
       todos: 'id, dateKey, done, updatedAt, syncState',
       attachments: 'id, entryId, dateKey, updatedAt, syncState',
       changes: '++seq, entity, entityId, changedAt, syncState',
+    })
+    this.version(2).stores({
+      entries: 'id, &dateKey, updatedAt, syncState, mood.score',
+      todos: 'id, dateKey, done, updatedAt, syncState',
+      attachments: 'id, entryId, dateKey, updatedAt, syncState',
+      changes: '++seq, entity, entityId, changedAt, syncState',
+      weeklySummaries: '&weekKey, updatedAt, provider, model',
     })
   }
 }
@@ -223,4 +240,25 @@ export const deleteAttachment = async (attachment: AttachmentRecord) => {
       name: attachment.name,
     })
   })
+}
+
+export const upsertWeeklySummary = async (
+  weekKey: string,
+  content: string,
+  model: string,
+  provider = 'openai-compatible',
+) => {
+  const timestamp = nowIso()
+  const existing = await db.weeklySummaries.get(weekKey)
+  const summary: WeeklySummary = {
+    weekKey,
+    content,
+    model,
+    provider,
+    createdAt: existing?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+  }
+
+  await db.weeklySummaries.put(summary)
+  return summary
 }

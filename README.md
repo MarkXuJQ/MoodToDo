@@ -10,6 +10,9 @@
 - 添加、完成、删除当日 Todo。
 - 生成 `心象分`：将心情描述模糊量化为 0-100 分，并保存晴朗度、负荷度、能量感、修复感、反思度等组成项。
 - 生成 `心象象限`：把今日状态归入高能舒展、高能紧绷、低能修复、低能承压四类。
+- 提供总结页面：用月历热力图观察心象分、打卡状态和事项完成情况。
+- 支持一周回顾：选择任意一周，查看心象均值、打卡天数、事项完成率和每日状态。
+- 支持 OpenAI-compatible 大模型 API 生成周总结，API Key 只保存在本机浏览器 `localStorage`。
 - 使用 IndexedDB 做本地持久化，图片以 Blob 存入 `attachments` 表。
 - 使用 `changes` 变更日志记录本地写入，为后续 WebDAV 增量同步预留结构。
 - 统计记录按 `月份 -> 周 -> 日期` 展示，不把每天记录铺平成单层列表。
@@ -41,8 +44,19 @@ IndexedDB 数据库名：`xinxiangyi_local`
 - `todos`：每日事项，包含完成状态和完成时间。
 - `attachments`：本地附件，包含图片 Blob、文件名、类型、大小和关联日记。
 - `changes`：同步队列，包含实体类型、实体 ID、操作、设备 ID、时间和快照。
+- `weeklySummaries`：周总结缓存，包含周起始日期、模型、服务商、总结正文和更新时间。
 
 后续 WebDAV 同步可从 `changes` 表生成远端增量包，并把图片附件按 `attachments/{id}` 存储。
+
+## 大模型周总结
+
+总结页内可以配置兼容 OpenAI Chat Completions 的接口：
+
+- Endpoint 示例：`https://api.openai.com/v1/chat/completions`
+- Model 示例：`gpt-4o-mini`
+- API Key：只保存在当前浏览器本地，不写入 IndexedDB 同步队列。
+
+生成周总结时，应用会把选中一周的日期、心象分、象限、心情描述、日记正文、标签和 Todo 完成状态发送给配置的接口。生成结果会存入 `weeklySummaries`，之后可以继续手动修改和保存。
 
 ## 开发
 
