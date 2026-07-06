@@ -14,6 +14,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Search,
   Settings2,
   Sparkles,
   Trash2,
@@ -36,7 +37,7 @@ import {
 } from './lib/db'
 import type { MoodSignals } from './lib/mood'
 
-type ActiveView = 'journal' | 'summary'
+type ActiveView = 'dashboard' | 'journal' | 'summary' | 'overview'
 
 type DraftState = {
   title: string
@@ -49,6 +50,13 @@ type AiConfig = {
   endpoint: string
   apiKey: string
   model: string
+}
+
+type WebDavConfig = {
+  url: string
+  username: string
+  password: string
+  remotePath: string
 }
 
 type CalendarCell = {
@@ -86,7 +94,15 @@ const defaultAiConfig: AiConfig = {
   model: 'gpt-4o-mini',
 }
 
+const defaultWebDavConfig: WebDavConfig = {
+  url: 'https://dav.jianguoyun.com/dav/',
+  username: '',
+  password: '',
+  remotePath: '/xinxiangyi',
+}
+
 const aiConfigStorageKey = 'xinxiangyi-ai-config-v1'
+const webDavConfigStorageKey = 'xinxiangyi-webdav-config-v1'
 
 const getTodayKey = () => {
   const today = new Date()
@@ -363,6 +379,18 @@ const readAiConfig = (): AiConfig => {
   }
 }
 
+const readWebDavConfig = (): WebDavConfig => {
+  const raw = window.localStorage.getItem(webDavConfigStorageKey)
+
+  if (!raw) return defaultWebDavConfig
+
+  try {
+    return { ...defaultWebDavConfig, ...JSON.parse(raw) }
+  } catch {
+    return defaultWebDavConfig
+  }
+}
+
 const extractAiContent = (payload: unknown) => {
   const chatPayload = payload as {
     choices?: Array<{ message?: { content?: string } }>
@@ -440,7 +468,7 @@ const AttachmentThumb = ({
 }
 
 function App() {
-  const [activeView, setActiveView] = useState<ActiveView>('journal')
+  const [activeView, setActiveView] = useState<ActiveView>('dashboard')
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([])
@@ -453,6 +481,8 @@ function App() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [todoTitle, setTodoTitle] = useState('')
   const [aiConfig, setAiConfig] = useState<AiConfig>(defaultAiConfig)
+  const [webDavConfig, setWebDavConfig] = useState<WebDavConfig>(defaultWebDavConfig)
+  const [journalSearch, setJournalSearch] = useState('')
   const [summaryDraft, setSummaryDraft] = useState('')
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
   const [summaryError, setSummaryError] = useState('')
@@ -476,6 +506,7 @@ function App() {
 
   useEffect(() => {
     setAiConfig(readAiConfig())
+    setWebDavConfig(readWebDavConfig())
     void reload()
   }, [])
 
@@ -529,6 +560,18 @@ function App() {
     () => weeklySummaries.find((summary) => summary.weekKey === selectedWeek),
     [selectedWeek, weeklySummaries],
   )
+  const filteredEntries = useMemo(() => {
+    const keyword = journalSearch.trim().toLowerCase()
+
+    if (!keyword) return entries
+
+    return entries.filter((entry) =>
+      [entry.title, entry.body, entry.moodText, entry.tags.join(' '), entry.mood.quadrant]
+        .join(' ')
+        .toLowerCase()
+        .includes(keyword),
+    )
+  }, [entries, journalSearch])
   const pendingChangeCount = changes.filter((change) => change.syncState === 'pending').length
   const completionRate = getCompletionRate(allEntryTodos)
   const monthEntries = entries.filter((entry) => entry.dateKey.startsWith(visibleMonth))
@@ -602,7 +645,7 @@ function App() {
   const handleSelectCalendarDay = (dateKey: string) => {
     setSelectedDate(dateKey)
     setSelectedWeek(getWeekKey(dateKey))
-    setActiveView('journal')
+    setActiveView('dashboard')
   }
 
   const handleAiConfigChange =
@@ -610,6 +653,13 @@ function App() {
       const next = { ...aiConfig, [key]: event.target.value }
       setAiConfig(next)
       window.localStorage.setItem(aiConfigStorageKey, JSON.stringify(next))
+    }
+
+  const handleWebDavConfigChange =
+    (key: keyof WebDavConfig) => (event: ChangeEvent<HTMLInputElement>) => {
+      const next = { ...webDavConfig, [key]: event.target.value }
+      setWebDavConfig(next)
+      window.localStorage.setItem(webDavConfigStorageKey, JSON.stringify(next))
     }
 
   const handleGenerateSummary = async () => {
@@ -694,24 +744,40 @@ function App() {
 
       <nav className="view-tabs" aria-label="视图切换">
         <button
+          className={activeView === 'dashboard' ? 'active' : ''}
+          type="button"
+          onClick={() => setActiveView('dashboard')}
+        >
+          <BarChart3 size={18} aria-hidden="true" />
+          Dashboard
+        </button>
+        <button
           className={activeView === 'journal' ? 'active' : ''}
           type="button"
           onClick={() => setActiveView('journal')}
         >
           <BookOpen size={18} aria-hidden="true" />
-          记录
+          日记浏览
         </button>
         <button
           className={activeView === 'summary' ? 'active' : ''}
           type="button"
           onClick={() => setActiveView('summary')}
         >
-          <BarChart3 size={18} aria-hidden="true" />
+          <TrendingUp size={18} aria-hidden="true" />
           总结
+        </button>
+        <button
+          className={activeView === 'overview' ? 'active' : ''}
+          type="button"
+          onClick={() => setActiveView('overview')}
+        >
+          <Database size={18} aria-hidden="true" />
+          总览
         </button>
       </nav>
 
-      {activeView === 'journal' ? (
+      {activeView === 'dashboard' ? (
         <>
           <section className="day-strip" aria-label="日期选择">
             <label>
@@ -938,7 +1004,68 @@ function App() {
             {monthGroups.length === 0 && <p className="empty-state">还没有层级记录。</p>}
           </section>
         </>
-      ) : (
+      ) : activeView === 'journal' ? (
+        <section className="journal-browser" aria-labelledby="journal-browser-title">
+          <div className="summary-head">
+            <div>
+              <p className="eyebrow">Journal Browser</p>
+              <h2 id="journal-browser-title">日记浏览</h2>
+            </div>
+            <label className="search-box">
+              <Search size={18} aria-hidden="true" />
+              <input
+                value={journalSearch}
+                onChange={(event) => setJournalSearch(event.target.value)}
+                placeholder="搜索标题、正文、心情、标签"
+              />
+            </label>
+          </div>
+
+          <div className="summary-metrics">
+            <Metric label="日记总数" value={`${entries.length}`} />
+            <Metric label="搜索结果" value={`${filteredEntries.length}`} />
+            <Metric label="最近心象" value={`${latestEntry?.mood.score ?? 0}`} />
+            <Metric label="连续打卡" value={`${currentStreak} 天`} />
+            <Metric label="待同步" value={`${pendingChangeCount}`} />
+          </div>
+
+          <div className="journal-list">
+            {filteredEntries.map((entry) => {
+              const entryTodos = todos.filter((todo) => todo.dateKey === entry.dateKey)
+              const entryAttachments = attachments.filter((attachment) => attachment.entryId === entry.id)
+
+              return (
+                <button
+                  className="journal-card"
+                  type="button"
+                  key={entry.id}
+                  onClick={() => {
+                    setSelectedDate(entry.dateKey)
+                    setActiveView('dashboard')
+                  }}
+                >
+                  <div className="journal-card-head">
+                    <span>{entry.dateKey}</span>
+                    <strong className={`score-${entry.mood.level}`}>{entry.mood.score}</strong>
+                  </div>
+                  <h3>{entry.title}</h3>
+                  <p>{entry.moodText || entry.body || '没有正文'}</p>
+                  <div className="journal-meta">
+                    <span>{entry.mood.quadrant}</span>
+                    <span>{entryTodos.filter((todo) => todo.done).length}/{entryTodos.length} 事项</span>
+                    <span>{entryAttachments.length} 图</span>
+                    {entry.tags.map((tag) => (
+                      <span key={tag}>#{tag}</span>
+                    ))}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          {filteredEntries.length === 0 && <p className="empty-state">还没有匹配的日记。</p>}
+        </section>
+      ) : activeView === 'summary' ? (
         <section className="summary-shell" aria-labelledby="summary-title">
           <div className="summary-head">
             <div>
@@ -1086,6 +1213,81 @@ function App() {
                   rows={10}
                 />
               </label>
+            </section>
+          </div>
+        </section>
+      ) : (
+        <section className="overview-shell" aria-labelledby="overview-title">
+          <div className="summary-head">
+            <div>
+              <p className="eyebrow">Local First</p>
+              <h2 id="overview-title">总览</h2>
+            </div>
+            <span className="count-badge">localhost + IndexedDB</span>
+          </div>
+
+          <div className="summary-metrics">
+            <Metric label="数据库" value="xinxiangyi_local" />
+            <Metric label="日记" value={`${entries.length}`} />
+            <Metric label="事项" value={`${todos.length}`} />
+            <Metric label="附件" value={`${attachments.length}`} />
+            <Metric label="周总结" value={`${weeklySummaries.length}`} />
+          </div>
+
+          <div className="overview-grid">
+            <section className="panel" aria-labelledby="database-title">
+              <div className="section-head">
+                <div>
+                  <p className="eyebrow">Database</p>
+                  <h2 id="database-title">本地数据库</h2>
+                </div>
+                <Database size={22} aria-hidden="true" />
+              </div>
+              <div className="data-table">
+                <span>entries</span>
+                <strong>{entries.length}</strong>
+                <span>todos</span>
+                <strong>{todos.length}</strong>
+                <span>attachments</span>
+                <strong>{attachments.length}</strong>
+                <span>changes</span>
+                <strong>{changes.length}</strong>
+                <span>pending changes</span>
+                <strong>{pendingChangeCount}</strong>
+                <span>weeklySummaries</span>
+                <strong>{weeklySummaries.length}</strong>
+              </div>
+            </section>
+
+            <section className="panel" aria-labelledby="webdav-title">
+              <div className="section-head">
+                <div>
+                  <p className="eyebrow">WebDAV</p>
+                  <h2 id="webdav-title">坚果云同步准备</h2>
+                </div>
+                <Cloud size={22} aria-hidden="true" />
+              </div>
+              <div className="ai-config">
+                <label>
+                  <span>Server URL</span>
+                  <input value={webDavConfig.url} onChange={handleWebDavConfigChange('url')} placeholder="https://dav.jianguoyun.com/dav/" />
+                </label>
+                <label>
+                  <span>Username</span>
+                  <input value={webDavConfig.username} onChange={handleWebDavConfigChange('username')} placeholder="坚果云账号邮箱" />
+                </label>
+                <label>
+                  <span>Password</span>
+                  <input value={webDavConfig.password} onChange={handleWebDavConfigChange('password')} placeholder="坚果云应用密码" type="password" />
+                </label>
+                <label>
+                  <span>Remote Path</span>
+                  <input value={webDavConfig.remotePath} onChange={handleWebDavConfigChange('remotePath')} placeholder="/xinxiangyi" />
+                </label>
+              </div>
+              <p className="sync-note">
+                当前版本只保存同步配置和本地变更日志。下一步会把 `changes` 打包成 JSON 增量文件，并把图片附件按 `attachments/` 上传到 WebDAV。
+              </p>
             </section>
           </div>
         </section>

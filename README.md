@@ -6,6 +6,8 @@
 
 ## 当前能力
 
+- 在 localhost 直接运行，数据默认落到浏览器本地 IndexedDB：`xinxiangyi_local`。
+- 提供四个主界面框架：Dashboard、日记浏览、总结、总览。
 - 记录每日打卡日记、心情描述、标签和本地图片附件。
 - 添加、完成、删除当日 Todo。
 - 生成 `心象分`：将心情描述模糊量化为 0-100 分，并保存晴朗度、负荷度、能量感、修复感、反思度等组成项。
@@ -13,6 +15,7 @@
 - 提供总结页面：用月历热力图观察心象分、打卡状态和事项完成情况。
 - 支持一周回顾：选择任意一周，查看心象均值、打卡天数、事项完成率和每日状态。
 - 支持 OpenAI-compatible 大模型 API 生成周总结，API Key 只保存在本机浏览器 `localStorage`。
+- 总览页提供本地数据库表计数和 WebDAV/坚果云同步配置草案。
 - 使用 IndexedDB 做本地持久化，图片以 Blob 存入 `attachments` 表。
 - 使用 `changes` 变更日志记录本地写入，为后续 WebDAV 增量同步预留结构。
 - 统计记录按 `月份 -> 周 -> 日期` 展示，不把每天记录铺平成单层列表。
@@ -48,6 +51,13 @@ IndexedDB 数据库名：`xinxiangyi_local`
 
 后续 WebDAV 同步可从 `changes` 表生成远端增量包，并把图片附件按 `attachments/{id}` 存储。
 
+## 页面框架
+
+- `Dashboard`：今日记录、今日 Todo、心象分和层级记录入口。
+- `日记浏览`：按标题、正文、心情、标签、象限搜索历史日记。
+- `总结`：月历热力图、一周回顾、大模型周总结。
+- `总览`：本地数据库状态、待同步变更数、WebDAV/坚果云配置。
+
 ## 大模型周总结
 
 总结页内可以配置兼容 OpenAI Chat Completions 的接口：
@@ -57,6 +67,22 @@ IndexedDB 数据库名：`xinxiangyi_local`
 - API Key：只保存在当前浏览器本地，不写入 IndexedDB 同步队列。
 
 生成周总结时，应用会把选中一周的日期、心象分、象限、心情描述、日记正文、标签和 Todo 完成状态发送给配置的接口。生成结果会存入 `weeklySummaries`，之后可以继续手动修改和保存。
+
+## WebDAV / 坚果云同步计划
+
+总览页已经预留 WebDAV 配置：
+
+- Server URL 默认：`https://dav.jianguoyun.com/dav/`
+- Username：坚果云账号邮箱
+- Password：坚果云应用密码
+- Remote Path 默认：`/xinxiangyi`
+
+当前版本只保存配置和本地 `changes` 变更日志，还不会真正上传。下一步计划：
+
+1. 将 `entries`、`todos`、`weeklySummaries` 和 `changes` 导出为 JSON 快照。
+2. 将图片附件导出到 `attachments/{attachmentId}`。
+3. 通过 WebDAV `PROPFIND/MKCOL/PUT/GET` 与坚果云目录同步。
+4. 基于 `updatedAt`、`deviceId` 和 `syncState` 处理增量同步与冲突。
 
 ## 开发
 
