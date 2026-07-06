@@ -1,4 +1,5 @@
 export type MoodLevel = '低谷' | '承压' | '平稳' | '舒展' | '高亮'
+export type MoodQuadrant = '低能承压' | '高能紧绷' | '低能修复' | '高能舒展'
 
 export type MoodSignals = {
   clarity: number
@@ -8,12 +9,23 @@ export type MoodSignals = {
   reflection: number
 }
 
+export type MoodVector = {
+  valence: number
+  arousal: number
+  resilience: number
+  clarity: number
+}
+
 export type MoodAnalysis = {
   score: number
   level: MoodLevel
+  quadrant: MoodQuadrant
   confidence: number
+  algorithm: string
   signals: MoodSignals
+  vector: MoodVector
   keywords: string[]
+  reviewHint: string
 }
 
 type WeightedWord = {
@@ -86,9 +98,14 @@ const recoveryWords: WeightedWord[] = [
 ]
 
 const negationWords = ['不', '没', '没有', '无', '别', 'not', 'no']
+const algorithmVersion = 'xinxiang-v0.2-lexical-vector'
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
+
+const sigmoid = (value: number, slope = 1) => 1 / (1 + Math.exp(-value * slope))
+
+const scaleToUnit = (value: number, max: number) => clamp(value / max, 0, 1)
 
 const countMatches = (text: string, words: WeightedWord[]) => {
   const hits: string[] = []
@@ -124,6 +141,22 @@ const getLevel = (score: number): MoodLevel => {
   return '高亮'
 }
 
+const getQuadrant = (vector: MoodVector): MoodQuadrant => {
+  if (vector.arousal < 0 && vector.valence < 0) return '低能承压'
+  if (vector.arousal >= 0 && vector.valence < 0) return '高能紧绷'
+  if (vector.arousal < 0 && vector.valence >= 0) return '低能修复'
+  return '高能舒展'
+}
+
+const getReviewHint = (quadrant: MoodQuadrant, score: number) => {
+  if (quadrant === '高能紧绷') return '适合回看近期压力源，把高能量导向一个可完成的小动作。'
+  if (quadrant === '低能承压') return '适合关联睡眠、运动和未完成事项，先寻找可恢复的入口。'
+  if (quadrant === '低能修复') return '适合保留当日有效的修复方式，作为下次低能量时的参考。'
+  if (score >= 82) return '适合标记触发高亮状态的场景，沉淀成个人正反馈样本。'
+
+  return '适合观察今日行动和心情之间的关联，记录一个可重复的小条件。'
+}
+
 export const analyzeMood = (sourceText: string): MoodAnalysis => {
   const text = sourceText.trim().toLowerCase()
 
@@ -131,7 +164,9 @@ export const analyzeMood = (sourceText: string): MoodAnalysis => {
     return {
       score: 50,
       level: '平稳',
+      quadrant: '低能修复',
       confidence: 0,
+      algorithm: algorithmVersion,
       signals: {
         clarity: 0,
         load: 0,
@@ -139,7 +174,14 @@ export const analyzeMood = (sourceText: string): MoodAnalysis => {
         recovery: 0,
         reflection: 0,
       },
+      vector: {
+        valence: 0,
+        arousal: -0.1,
+        resilience: 0,
+        clarity: 0,
+      },
       keywords: [],
+      reviewHint: '写下几句心情后，心象仪会给出模糊量化和回顾线索。',
     }
   }
 
@@ -155,24 +197,55 @@ export const analyzeMood = (sourceText: string): MoodAnalysis => {
   const loadScore = clamp(load.total + negationPenalty, 0, 40)
   const energyScore = clamp(energy.total + punctuationLift, 0, 28)
   const recoveryScore = clamp(recovery.total, 0, 28)
+  const reflectionScore = Math.round(reflection)
 
-  const rawScore =
-    50 + clarityScore * 0.8 + energyScore * 0.55 + recoveryScore * 0.45 + reflection * 0.35 - loadScore * 0.9
+  const valence =
+    scaleToUnit(clarityScore, 35) * 1.25 +
+    scaleToUnit(recoveryScore, 28) * 0.45 -
+    scaleToUnit(loadScore, 40) * 1.45
+  const arousal = scaleToUnit(energyScore, 28) * 1.35 - scaleToUnit(recoveryScore, 28) * 0.7 - scaleToUnit(loadScore, 40) * 0.25
+  const resilience =
+    scaleToUnit(recoveryScore, 28) * 1.2 +
+    scaleToUnit(reflection, 24) * 0.8 -
+    scaleToUnit(loadScore, 40) * 0.65
+  const clarityAxis = scaleToUnit(clarityScore, 35) * 1.1 + scaleToUnit(reflection, 24) * 0.65
 
-  const score = Math.round(clamp(rawScore, 0, 100))
+  const vector: MoodVector = {
+    valence: Number(clamp(valence, -1, 1).toFixed(3)),
+    arousal: Number(clamp(arousal, -1, 1).toFixed(3)),
+    resilience: Number(clamp(resilience, -1, 1).toFixed(3)),
+    clarity: Number(clamp(clarityAxis, -1, 1).toFixed(3)),
+  }
+
+  const curvedScore =
+    100 *
+    sigmoid(
+      vector.valence * 1.35 +
+        vector.resilience * 0.85 +
+        vector.clarity * 0.35 +
+        vector.arousal * 0.16,
+      1.15,
+    )
+
+  const score = Math.round(clamp(curvedScore, 0, 100))
+  const quadrant = getQuadrant(vector)
   const confidence = Math.round(clamp(text.length / 60, 0.2, 1) * 100)
 
   return {
     score,
     level: getLevel(score),
+    quadrant,
     confidence,
+    algorithm: algorithmVersion,
     signals: {
       clarity: Math.round(clarityScore),
       load: Math.round(loadScore),
       energy: Math.round(energyScore),
       recovery: Math.round(recoveryScore),
-      reflection: Math.round(reflection),
+      reflection: reflectionScore,
     },
+    vector,
     keywords: [...new Set([...clarity.hits, ...load.hits, ...energy.hits, ...recovery.hits])],
+    reviewHint: getReviewHint(quadrant, score),
   }
 }

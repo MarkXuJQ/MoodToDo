@@ -8,9 +8,9 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'Layered Todo 打卡日记',
-        short_name: 'Layered Todo',
-        description: '离线优先的打卡日记、Todo 和情绪复原指数记录工具。',
+        name: '心象仪',
+        short_name: '心象仪',
+        description: '离线优先的打卡日记、Todo 和心情模糊量化工具。',
         theme_color: '#1f766f',
         background_color: '#f6f7f4',
         display: 'standalone',

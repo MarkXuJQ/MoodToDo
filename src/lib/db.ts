@@ -69,7 +69,7 @@ class LocalTodoDatabase extends Dexie {
   changes!: Table<ChangeLogRecord, number>
 
   constructor() {
-    super('layered_todo_local')
+    super('xinxiangyi_local')
     this.version(1).stores({
       entries: 'id, &dateKey, updatedAt, syncState, mood.score',
       todos: 'id, dateKey, done, updatedAt, syncState',
@@ -90,7 +90,7 @@ const createId = (prefix: string) => {
 const nowIso = () => new Date().toISOString()
 
 const getDeviceId = () => {
-  const key = 'layered-todo-device-id'
+  const key = 'xinxiangyi-device-id'
   const existing = window.localStorage.getItem(key)
 
   if (existing) {

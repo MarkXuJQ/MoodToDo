@@ -395,6 +395,38 @@ button:focus-visible,
   font-weight: 800;
 }
 
+.signal-column {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mood-space {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--panel-alt);
+}
+
+.mood-space span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.mood-space strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .signals {
   display: grid;
   grid-template-columns: 58px 1fr;
@@ -440,6 +472,18 @@ button:focus-visible,
 
 .progress-bar.reflection::before {
   background: var(--violet);
+}
+
+.review-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: var(--panel-alt);
+  color: var(--muted-strong);
+  font-size: 0.84rem;
+  font-weight: 700;
 }
 
 .history-band {

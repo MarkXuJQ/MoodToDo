@@ -359,8 +359,8 @@ function App() {
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Layered Todo</p>
-          <h1>打卡日记</h1>
+          <p className="eyebrow">Xinxiangyi</p>
+          <h1>心象仪</h1>
         </div>
         <div className="status-pills" aria-label="本地状态">
           <span>
@@ -379,7 +379,7 @@ function App() {
           <CalendarDays size={18} aria-hidden="true" />
           <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
         </label>
-        <Metric label="MES" value={`${todayScore}`} tone={`score-${selectedEntry?.mood.level ?? '平稳'}`} />
+        <Metric label="心象分" value={`${todayScore}`} tone={`score-${selectedEntry?.mood.level ?? '平稳'}`} />
         <Metric label="今日完成" value={`${dayTodos.filter((todo) => todo.done).length}/${dayTodos.length}`} />
         <Metric label="图片" value={`${selectedAttachments.length + pendingFiles.length}`} />
       </section>
@@ -406,7 +406,7 @@ function App() {
               <textarea
                 value={draft.moodText}
                 onChange={handleDraftChange('moodText')}
-                placeholder="比如：上午有些焦虑，下午散步后恢复了专注"
+                placeholder="比如：上午焦虑但有推进，下午散步后恢复专注"
                 rows={4}
               />
             </label>
@@ -503,8 +503,8 @@ function App() {
         <section className="panel stats-panel" aria-labelledby="stats-title">
           <div className="section-head">
             <div>
-              <p className="eyebrow">MES</p>
-              <h2 id="stats-title">情绪复原指数</h2>
+              <p className="eyebrow">Mood Space</p>
+              <h2 id="stats-title">心象分</h2>
             </div>
             <TrendingUp size={22} aria-hidden="true" />
           </div>
@@ -517,25 +517,32 @@ function App() {
 
           {latestEntry ? (
             <div className="signal-stack">
-              <div className="score-ring" aria-label={`最近 MES ${latestEntry.mood.score}`}>
+              <div className="score-ring" aria-label={`最近心象分 ${latestEntry.mood.score}`}>
                 <strong>{latestEntry.mood.score}</strong>
                 <span>{latestEntry.mood.level}</span>
               </div>
-              <div className="signals">
-                <span>晴朗度</span>
-                <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'clarity')} tone="clarity" />
-                <span>负荷度</span>
-                <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'load')} tone="load" />
-                <span>能量感</span>
-                <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'energy')} tone="energy" />
-                <span>修复感</span>
-                <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'recovery')} tone="recovery" />
-                <span>反思度</span>
-                <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'reflection')} tone="reflection" />
+              <div className="signal-column">
+                <div className="mood-space">
+                  <span>象限</span>
+                  <strong>{latestEntry.mood.quadrant}</strong>
+                </div>
+                <div className="signals">
+                  <span>晴朗度</span>
+                  <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'clarity')} tone="clarity" />
+                  <span>负荷度</span>
+                  <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'load')} tone="load" />
+                  <span>能量感</span>
+                  <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'energy')} tone="energy" />
+                  <span>修复感</span>
+                  <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'recovery')} tone="recovery" />
+                  <span>反思度</span>
+                  <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'reflection')} tone="reflection" />
+                </div>
               </div>
+              <p className="review-hint">{latestEntry.mood.reviewHint}</p>
             </div>
           ) : (
-            <p className="empty-state">保存第一条日记后生成指数。</p>
+            <p className="empty-state">保存第一条日记后生成心象分。</p>
           )}
         </section>
       </div>
@@ -554,7 +561,7 @@ function App() {
             <details className="month-group" key={month.monthKey} open={monthIndex === 0}>
               <summary>
                 <span>{formatMonthLabel(month.monthKey)}</span>
-                <span>MES {month.averageScore}</span>
+                <span>心象 {month.averageScore}</span>
                 <span>{month.completionRate}%</span>
               </summary>
               <div className="week-stack">
@@ -562,7 +569,7 @@ function App() {
                   <div className="week-group" key={week.weekKey}>
                     <div className="week-head">
                       <strong>{formatDateLabel(week.weekKey)} 周</strong>
-                      <span>MES {week.averageScore}</span>
+                      <span>心象 {week.averageScore}</span>
                       <span>
                         <Check size={14} aria-hidden="true" />
                         {week.completionRate}%
