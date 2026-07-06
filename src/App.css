@@ -653,6 +653,17 @@ button:focus-visible,
   font-weight: 700;
 }
 
+.write-error {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto 14px;
+  border: 1px solid #e7b7ad;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff1ee;
+  color: var(--coral);
+  font-weight: 800;
+}
+
 .score-低谷 {
   color: var(--coral) !important;
 }
@@ -1121,7 +1132,8 @@ button:focus-visible,
   .history-band,
   .summary-shell,
   .journal-browser,
-  .overview-shell {
+  .overview-shell,
+  .write-error {
     width: min(100% - 20px, 1180px);
   }
 

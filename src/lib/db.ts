@@ -93,6 +93,13 @@ class LocalTodoDatabase extends Dexie {
       changes: '++seq, entity, entityId, changedAt, syncState',
       weeklySummaries: '&weekKey, updatedAt, provider, model',
     })
+    this.version(3).stores({
+      entries: 'id, &dateKey, updatedAt, syncState, mood.score',
+      todos: 'id, dateKey, done, createdAt, updatedAt, syncState',
+      attachments: 'id, entryId, dateKey, createdAt, updatedAt, syncState',
+      changes: '++seq, entity, entityId, changedAt, syncState',
+      weeklySummaries: '&weekKey, updatedAt, provider, model',
+    })
   }
 }
 
@@ -108,14 +115,14 @@ const nowIso = () => new Date().toISOString()
 
 const getDeviceId = () => {
   const key = 'xinxiangyi-device-id'
-  const existing = window.localStorage.getItem(key)
+  const existing = globalThis.localStorage?.getItem(key)
 
   if (existing) {
     return existing
   }
 
   const id = createId('device')
-  window.localStorage.setItem(key, id)
+  globalThis.localStorage?.setItem(key, id)
   return id
 }
 

@@ -486,6 +486,7 @@ function App() {
   const [summaryDraft, setSummaryDraft] = useState('')
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
   const [summaryError, setSummaryError] = useState('')
+  const [writeError, setWriteError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
   const reload = async () => {
@@ -602,19 +603,26 @@ function App() {
     if (!canSave || isSaving) return
 
     setIsSaving(true)
-    await upsertJournalEntry(
-      {
-        dateKey: selectedDate,
-        title: draft.title.trim() || formatDateLabel(selectedDate),
-        body: draft.body.trim(),
-        moodText: draft.moodText.trim(),
-        tags: parseTags(draft.tags),
-      },
-      pendingFiles,
-    )
-    setPendingFiles([])
-    await reload()
-    setIsSaving(false)
+    setWriteError('')
+
+    try {
+      await upsertJournalEntry(
+        {
+          dateKey: selectedDate,
+          title: draft.title.trim() || formatDateLabel(selectedDate),
+          body: draft.body.trim(),
+          moodText: draft.moodText.trim(),
+          tags: parseTags(draft.tags),
+        },
+        pendingFiles,
+      )
+      setPendingFiles([])
+      await reload()
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : '保存日记失败。')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleAddTodo = async (event: FormEvent<HTMLFormElement>) => {
@@ -622,24 +630,48 @@ function App() {
     const title = todoTitle.trim()
     if (!title) return
 
-    await addTodo(selectedDate, title)
-    setTodoTitle('')
-    await reload()
+    setWriteError('')
+
+    try {
+      await addTodo(selectedDate, title)
+      setTodoTitle('')
+      await reload()
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : '新增事项失败。')
+    }
   }
 
   const handleToggleTodo = async (todo: TodoItem) => {
-    await setTodoDone(todo, !todo.done)
-    await reload()
+    setWriteError('')
+
+    try {
+      await setTodoDone(todo, !todo.done)
+      await reload()
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : '更新事项失败。')
+    }
   }
 
   const handleDeleteTodo = async (todo: TodoItem) => {
-    await deleteTodo(todo)
-    await reload()
+    setWriteError('')
+
+    try {
+      await deleteTodo(todo)
+      await reload()
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : '删除事项失败。')
+    }
   }
 
   const handleDeleteAttachment = async (attachment: AttachmentRecord) => {
-    await deleteAttachment(attachment)
-    await reload()
+    setWriteError('')
+
+    try {
+      await deleteAttachment(attachment)
+      await reload()
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : '删除附件失败。')
+    }
   }
 
   const handleSelectCalendarDay = (dateKey: string) => {
@@ -788,6 +820,8 @@ function App() {
             <Metric label="今日完成" value={`${dayTodos.filter((todo) => todo.done).length}/${dayTodos.length}`} />
             <Metric label="图片" value={`${selectedAttachments.length + pendingFiles.length}`} />
           </section>
+
+          {writeError && <p className="write-error">{writeError}</p>}
 
           <div className="workspace">
             <section className="panel journal-panel" aria-labelledby="journal-title">
