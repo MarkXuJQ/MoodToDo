@@ -13,7 +13,7 @@ const databaseName = 'xinxiangyi.sqlite'
 const databasePath = resolve(dataDir, databaseName)
 const port = Number(process.env.XINXIANGYI_API_PORT ?? 8787)
 const host = process.env.XINXIANGYI_API_HOST ?? '127.0.0.1'
-const schemaVersion = 1
+const schemaVersion = 2
 
 mkdirSync(dataDir, { recursive: true })
 
@@ -82,6 +82,29 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS metric_definitions (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    color TEXT NOT NULL,
+    target_value REAL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    sync_state TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS metric_records (
+    id TEXT PRIMARY KEY,
+    metric_id TEXT NOT NULL,
+    date_key TEXT NOT NULL,
+    value REAL NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    sync_state TEXT NOT NULL,
+    UNIQUE(metric_id, date_key),
+    FOREIGN KEY(metric_id) REFERENCES metric_definitions(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_entries_date_key ON entries(date_key);
   CREATE INDEX IF NOT EXISTS idx_todos_date_key ON todos(date_key);
   CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
@@ -89,6 +112,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
   CREATE INDEX IF NOT EXISTS idx_changes_changed_at ON changes(changed_at);
   CREATE INDEX IF NOT EXISTS idx_changes_sync_state ON changes(sync_state);
+  CREATE INDEX IF NOT EXISTS idx_metric_records_metric_id ON metric_records(metric_id);
+  CREATE INDEX IF NOT EXISTS idx_metric_records_date_key ON metric_records(date_key);
 `)
 
 db.exec(`PRAGMA user_version = ${schemaVersion}`)
@@ -162,6 +187,27 @@ const rowToWeeklySummary = (row) => ({
   provider: row.provider,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+})
+
+const rowToMetricDefinition = (row) => ({
+  id: row.id,
+  name: row.name,
+  unit: row.unit,
+  color: row.color,
+  targetValue: row.target_value ?? undefined,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  syncState: row.sync_state,
+})
+
+const rowToMetricRecord = (row) => ({
+  id: row.id,
+  metricId: row.metric_id,
+  dateKey: row.date_key,
+  value: Number(row.value),
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  syncState: row.sync_state,
 })
 
 const getMeta = () => ({
@@ -372,6 +418,14 @@ const getState = () => ({
   entries: db.prepare('SELECT * FROM entries ORDER BY date_key DESC').all().map(rowToEntry),
   todos: db.prepare('SELECT * FROM todos ORDER BY created_at DESC').all().map(rowToTodo),
   attachments: db.prepare('SELECT * FROM attachments ORDER BY created_at DESC').all().map(rowToAttachment),
+  metricDefinitions: db
+    .prepare('SELECT * FROM metric_definitions ORDER BY created_at ASC')
+    .all()
+    .map(rowToMetricDefinition),
+  metricRecords: db
+    .prepare('SELECT * FROM metric_records ORDER BY date_key DESC, updated_at DESC')
+    .all()
+    .map(rowToMetricRecord),
   changes: db.prepare('SELECT * FROM changes ORDER BY changed_at DESC').all().map(rowToChange),
   weeklySummaries: db
     .prepare('SELECT * FROM weekly_summaries ORDER BY updated_at DESC')
@@ -631,6 +685,146 @@ const upsertWeeklySummary = async (request, response) => {
   sendJson(response, 200, { summary })
 }
 
+const upsertMetricDefinition = async (request, response) => {
+  const payload = await readJson(request)
+  const timestamp = nowIso()
+  const existing = payload.id ? db.prepare('SELECT * FROM metric_definitions WHERE id = ?').get(payload.id) : null
+  const name = typeof payload.name === 'string' ? payload.name.trim() : ''
+  const unit = typeof payload.unit === 'string' ? payload.unit.trim() : ''
+  const color = typeof payload.color === 'string' ? payload.color.trim() : ''
+  const targetValue =
+    typeof payload.targetValue === 'number' && Number.isFinite(payload.targetValue) ? payload.targetValue : null
+
+  if (!name) {
+    sendJson(response, 400, { error: '指标名称不能为空。' })
+    return
+  }
+
+  if (!/^#([0-9a-fA-F]{6})$/.test(color)) {
+    sendJson(response, 400, { error: '请使用合法的颜色值。' })
+    return
+  }
+
+  const metricDefinition = {
+    id: existing?.id ?? createId('metric'),
+    name,
+    unit,
+    color,
+    targetValue: targetValue ?? undefined,
+    createdAt: existing?.created_at ?? timestamp,
+    updatedAt: timestamp,
+    syncState: 'pending',
+  }
+  const deviceId = getDeviceId(request)
+
+  transaction(() => {
+    db.prepare(`
+      INSERT INTO metric_definitions (
+        id, name, unit, color, target_value, created_at, updated_at, sync_state
+      )
+      VALUES (
+        $id, $name, $unit, $color, $targetValue, $createdAt, $updatedAt, $syncState
+      )
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        unit = excluded.unit,
+        color = excluded.color,
+        target_value = excluded.target_value,
+        updated_at = excluded.updated_at,
+        sync_state = excluded.sync_state
+    `).run({
+      $id: metricDefinition.id,
+      $name: metricDefinition.name,
+      $unit: metricDefinition.unit,
+      $color: metricDefinition.color,
+      $targetValue: metricDefinition.targetValue ?? null,
+      $createdAt: metricDefinition.createdAt,
+      $updatedAt: metricDefinition.updatedAt,
+      $syncState: metricDefinition.syncState,
+    })
+    appendChange('metricDefinition', metricDefinition.id, 'upsert', metricDefinition, deviceId)
+  })
+
+  sendJson(response, 200, { metricDefinition })
+}
+
+const upsertMetricRecord = async (request, response) => {
+  const payload = await readJson(request)
+  const timestamp = nowIso()
+  const metricId = typeof payload.metricId === 'string' ? payload.metricId.trim() : ''
+  const dateKey = typeof payload.dateKey === 'string' ? payload.dateKey.trim() : ''
+  const value = Number(payload.value)
+
+  if (!metricId || !dateKey || !Number.isFinite(value)) {
+    sendJson(response, 400, { error: '指标记录缺少有效的日期或数值。' })
+    return
+  }
+
+  const definition = db.prepare('SELECT * FROM metric_definitions WHERE id = ?').get(metricId)
+
+  if (!definition) {
+    sendJson(response, 404, { error: '指标不存在。' })
+    return
+  }
+
+  const existing = db.prepare('SELECT * FROM metric_records WHERE metric_id = ? AND date_key = ?').get(metricId, dateKey)
+  const metricRecord = {
+    id: existing?.id ?? createId('metric_record'),
+    metricId,
+    dateKey,
+    value,
+    createdAt: existing?.created_at ?? timestamp,
+    updatedAt: timestamp,
+    syncState: 'pending',
+  }
+  const deviceId = getDeviceId(request)
+
+  transaction(() => {
+    db.prepare(`
+      INSERT INTO metric_records (
+        id, metric_id, date_key, value, created_at, updated_at, sync_state
+      )
+      VALUES (
+        $id, $metricId, $dateKey, $value, $createdAt, $updatedAt, $syncState
+      )
+      ON CONFLICT(metric_id, date_key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at,
+        sync_state = excluded.sync_state
+    `).run({
+      $id: metricRecord.id,
+      $metricId: metricRecord.metricId,
+      $dateKey: metricRecord.dateKey,
+      $value: metricRecord.value,
+      $createdAt: metricRecord.createdAt,
+      $updatedAt: metricRecord.updatedAt,
+      $syncState: metricRecord.syncState,
+    })
+    appendChange('metricRecord', metricRecord.id, 'upsert', metricRecord, deviceId)
+  })
+
+  sendJson(response, 200, { metricRecord })
+}
+
+const deleteMetricDefinition = async (request, response, id) => {
+  const existing = db.prepare('SELECT * FROM metric_definitions WHERE id = ?').get(id)
+
+  if (!existing) {
+    sendJson(response, 404, { error: '指标不存在。' })
+    return
+  }
+
+  const metricDefinition = rowToMetricDefinition(existing)
+  const deviceId = getDeviceId(request)
+
+  transaction(() => {
+    db.prepare('DELETE FROM metric_definitions WHERE id = ?').run(id)
+    appendChange('metricDefinition', metricDefinition.id, 'delete', metricDefinition, deviceId)
+  })
+
+  sendJson(response, 200, { ok: true })
+}
+
 const route = async (request, response) => {
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {})
@@ -684,6 +878,22 @@ const route = async (request, response) => {
 
   if (request.method === 'POST' && pathname === '/api/summaries/upsert') {
     await upsertWeeklySummary(request, response)
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/api/metrics/definitions/upsert') {
+    await upsertMetricDefinition(request, response)
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/api/metrics/records/upsert') {
+    await upsertMetricRecord(request, response)
+    return
+  }
+
+  const metricDefinitionMatch = pathname.match(/^\/api\/metrics\/definitions\/([^/]+)$/)
+  if (metricDefinitionMatch && request.method === 'DELETE') {
+    await deleteMetricDefinition(request, response, decodeURIComponent(metricDefinitionMatch[1]))
     return
   }
 

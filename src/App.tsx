@@ -26,16 +26,21 @@ import './App.css'
 import {
   addTodo,
   deleteAttachment,
+  deleteMetricDefinition,
   deleteTodo,
   getLocalState,
   localDatabaseDriver,
   localDatabaseName,
   setTodoDone,
+  upsertMetricDefinition,
+  upsertMetricRecord,
   upsertWeeklySummary,
   upsertJournalEntry,
   type AttachmentRecord,
   type ChangeLogRecord,
   type JournalEntry,
+  type MetricDefinition,
+  type MetricRecord,
   type TodoItem,
   type WeeklySummary,
 } from './lib/db'
@@ -46,6 +51,7 @@ import {
   type GameEngineSettings,
 } from './lib/gameEngine'
 import DynamicBackground from './components/ui/dynamic-background'
+import { ProgressRing, TrendChart, type TrendPoint } from './components/ui/data-viz'
 
 type ActiveView = 'dashboard' | 'journal' | 'summary' | 'settings'
 
@@ -112,6 +118,14 @@ type DashboardCardConfig = {
   enabled: boolean
 }
 
+type MetricDraftState = {
+  id?: string
+  name: string
+  unit: string
+  color: string
+  targetValue: string
+}
+
 const emptyDraft: DraftState = {
   title: '',
   body: '',
@@ -145,6 +159,15 @@ const defaultDashboardCards: DashboardCardConfig[] = [
   { id: 'pendingSync', enabled: true },
   { id: 'attachments', enabled: false },
 ]
+
+const metricColorOptions = ['#176f66', '#3b68ae', '#7357ad', '#c68b20', '#bd4f3d', '#4d7c0f']
+
+const emptyMetricDraft: MetricDraftState = {
+  name: '',
+  unit: '',
+  color: metricColorOptions[0],
+  targetValue: '',
+}
 
 const getTodayKey = () => {
   const today = new Date()
@@ -203,6 +226,18 @@ const getMonthDays = (monthKey: string) => {
   return Array.from({ length: days }, (_, index) => `${monthKey}-${String(index + 1).padStart(2, '0')}`)
 }
 
+const getDateWindow = (endDateKey: string, days: number) =>
+  Array.from({ length: days }, (_, index) => addDays(endDateKey, index - (days - 1)))
+
+const formatShortDateLabel = (dateKey: string) => {
+  const date = new Date(`${dateKey}T00:00:00`)
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+  }).format(date)
+}
+
 const getCalendarDates = (monthKey: string) => {
   const first = new Date(`${monthKey}-01T00:00:00`)
   const mondayOffset = (first.getDay() + 6) % 7
@@ -227,6 +262,21 @@ const average = (values: number[]) => {
   if (values.length === 0) return 0
 
   return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+}
+
+const getMetricScaleMax = (metric: MetricDefinition, records: MetricRecord[]) => {
+  const values = records.map((record) => record.value)
+  const observed = values.length > 0 ? Math.max(...values) : 0
+  const target = metric.targetValue ?? 0
+
+  return Math.max(1, target, observed)
+}
+
+const formatMetricValue = (value: number | null | undefined, unit: string) => {
+  if (value == null || Number.isNaN(value)) return `-${unit ? ` ${unit}` : ''}`.trim()
+  const normalized = Number.isInteger(value) ? `${value}` : value.toFixed(1)
+
+  return `${normalized}${unit ? ` ${unit}` : ''}`
 }
 
 const parseTags = (value: string) =>
@@ -564,6 +614,8 @@ function App() {
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([])
+  const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinition[]>([])
+  const [metricRecords, setMetricRecords] = useState<MetricRecord[]>([])
   const [changes, setChanges] = useState<ChangeLogRecord[]>([])
   const [weeklySummaries, setWeeklySummaries] = useState<WeeklySummary[]>([])
   const [selectedDate, setSelectedDate] = useState(getTodayKey)
@@ -576,6 +628,9 @@ function App() {
   const [webDavConfig, setWebDavConfig] = useState<WebDavConfig>(defaultWebDavConfig)
   const [gameEngineSettings, setGameEngineSettings] = useState<GameEngineSettings>(defaultGameEngineSettings)
   const [dashboardCards, setDashboardCards] = useState<DashboardCardConfig[]>(defaultDashboardCards)
+  const [metricDraft, setMetricDraft] = useState<MetricDraftState>(emptyMetricDraft)
+  const [metricValueDrafts, setMetricValueDrafts] = useState<Record<string, string>>({})
+  const [selectedMetricId, setSelectedMetricId] = useState('')
   const [journalSearch, setJournalSearch] = useState('')
   const [summaryDraft, setSummaryDraft] = useState('')
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
@@ -599,6 +654,8 @@ function App() {
       setEntries(nextState.entries)
       setTodos(nextState.todos)
       setAttachments(nextState.attachments)
+      setMetricDefinitions(nextState.metricDefinitions)
+      setMetricRecords(nextState.metricRecords)
       setChanges(nextState.changes)
       setWeeklySummaries(nextState.weeklySummaries)
       setDatabaseStatus({
@@ -646,6 +703,31 @@ function App() {
     setDraft(emptyDraft)
   }, [selectedEntry])
 
+  useEffect(() => {
+    if (metricDefinitions.length === 0) {
+      setSelectedMetricId('')
+      return
+    }
+
+    if (!metricDefinitions.some((metricDefinition) => metricDefinition.id === selectedMetricId)) {
+      setSelectedMetricId(metricDefinitions[0].id)
+    }
+  }, [metricDefinitions, selectedMetricId])
+
+  useEffect(() => {
+    setMetricValueDrafts(
+      Object.fromEntries(
+        metricDefinitions.map((metricDefinition) => {
+          const metricRecord = metricRecords.find(
+            (record) => record.metricId === metricDefinition.id && record.dateKey === selectedDate,
+          )
+
+          return [metricDefinition.id, metricRecord ? `${metricRecord.value}` : '']
+        }),
+      ),
+    )
+  }, [metricDefinitions, metricRecords, selectedDate])
+
   const dayTodos = useMemo(
     () =>
       todos
@@ -662,6 +744,20 @@ function App() {
   const todayKey = getTodayKey()
   const latestEntry = entries[0]
   const entryByDate = useMemo(() => new Map(entries.map((entry) => [entry.dateKey, entry])), [entries])
+  const metricRecordsByMetricId = useMemo(() => {
+    const groups = new Map<string, MetricRecord[]>()
+
+    for (const metricRecord of metricRecords) {
+      groups.set(metricRecord.metricId, [...(groups.get(metricRecord.metricId) ?? []), metricRecord])
+    }
+
+    return new Map(
+      [...groups.entries()].map(([metricId, records]) => [
+        metricId,
+        records.sort((left, right) => left.dateKey.localeCompare(right.dateKey)),
+      ]),
+    )
+  }, [metricRecords])
   const attachmentCountByEntryId = useMemo(() => {
     const counts = new Map<string, number>()
 
@@ -811,6 +907,48 @@ function App() {
     ],
     [filteredBoardTodos, todayKey],
   )
+  const trendDateKeys = useMemo(() => getDateWindow(selectedDate, 14), [selectedDate])
+  const moodTrendPoints = useMemo<TrendPoint[]>(
+    () =>
+      trendDateKeys.map((dateKey) => ({
+        label: formatShortDateLabel(dateKey),
+        value: entryByDate.get(dateKey)?.mood.score ?? null,
+      })),
+    [entryByDate, trendDateKeys],
+  )
+  const selectedMoodTrendIndex = moodTrendPoints.length > 0 ? moodTrendPoints.length - 1 : undefined
+  const ringEntry = selectedEntry ?? latestEntry
+  const selectedMetricDefinition = metricDefinitions.find((metricDefinition) => metricDefinition.id === selectedMetricId)
+  const selectedMetricRecords = selectedMetricDefinition
+    ? (metricRecordsByMetricId.get(selectedMetricDefinition.id) ?? [])
+    : []
+  const selectedMetricCurrentRecord = selectedMetricRecords.find((metricRecord) => metricRecord.dateKey === selectedDate)
+  const selectedMetricLatestRecord = selectedMetricRecords[selectedMetricRecords.length - 1]
+  const selectedMetricScaleMax = selectedMetricDefinition
+    ? getMetricScaleMax(selectedMetricDefinition, selectedMetricRecords)
+    : 100
+  const metricRows = useMemo(
+    () =>
+      metricDefinitions.map((metricDefinition) => {
+        const records = metricRecordsByMetricId.get(metricDefinition.id) ?? []
+        const latestRecord = records[records.length - 1]
+        const selectedDateRecord = records.find((metricRecord) => metricRecord.dateKey === selectedDate)
+        const scaleMax = getMetricScaleMax(metricDefinition, records)
+        const points: TrendPoint[] = trendDateKeys.map((dateKey) => ({
+          label: formatShortDateLabel(dateKey),
+          value: records.find((metricRecord) => metricRecord.dateKey === dateKey)?.value ?? null,
+        }))
+
+        return {
+          metricDefinition,
+          latestRecord,
+          selectedDateRecord,
+          scaleMax,
+          points,
+        }
+      }),
+    [metricDefinitions, metricRecordsByMetricId, selectedDate, trendDateKeys],
+  )
 
   const handleDraftChange =
     (key: keyof DraftState) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -954,6 +1092,86 @@ function App() {
     persistDashboardCards(
       dashboardCards.map((card) => (card.id === cardId ? { ...card, enabled: !card.enabled } : card)),
     )
+  }
+
+  const handleMetricDraftChange =
+    (key: keyof MetricDraftState) => (event: ChangeEvent<HTMLInputElement>) => {
+      setMetricDraft((current) => ({ ...current, [key]: event.target.value }))
+    }
+
+  const resetMetricDraft = () => setMetricDraft(emptyMetricDraft)
+
+  const handleEditMetricDefinition = (metricDefinition: MetricDefinition) => {
+    setMetricDraft({
+      id: metricDefinition.id,
+      name: metricDefinition.name,
+      unit: metricDefinition.unit,
+      color: metricDefinition.color,
+      targetValue: metricDefinition.targetValue != null ? `${metricDefinition.targetValue}` : '',
+    })
+    setSelectedMetricId(metricDefinition.id)
+  }
+
+  const handleSaveMetricDefinition = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const name = metricDraft.name.trim()
+    if (!name) return
+
+    setWriteError('')
+
+    try {
+      const targetValue = metricDraft.targetValue.trim()
+      const metricDefinition = await upsertMetricDefinition({
+        id: metricDraft.id,
+        name,
+        unit: metricDraft.unit.trim(),
+        color: metricDraft.color,
+        targetValue: targetValue ? Number(targetValue) : undefined,
+      })
+      setSelectedMetricId(metricDefinition.id)
+      resetMetricDraft()
+      await reload()
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : '保存指标失败。')
+    }
+  }
+
+  const handleDeleteMetricDefinition = async (metricDefinition: MetricDefinition) => {
+    setWriteError('')
+
+    try {
+      await deleteMetricDefinition(metricDefinition)
+      if (metricDraft.id === metricDefinition.id) {
+        resetMetricDraft()
+      }
+      await reload()
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : '删除指标失败。')
+    }
+  }
+
+  const handleMetricValueDraftChange =
+    (metricId: string) => (event: ChangeEvent<HTMLInputElement>) => {
+      setMetricValueDrafts((current) => ({ ...current, [metricId]: event.target.value }))
+    }
+
+  const handleSaveMetricRecord = async (metricDefinition: MetricDefinition) => {
+    const rawValue = metricValueDrafts[metricDefinition.id]?.trim() ?? ''
+    if (!rawValue) return
+
+    setWriteError('')
+
+    try {
+      await upsertMetricRecord({
+        metricId: metricDefinition.id,
+        dateKey: selectedDate,
+        value: Number(rawValue),
+      })
+      setSelectedMetricId(metricDefinition.id)
+      await reload()
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : '保存指标数值失败。')
+    }
   }
 
   const handleGenerateSummary = async () => {
@@ -1277,39 +1495,205 @@ function App() {
                 <Metric label="记录天数" value={`${entries.length}`} />
               </div>
 
-              {latestEntry ? (
+              {ringEntry ? (
                 <div className="grid gap-4">
-                  <div className="score-ring" aria-label={`最近心象分 ${latestEntry.mood.score}`}>
-                    <div className="text-center">
-                      <strong className="block text-3xl font-black leading-none text-ink-950">{latestEntry.mood.score}</strong>
-                      <span className="text-xs font-black text-ink-400">{latestEntry.mood.level}</span>
-                    </div>
-                  </div>
+                  <ProgressRing
+                    value={ringEntry.mood.score}
+                    max={100}
+                    color={ringEntry.mood.score >= 82 ? '#7357ad' : ringEntry.mood.score >= 66 ? '#176f66' : ringEntry.mood.score >= 50 ? '#3b68ae' : ringEntry.mood.score >= 35 ? '#c68b20' : '#bd4f3d'}
+                    label={ringEntry.mood.level}
+                    valueText={`${ringEntry.mood.score}`}
+                    caption={ringEntry.dateKey === selectedDate ? '当前日期' : ringEntry.dateKey}
+                  />
                   <div className="grid gap-3">
                     <div className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-field-200 bg-field-50 px-3">
                       <span className="text-xs font-black text-ink-400">象限</span>
-                      <strong className="truncate text-sm font-black text-ink-950">{latestEntry.mood.quadrant}</strong>
+                      <strong className="truncate text-sm font-black text-ink-950">{ringEntry.mood.quadrant}</strong>
                     </div>
                     <div className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-x-3 gap-y-2 text-xs font-black text-ink-600">
                       <span>晴朗度</span>
-                      <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'clarity')} tone="clarity" />
+                      <ProgressBar value={getSignalValue(ringEntry.mood.signals, 'clarity')} tone="clarity" />
                       <span>负荷度</span>
-                      <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'load')} tone="load" />
+                      <ProgressBar value={getSignalValue(ringEntry.mood.signals, 'load')} tone="load" />
                       <span>能量感</span>
-                      <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'energy')} tone="energy" />
+                      <ProgressBar value={getSignalValue(ringEntry.mood.signals, 'energy')} tone="energy" />
                       <span>修复感</span>
-                      <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'recovery')} tone="recovery" />
+                      <ProgressBar value={getSignalValue(ringEntry.mood.signals, 'recovery')} tone="recovery" />
                       <span>反思度</span>
-                      <ProgressBar value={getSignalValue(latestEntry.mood.signals, 'reflection')} tone="reflection" />
+                      <ProgressBar value={getSignalValue(ringEntry.mood.signals, 'reflection')} tone="reflection" />
                     </div>
                   </div>
-                  <p className="note">{latestEntry.mood.reviewHint}</p>
+                  <p className="note">{ringEntry.mood.reviewHint}</p>
                 </div>
               ) : (
                 <p className="empty-state">保存第一条日记后生成心象分。</p>
               )}
             </section>
             </div>
+          </div>
+
+          <div className="dashboard-visual-grid">
+            <section className="section" aria-labelledby="mood-trend-title">
+              <div className="section-head">
+                <div>
+                  <p className="eyebrow">Mood Trend</p>
+                  <h2 className="section-title" id="mood-trend-title">心情折线</h2>
+                </div>
+                <span className="pill">{trendDateKeys[0]} - {trendDateKeys[trendDateKeys.length - 1]}</span>
+              </div>
+
+              <TrendChart
+                points={moodTrendPoints}
+                stroke="#176f66"
+                fill="#176f66"
+                min={0}
+                max={100}
+                emphasisIndex={selectedMoodTrendIndex}
+                valueSuffix=""
+              />
+
+              <div className="mini-metrics mt-4">
+                <Metric label="窗口均值" value={`${average(moodTrendPoints.flatMap((point) => (point.value == null ? [] : [point.value]))) || 0}`} />
+                <Metric label="已记录天数" value={`${moodTrendPoints.filter((point) => point.value != null).length}/${moodTrendPoints.length}`} />
+                <Metric label="当前日期" value={`${selectedEntry?.mood.score ?? '-'}`} tone={selectedEntry ? `score-${selectedEntry.mood.level}` : ''} />
+              </div>
+            </section>
+
+            <section className="section" aria-labelledby="metric-trend-title">
+              <div className="section-head">
+                <div>
+                  <p className="eyebrow">Custom Metrics</p>
+                  <h2 className="section-title" id="metric-trend-title">量化事项</h2>
+                </div>
+                <span className="pill">{formatDateLabel(selectedDate)}</span>
+              </div>
+
+              <form className="metric-form-grid" onSubmit={handleSaveMetricDefinition}>
+                <label className="input-label">
+                  <span>名称</span>
+                  <input className="text-input" value={metricDraft.name} onChange={handleMetricDraftChange('name')} placeholder="比如：跑步、深度工作、饮水" />
+                </label>
+                <label className="input-label">
+                  <span>单位</span>
+                  <input className="text-input" value={metricDraft.unit} onChange={handleMetricDraftChange('unit')} placeholder="km、h、杯" />
+                </label>
+                <label className="input-label">
+                  <span>目标值</span>
+                  <input className="text-input" type="number" inputMode="decimal" value={metricDraft.targetValue} onChange={handleMetricDraftChange('targetValue')} placeholder="可选" />
+                </label>
+                <label className="input-label">
+                  <span>颜色</span>
+                  <input className="color-input" type="color" value={metricDraft.color} onChange={handleMetricDraftChange('color')} />
+                </label>
+                <div className="metric-form-actions">
+                  <button className="button-primary" type="submit">
+                    <Save size={18} aria-hidden="true" />
+                    {metricDraft.id ? '更新指标' : '新增指标'}
+                  </button>
+                  {metricDraft.id && (
+                    <button className="button-secondary" type="button" onClick={resetMetricDraft}>
+                      取消编辑
+                    </button>
+                  )}
+                </div>
+              </form>
+
+              <div className="metric-list">
+                {metricRows.map(({ metricDefinition, latestRecord, selectedDateRecord, scaleMax, points }) => (
+                  <article
+                    className={`metric-row ${selectedMetricId === metricDefinition.id ? 'metric-row-active' : ''}`}
+                    key={metricDefinition.id}
+                  >
+                    <div className="metric-row-main">
+                      <button className="metric-row-name" type="button" onClick={() => setSelectedMetricId(metricDefinition.id)}>
+                        <span className="metric-color-dot" style={{ backgroundColor: metricDefinition.color }} />
+                        <span>
+                          <strong>{metricDefinition.name}</strong>
+                          <small>
+                            {metricDefinition.unit || '未设单位'}
+                            {metricDefinition.targetValue != null ? ` · 目标 ${formatMetricValue(metricDefinition.targetValue, metricDefinition.unit)}` : ''}
+                          </small>
+                        </span>
+                      </button>
+                      <div className="metric-row-values">
+                        <span className="metric-value-inline">{formatMetricValue(latestRecord?.value, metricDefinition.unit)}</span>
+                        <small>{selectedDateRecord ? `当日 ${formatMetricValue(selectedDateRecord.value, metricDefinition.unit)}` : '当日未填写'}</small>
+                      </div>
+                    </div>
+
+                    <div className="metric-row-chart">
+                      <TrendChart
+                        points={points}
+                        stroke={metricDefinition.color}
+                        fill={metricDefinition.color}
+                        min={0}
+                        max={scaleMax}
+                        compact
+                        showArea={false}
+                        emphasisIndex={points.length - 1}
+                        valueSuffix={metricDefinition.unit ? ` ${metricDefinition.unit}` : ''}
+                      />
+                    </div>
+
+                    <div className="metric-row-controls">
+                      <label className="input-label">
+                        <span>{selectedDate.slice(5)} 数值</span>
+                        <input
+                          className="text-input"
+                          type="number"
+                          inputMode="decimal"
+                          value={metricValueDrafts[metricDefinition.id] ?? ''}
+                          onChange={handleMetricValueDraftChange(metricDefinition.id)}
+                          placeholder="0"
+                        />
+                      </label>
+                      <div className="metric-row-actions">
+                        <button className="button-secondary min-h-9 px-3" type="button" onClick={() => void handleSaveMetricRecord(metricDefinition)}>
+                          保存数值
+                        </button>
+                        <button className="button-secondary min-h-9 px-3" type="button" onClick={() => handleEditMetricDefinition(metricDefinition)}>
+                          编辑
+                        </button>
+                        <button className="icon-button" type="button" aria-label={`删除 ${metricDefinition.name}`} onClick={() => void handleDeleteMetricDefinition(metricDefinition)}>
+                          <Trash2 size={16} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              {metricRows.length === 0 && <p className="empty-state mt-4">先添加一个想长期观察的量化事项，折线和数值就会跟着长出来。</p>}
+
+              {selectedMetricDefinition && (
+                <div className="metric-focus">
+                  <ProgressRing
+                    value={selectedMetricCurrentRecord?.value ?? selectedMetricLatestRecord?.value ?? 0}
+                    max={selectedMetricScaleMax}
+                    color={selectedMetricDefinition.color}
+                    label={selectedMetricDefinition.name}
+                    valueText={formatMetricValue(
+                      selectedMetricCurrentRecord?.value ?? selectedMetricLatestRecord?.value ?? 0,
+                      selectedMetricDefinition.unit,
+                    )}
+                    caption={
+                      selectedMetricDefinition.targetValue != null
+                        ? `目标 ${formatMetricValue(selectedMetricDefinition.targetValue, selectedMetricDefinition.unit)}`
+                        : '按历史最高值自动缩放'
+                    }
+                    size={118}
+                  />
+                  <div className="metric-focus-copy">
+                    <strong>{selectedMetricDefinition.name}</strong>
+                    <p>
+                      {selectedMetricCurrentRecord
+                        ? `当前日期已记录 ${formatMetricValue(selectedMetricCurrentRecord.value, selectedMetricDefinition.unit)}。`
+                        : '当前日期还没有填写这个指标。'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </section>
           </div>
 
           <section className="section-flat mt-5" aria-labelledby="history-title">

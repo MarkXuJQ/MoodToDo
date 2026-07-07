@@ -17,6 +17,8 @@
 - 支持 OpenAI-compatible 大模型 API 生成周总结，API Key 只保存在本机浏览器 `localStorage`。
 - 设置页内提供系统总览、本地 SQLite 文件状态、统计卡片配置和 WebDAV/坚果云同步草案。
 - 使用 SQLite 做本地持久化，图片先以 BLOB 存入 `attachments` 表。
+- 支持自定义量化指标：可添加名称、单位、颜色、目标值，并按日期记录数值。
+- 提供心情折线图、彩色指标折线和随数据变化的圆环进度展示。
 - 使用 `changes` 变更日志记录本地写入，为后续 WebDAV 增量同步预留结构。
 - 统计记录按 `月份 -> 周 -> 日期` 展示，不把每天记录铺平成单层列表。
 
@@ -48,6 +50,8 @@ SQLite 数据库文件：`data/xinxiangyi.sqlite`
 - `attachments`：本地附件，包含图片 BLOB、文件名、类型、大小和关联日记。
 - `changes`：同步队列，包含实体类型、实体 ID、操作、设备 ID、时间和快照。
 - `weeklySummaries`：周总结缓存，包含周起始日期、模型、服务商、总结正文和更新时间。
+- `metricDefinitions`：自定义指标定义，包含名称、单位、颜色和目标值。
+- `metricRecords`：指标日值，包含指标 ID、日期和值。
 
 后续 WebDAV 同步可从 `changes` 表生成远端增量包，并把图片附件按 `attachments/{id}` 存储。
 

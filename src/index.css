@@ -267,6 +267,162 @@
     @apply grid size-28 place-items-center rounded-full border-[10px] border-xin-100 bg-white;
   }
 
+  .ring-shell {
+    @apply relative grid place-items-center;
+  }
+
+  .ring-track {
+    stroke: rgba(219, 231, 225, 0.9);
+  }
+
+  .ring-fill {
+    transition: stroke-dashoffset 220ms ease;
+  }
+
+  .ring-content {
+    @apply pointer-events-none absolute inset-0 grid place-items-center text-center;
+  }
+
+  .ring-value {
+    @apply block text-3xl font-black leading-none text-ink-950;
+  }
+
+  .ring-label {
+    @apply mt-1 block text-xs font-black text-ink-400;
+  }
+
+  .ring-caption {
+    @apply mt-0.5 block text-[11px] font-bold text-ink-400;
+  }
+
+  .dashboard-visual-grid {
+    @apply mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)];
+  }
+
+  .mini-metrics {
+    @apply grid gap-3 sm:grid-cols-3;
+  }
+
+  .trend-chart {
+    @apply h-auto w-full;
+  }
+
+  .trend-grid {
+    stroke: rgba(195, 210, 203, 0.6);
+    stroke-dasharray: 4 6;
+  }
+
+  .trend-dot {
+    opacity: 0.92;
+  }
+
+  .trend-dot-active {
+    stroke: rgba(255, 255, 255, 0.92);
+    stroke-width: 3;
+  }
+
+  .trend-axis-label,
+  .trend-axis-value,
+  .trend-value {
+    fill: var(--color-ink-400);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .trend-value {
+    fill: var(--color-ink-950);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .trend-empty-inline {
+    @apply grid min-h-20 place-items-center rounded-md border border-dashed border-field-300 bg-[rgba(247,250,247,0.55)] px-3 text-center text-xs font-bold text-ink-400;
+  }
+
+  .metric-form-grid {
+    @apply grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(120px,0.5fr)_minmax(120px,0.55fr)_88px];
+  }
+
+  .metric-form-actions {
+    @apply flex flex-wrap items-end gap-2 xl:col-span-4;
+  }
+
+  .color-input {
+    @apply min-h-11 w-full rounded-md border border-white/75 bg-[rgba(247,250,247,0.8)] p-1.5;
+  }
+
+  .metric-list {
+    @apply mt-4 grid gap-3;
+  }
+
+  .metric-row {
+    @apply grid gap-4 rounded-md border border-white/70 bg-[rgba(247,250,247,0.76)] p-4 transition-colors xl:grid-cols-[minmax(0,1.05fr)_180px_240px];
+  }
+
+  .metric-row-active {
+    @apply border-xin-700 bg-xin-100/70;
+  }
+
+  .metric-row-main {
+    @apply flex flex-col gap-3;
+  }
+
+  .metric-row-name {
+    @apply flex items-start gap-3 text-left;
+  }
+
+  .metric-row-name strong {
+    @apply block text-sm font-black text-ink-950;
+  }
+
+  .metric-row-name small {
+    @apply mt-1 block text-xs font-bold text-ink-400;
+  }
+
+  .metric-color-dot {
+    @apply mt-1 size-3 shrink-0 rounded-full;
+  }
+
+  .metric-row-values {
+    @apply grid gap-0.5;
+  }
+
+  .metric-value-inline {
+    @apply text-lg font-black text-ink-950;
+  }
+
+  .metric-row-values small {
+    @apply text-xs font-bold text-ink-400;
+  }
+
+  .metric-row-chart {
+    @apply self-center;
+  }
+
+  .metric-row-controls {
+    @apply grid gap-3;
+  }
+
+  .metric-row-actions {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .metric-focus {
+    @apply mt-4 flex flex-col items-center gap-4 rounded-md border border-white/70 bg-[rgba(255,255,255,0.72)] p-4 text-center sm:flex-row sm:text-left;
+  }
+
+  .metric-focus-copy {
+    @apply grid gap-1;
+  }
+
+  .metric-focus-copy strong {
+    @apply text-base font-black text-ink-950;
+  }
+
+  .metric-focus-copy p {
+    @apply m-0 text-sm font-bold text-ink-600;
+  }
+
   .progress-track {
     @apply block h-2.5 overflow-hidden rounded-full bg-field-200;
   }

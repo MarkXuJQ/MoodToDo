@@ -42,7 +42,28 @@ export type AttachmentRecord = {
   syncState: SyncState
 }
 
-export type ChangeEntity = 'entry' | 'todo' | 'attachment'
+export type MetricDefinition = {
+  id: string
+  name: string
+  unit: string
+  color: string
+  targetValue?: number
+  createdAt: string
+  updatedAt: string
+  syncState: SyncState
+}
+
+export type MetricRecord = {
+  id: string
+  metricId: string
+  dateKey: string
+  value: number
+  createdAt: string
+  updatedAt: string
+  syncState: SyncState
+}
+
+export type ChangeEntity = 'entry' | 'todo' | 'attachment' | 'metricDefinition' | 'metricRecord'
 export type ChangeOperation = 'upsert' | 'delete'
 
 export type ChangeLogRecord = {
@@ -85,6 +106,8 @@ export type LocalState = {
   entries: JournalEntry[]
   todos: TodoItem[]
   attachments: AttachmentRecord[]
+  metricDefinitions: MetricDefinition[]
+  metricRecords: MetricRecord[]
   changes: ChangeLogRecord[]
   weeklySummaries: WeeklySummary[]
   meta: LocalDatabaseMeta
@@ -240,6 +263,40 @@ export const deleteAttachment = async (attachment: AttachmentRecord) => {
   await apiFetch<{ ok: true }>(`/api/attachments/${encodeURIComponent(attachment.id)}`, {
     method: 'DELETE',
   })
+}
+
+export const upsertMetricDefinition = async (payload: {
+  id?: string
+  name: string
+  unit: string
+  color: string
+  targetValue?: number
+}) => {
+  const { metricDefinition } = await apiFetch<{ metricDefinition: MetricDefinition }>('/api/metrics/definitions/upsert', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+  return metricDefinition
+}
+
+export const deleteMetricDefinition = async (metricDefinition: MetricDefinition) => {
+  await apiFetch<{ ok: true }>(`/api/metrics/definitions/${encodeURIComponent(metricDefinition.id)}`, {
+    method: 'DELETE',
+  })
+}
+
+export const upsertMetricRecord = async (payload: {
+  metricId: string
+  dateKey: string
+  value: number
+}) => {
+  const { metricRecord } = await apiFetch<{ metricRecord: MetricRecord }>('/api/metrics/records/upsert', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+  return metricRecord
 }
 
 export const upsertWeeklySummary = async (
