@@ -57,6 +57,8 @@ try {
   const suffix = Date.now()
   const title = `自动测试 ${suffix}`
   const todo = `验证 todo ${suffix}`
+  const summaryTodo = `回顾页 todo ${suffix}`
+  const todayKey = new Date().toLocaleDateString('sv-SE')
 
   await page.getByPlaceholder('今天的主线').fill(title)
   await page.getByPlaceholder('比如：上午焦虑但有推进，下午散步后恢复专注').fill('今天状态平稳，完成了本地数据库写入验证。')
@@ -97,10 +99,52 @@ try {
     throw new Error('Todo was not marked done in SQLite.')
   }
 
+  await page.evaluate(async (expectedTodo) => {
+    const state = await fetch('/api/state').then((response) => response.json())
+    const item = state.todos.find((todoItem) => todoItem.title === expectedTodo)
+
+    if (item) {
+      await fetch(`/api/todos/${encodeURIComponent(item.id)}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+    }
+  }, todo)
+
+  await openNavigationTarget(/回顾|总结/)
+  await page.getByRole('button', { name: new RegExp(`${todayKey}，`) }).click()
+  const summaryTodoPanel = page.locator('.calendar-day-todos')
+  await summaryTodoPanel.getByPlaceholder('给这一天添加一个 Todo').fill(summaryTodo)
+  await summaryTodoPanel.getByRole('button', { name: '新增当日 Todo' }).click()
+  await summaryTodoPanel.getByText(summaryTodo).waitFor({ state: 'visible', timeout: 5000 })
+
+  const summaryTodoSaved = await page.evaluate(async (expectedTodo) => {
+    const state = await fetch('/api/state').then((response) => response.json())
+
+    return state.todos.some((item) => item.title === expectedTodo)
+  }, summaryTodo)
+
+  if (!summaryTodoSaved) {
+    throw new Error('Summary Todo was not saved in SQLite.')
+  }
+
+  const summaryTodoRow = summaryTodoPanel.getByRole('listitem').filter({ hasText: summaryTodo })
+  await summaryTodoRow.getByRole('button', { name: `删除 ${summaryTodo}` }).click()
+  await page.waitForFunction(
+    async (expectedTodo) => {
+      const state = await fetch('/api/state').then((response) => response.json())
+
+      return !state.todos.some((item) => item.title === expectedTodo)
+    },
+    summaryTodo,
+    { timeout: 5000 },
+  )
+
   await openNavigationTarget(/记录|日记浏览/)
-  await page.getByPlaceholder('搜索标题、正文、心情、天气、标签').fill(title)
-  await page.getByLabel(`选择 ${title}`).click()
-  await page.getByRole('button', { name: '删除已选' }).click()
+  await page.getByText(title).waitFor({ state: 'visible', timeout: 5000 })
+  await page.getByRole('button', { name: `删除 ${title}` }).click()
   await page.waitForFunction(
     async (expectedTitle) => {
       const state = await fetch('/api/state').then((response) => response.json())

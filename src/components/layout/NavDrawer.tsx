@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, Settings2, TrendingUp } from 'lucide-react'
+import { BarChart3, BookOpen, PanelLeftClose, PanelLeftOpen, Settings, TrendingUp } from 'lucide-react'
 
 import type { ActiveView, NavItem } from '../../types/app'
 
@@ -10,9 +10,7 @@ type NavDrawerProps = {
   navigationItems: NavItem[]
   onClose: () => void
   onNavigate: (view: ActiveView) => void
-  onOpenJournalBoard: () => void
-  onOpenSettingsOverview: () => void
-  onOpenSettingsAi: () => void
+  onToggleCollapse: () => void
 }
 
 export function NavDrawer({
@@ -23,11 +21,11 @@ export function NavDrawer({
   navigationItems,
   onClose,
   onNavigate,
-  onOpenJournalBoard,
-  onOpenSettingsOverview,
-  onOpenSettingsAi,
+  onToggleCollapse,
 }: NavDrawerProps) {
   const compact = isDesktop && isCollapsed
+  const primaryItems = navigationItems.filter((item) => item.id !== 'settings')
+  const settingsItem = navigationItems.find((item) => item.id === 'settings')
 
   return (
     <>
@@ -35,18 +33,32 @@ export function NavDrawer({
 
       <aside className={`nav-drawer ${isOpen ? 'nav-drawer-open' : ''} ${compact ? 'nav-drawer-collapsed' : ''}`} aria-label="主菜单">
         <div className="nav-drawer-head">
-          {!compact ? (
-            <>
-              <p className="eyebrow">Navigation</p>
-              <strong className="text-lg font-black text-ink-950">切换工作区</strong>
-            </>
-          ) : (
-            <strong className="text-sm font-black text-ink-400">导航</strong>
+          <div className="nav-head-copy">
+            {!compact ? (
+              <>
+                <p className="eyebrow">Navigation</p>
+                <strong className="text-lg font-black text-ink-950">切换工作区</strong>
+              </>
+            ) : (
+              <strong className="text-sm font-black text-ink-400">导航</strong>
+            )}
+          </div>
+
+          {isDesktop && (
+            <button
+              className="nav-collapse-button"
+              type="button"
+              aria-label={compact ? '展开侧栏' : '收起侧栏'}
+              aria-expanded={!compact}
+              onClick={onToggleCollapse}
+            >
+              {compact ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
+            </button>
           )}
         </div>
 
         <nav className="nav-list">
-          {navigationItems.map((item) => {
+          {primaryItems.map((item) => {
             const icon =
               item.id === 'dashboard' ? (
                 <BarChart3 size={18} aria-hidden="true" />
@@ -55,7 +67,7 @@ export function NavDrawer({
               ) : item.id === 'summary' ? (
                 <TrendingUp size={18} aria-hidden="true" />
               ) : (
-                <Settings2 size={18} aria-hidden="true" />
+                <Settings size={18} aria-hidden="true" />
               )
 
             return (
@@ -79,17 +91,19 @@ export function NavDrawer({
           })}
         </nav>
 
-        {!compact && (
-          <div className="nav-shortcuts">
-            <p className="nav-shortcuts-title">常用捷径</p>
-            <button className="nav-sub-link" type="button" onClick={onOpenJournalBoard}>
-              直接打开 Todo 看板
-            </button>
-            <button className="nav-sub-link" type="button" onClick={onOpenSettingsOverview}>
-              查看系统总览
-            </button>
-            <button className="nav-sub-link" type="button" onClick={onOpenSettingsAi}>
-              配置周总结模型
+        {settingsItem && (
+          <div className="nav-settings-slot">
+            <button
+              className={`nav-settings-button ${activeView === 'settings' ? 'nav-settings-button-active' : ''} ${compact ? 'nav-settings-button-compact' : ''}`}
+              type="button"
+              aria-label={settingsItem.label}
+              title={compact ? settingsItem.label : undefined}
+              onClick={() => onNavigate('settings')}
+            >
+              <span className="nav-link-icon">
+                <Settings size={18} aria-hidden="true" />
+              </span>
+              {!compact && <span className="font-black text-ink-950">{settingsItem.label}</span>}
             </button>
           </div>
         )}

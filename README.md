@@ -15,10 +15,9 @@
 - 提供总结页面：用月历热力图观察心象分、打卡状态和事项完成情况。
 - 支持一周回顾：选择任意一周，查看心象均值、打卡天数、事项完成率和每日状态。
 - 支持 OpenAI-compatible 大模型 API 生成周总结，API Key 只保存在本机浏览器 `localStorage`。
-- 设置页内提供系统总览、本地 SQLite 文件状态、统计卡片配置和 WebDAV/坚果云同步草案。
+- 设置页内提供系统总览、本地 SQLite 文件状态、统计卡片配置和 WebDAV/坚果云同步配置。
 - 使用 SQLite 做本地持久化，图片先以 BLOB 存入 `attachments` 表。
-- 支持自定义量化指标：可添加名称、单位、颜色、目标值，并按日期记录数值。
-- 提供心情折线图、彩色指标折线和随数据变化的圆环进度展示。
+- 提供心情折线图和随数据变化的圆环进度展示。
 - 使用 `changes` 变更日志记录本地写入，为后续 WebDAV 增量同步预留结构。
 - 统计记录按 `月份 -> 周 -> 日期` 展示，不把每天记录铺平成单层列表。
 
@@ -39,7 +38,7 @@
 - 以“心情原点”为中心，把文本向量投影到愉悦度、唤醒度、恢复力、清晰度等轴。
 - 用历史记录微调每个用户自己的轴权重。
 - 用相似日回顾找出重复模式，例如“高能紧绷后第二天低能承压”或“散步图片出现后修复感升高”。
-- 用 WebDAV 同步本地变更日志和附件，保持跨设备的私有数据一致。
+- 当前先用 WebDAV 同步 SQLite 整库快照；后续再升级为基于变更日志的跨设备增量合并。
 
 ## 数据结构
 
@@ -50,15 +49,13 @@ SQLite 数据库文件：`data/xinxiangyi.sqlite`
 - `attachments`：本地附件，包含图片 BLOB、文件名、类型、大小和关联日记。
 - `changes`：同步队列，包含实体类型、实体 ID、操作、设备 ID、时间和快照。
 - `weeklySummaries`：周总结缓存，包含周起始日期、模型、服务商、总结正文和更新时间。
-- `metricDefinitions`：自定义指标定义，包含名称、单位、颜色和目标值。
-- `metricRecords`：指标日值，包含指标 ID、日期和值。
 
-后续 WebDAV 同步可从 `changes` 表生成远端增量包，并把图片附件按 `attachments/{id}` 存储。
+当前 WebDAV 同步会上传/下载完整 SQLite 快照。后续增量同步可从 `changes` 表生成远端增量包，并把图片附件从 BLOB 拆到独立对象存储。
 
 ## 页面框架
 
-- `今日台`：今日记录、今日 Todo、心象分和层级记录入口。
-- `日记浏览`：按标题、正文、心情、标签、象限搜索历史日记，并提供 Todo 看板视图。
+- `今日台`：今日记录、今日 Todo、心象分、心情趋势和云同步入口。
+- `日记浏览`：用年度热力图回看长期心象记录，并提供 Todo 看板视图。
 - `总结`：月历热力图、一周回顾、大模型周总结。
 - `设置`：系统总览、统计卡片配置、本地数据库、WebDAV 和游戏接口。
 
@@ -73,21 +70,24 @@ SQLite 数据库文件：`data/xinxiangyi.sqlite`
 
 生成周总结时，浏览器会先把请求发给本地 SQLite API，再由本地 API 转发到配置的模型接口。这样可以避开浏览器直接访问外部大模型接口时常见的 CORS / `failed to fetch` 问题。生成结果会存入 `weeklySummaries`，之后可以继续手动修改和保存。
 
-## WebDAV / 坚果云同步计划
+## WebDAV / 坚果云同步
 
-设置页已经预留 WebDAV 配置：
+设置页提供 WebDAV 配置，今日台提供一个自动同步按钮：
 
 - Server URL 默认：`https://dav.jianguoyun.com/dav/`
 - Username：坚果云账号邮箱
 - Password：坚果云应用密码
 - Remote Path 默认：`/xinxiangyi`
 
-当前版本只保存配置和本地 `changes` 变更日志，还不会真正上传。下一步计划：
+当前版本采用整库快照同步，但界面不要求用户选择上传或拉取：
 
-1. 将 `entries`、`todos`、`weeklySummaries` 和 `changes` 导出为 JSON 快照。
-2. 将图片附件导出到 `attachments/{attachmentId}`。
-3. 通过 WebDAV `PROPFIND/MKCOL/PUT/GET` 与坚果云目录同步。
-4. 基于 `updatedAt`、`deviceId` 和 `syncState` 处理增量同步与冲突。
+1. 本地有未同步内容时，自动生成一致快照并上传 `xinxiangyi.sqlite` 与 `manifest.json`。
+2. 本地没有未同步内容时，自动尝试下载远端 `xinxiangyi.sqlite`。
+3. 下载远端快照时，会先通过 `PRAGMA integrity_check` 再替换本地数据库。
+4. 替换前会在 `data/.sync/` 保留一份本地备份。
+5. 设置页可开启“打开后每天自动同步”，每天首次打开应用时执行一次。
+
+这套方式适合单人多设备备份/恢复。它还不是实时增量同步，也不会处理“两个设备同时编辑同一天”的冲突。后续要做真正多端同步时，再基于 `changes`、`updatedAt`、`deviceId` 和 `syncState` 做合并策略。
 
 ## 开发
 

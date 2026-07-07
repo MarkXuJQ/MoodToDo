@@ -22,7 +22,7 @@ type ProgressRingProps = {
   value: number
   max: number
   color: string
-  label: string
+  label?: string
   valueText: string
   caption?: string
   size?: number
@@ -212,7 +212,7 @@ export const ProgressRing = ({ value, max, color, label, valueText, caption, siz
       </svg>
       <div className="ring-content">
         <strong className="ring-value">{valueText}</strong>
-        <span className="ring-label">{label}</span>
+        {label && <span className="ring-label">{label}</span>}
         {caption && <small className="ring-caption">{caption}</small>}
       </div>
     </div>

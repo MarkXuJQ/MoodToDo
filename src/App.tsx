@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
 
 import './App.css'
 import { AppHeader } from './components/layout/AppHeader'
@@ -12,38 +12,36 @@ import {
   defaultDashboardCards,
   defaultWebDavConfig,
   emptyDraft,
-  emptyMetricDraft,
   gameEngineSettingsStorageKey,
   journalModes,
   navigationItems,
   readAiConfig,
   readDashboardCards,
   readGameEngineSettings,
+  readThemeMode,
   readWebDavConfig,
   settingsSectionGroups,
   settingsSections,
+  themeModeStorageKey,
+  webDavLastAutoSyncStorageKey,
   webDavConfigStorageKey,
 } from './config/app-shell'
 import {
   addTodo,
   deleteAttachment,
-  deleteJournalEntries,
   deleteJournalEntry,
-  deleteMetricDefinition,
   deleteTodo,
   getLocalState,
   localDatabaseDriver,
   localDatabaseName,
+  pullWebDavSnapshot,
+  pushWebDavSnapshot,
   setTodoDone,
-  upsertMetricDefinition,
-  upsertMetricRecord,
   upsertWeeklySummary,
   upsertJournalEntry,
   type AttachmentRecord,
   type ChangeLogRecord,
   type JournalEntry,
-  type MetricDefinition,
-  type MetricRecord,
   type TodoItem,
   type WeeklySummary,
 } from './lib/db'
@@ -63,14 +61,11 @@ import {
   average,
   buildWeeklyPrompt,
   createCalendarCells,
-  formatMetricValue,
   getCheckinRate,
   getCompletionRate,
   getCurrentStreak,
   getHeatLevel,
   getLongestStreak,
-  getMetricScaleMax,
-  getSignalValue,
   parseTags,
 } from './lib/insights'
 import type {
@@ -81,10 +76,11 @@ import type {
   DatabaseStatus,
   DraftState,
   JournalMode,
-  MetricDraftState,
   SettingsSection,
+  ThemeMode,
   WeatherState,
   WebDavConfig,
+  WebDavTextConfigKey,
 } from './types/app'
 import { DashboardView } from './views/DashboardView'
 import { JournalView } from './views/JournalView'
@@ -93,6 +89,7 @@ import { SummaryView } from './views/SummaryView'
 import type { TrendPoint } from './components/ui/data-viz'
 
 const navCollapseStorageKey = 'xinxiangyi-nav-collapsed-v1'
+const getSystemThemeMode = () => (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
 
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>('dashboard')
@@ -104,8 +101,6 @@ function App() {
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([])
-  const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinition[]>([])
-  const [metricRecords, setMetricRecords] = useState<MetricRecord[]>([])
   const [changes, setChanges] = useState<ChangeLogRecord[]>([])
   const [weeklySummaries, setWeeklySummaries] = useState<WeeklySummary[]>([])
   const [selectedDate, setSelectedDate] = useState(getTodayKey)
@@ -116,21 +111,17 @@ function App() {
   const [todoTitle, setTodoTitle] = useState('')
   const [aiConfig, setAiConfig] = useState<AiConfig>(defaultAiConfig)
   const [webDavConfig, setWebDavConfig] = useState<WebDavConfig>(defaultWebDavConfig)
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => readThemeMode())
+  const [systemThemeMode, setSystemThemeMode] = useState<'light' | 'dark'>(() => getSystemThemeMode())
   const [gameEngineSettings, setGameEngineSettings] = useState<GameEngineSettings>(defaultGameEngineSettings)
   const [dashboardCards, setDashboardCards] = useState<DashboardCardConfig[]>(defaultDashboardCards)
-  const [metricDraft, setMetricDraft] = useState<MetricDraftState>(emptyMetricDraft)
-  const [metricValueDrafts, setMetricValueDrafts] = useState<Record<string, string>>({})
-  const [selectedMetricId, setSelectedMetricId] = useState('')
-  const [journalSearch, setJournalSearch] = useState('')
-  const [journalFilterMonth, setJournalFilterMonth] = useState('all')
-  const [journalFilterMood, setJournalFilterMood] = useState('all')
-  const [journalFilterTag, setJournalFilterTag] = useState('all')
-  const [selectedJournalEntryIds, setSelectedJournalEntryIds] = useState<string[]>([])
   const [summaryDraft, setSummaryDraft] = useState('')
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
   const [summaryError, setSummaryError] = useState('')
   const [writeError, setWriteError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [hasLoadedLocalState, setHasLoadedLocalState] = useState(false)
+  const [isWebDavSyncing, setIsWebDavSyncing] = useState(false)
   const [weatherState, setWeatherState] = useState<WeatherState>({
     status: 'idle',
     locationLabel: '定位中',
@@ -146,15 +137,13 @@ function App() {
     lastLoadedAt: '',
   })
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     try {
       const nextState = await getLocalState()
 
       setEntries(nextState.entries)
       setTodos(nextState.todos)
       setAttachments(nextState.attachments)
-      setMetricDefinitions(nextState.metricDefinitions)
-      setMetricRecords(nextState.metricRecords)
       setChanges(nextState.changes)
       setWeeklySummaries(nextState.weeklySummaries)
       setDatabaseStatus({
@@ -170,18 +159,45 @@ function App() {
           second: '2-digit',
         }),
       })
+      setHasLoadedLocalState(true)
     } catch (error) {
       setWriteError(error instanceof Error ? error.message : '读取本地 SQLite 数据库失败。')
     }
-  }
+  }, [])
 
   useEffect(() => {
     setAiConfig(readAiConfig())
     setWebDavConfig(readWebDavConfig())
+    setThemeMode(readThemeMode())
     setGameEngineSettings(readGameEngineSettings())
     setDashboardCards(readDashboardCards())
     void reload()
+  }, [reload])
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const handleChange = (event: MediaQueryListEvent | MediaQueryList) => {
+      const matches = 'matches' in event ? event.matches : mediaQuery.matches
+      setSystemThemeMode(matches ? 'dark' : 'light')
+    }
+
+    handleChange(mediaQuery)
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleChange)
+      return () => mediaQuery.removeEventListener('change', handleChange)
+    }
+
+    mediaQuery.addListener(handleChange)
+    return () => mediaQuery.removeListener(handleChange)
   }, [])
+
+  const resolvedThemeMode = themeMode === 'system' ? systemThemeMode : themeMode
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolvedThemeMode
+    document.documentElement.dataset.themeMode = themeMode
+  }, [resolvedThemeMode, themeMode])
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(min-width: 1024px)')
@@ -208,6 +224,12 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(navCollapseStorageKey, isNavCollapsed ? '1' : '0')
   }, [isNavCollapsed])
+
+  useEffect(() => {
+    if (isDesktopNav || activeView !== 'journal') return
+
+    setJournalMode('entries')
+  }, [activeView, isDesktopNav])
 
   useEffect(() => {
     let isMounted = true
@@ -267,54 +289,8 @@ function App() {
     setDraft(emptyDraft)
   }, [selectedEntry])
 
-  useEffect(() => {
-    if (metricDefinitions.length === 0) {
-      setSelectedMetricId('')
-      return
-    }
-
-    if (!metricDefinitions.some((metricDefinition) => metricDefinition.id === selectedMetricId)) {
-      setSelectedMetricId(metricDefinitions[0].id)
-    }
-  }, [metricDefinitions, selectedMetricId])
-
-  useEffect(() => {
-    setMetricValueDrafts(
-      Object.fromEntries(
-        metricDefinitions.map((metricDefinition) => {
-          const metricRecord = metricRecords.find(
-            (record) => record.metricId === metricDefinition.id && record.dateKey === selectedDate,
-          )
-
-          return [metricDefinition.id, metricRecord ? `${metricRecord.value}` : '']
-        }),
-      ),
-    )
-  }, [metricDefinitions, metricRecords, selectedDate])
-
-  useEffect(() => {
-    setSelectedJournalEntryIds((current) => current.filter((id) => entries.some((entry) => entry.id === id)))
-  }, [entries])
-
   const todayKey = getTodayKey()
-  const latestEntry = entries[0]
-
   const entryByDate = useMemo(() => new Map(entries.map((entry) => [entry.dateKey, entry])), [entries])
-
-  const metricRecordsByMetricId = useMemo(() => {
-    const groups = new Map<string, MetricRecord[]>()
-
-    for (const metricRecord of metricRecords) {
-      groups.set(metricRecord.metricId, [...(groups.get(metricRecord.metricId) ?? []), metricRecord])
-    }
-
-    return new Map(
-      [...groups.entries()].map(([metricId, records]) => [
-        metricId,
-        records.sort((left, right) => left.dateKey.localeCompare(right.dateKey)),
-      ]),
-    )
-  }, [metricRecords])
 
   const attachmentCountByEntryId = useMemo(() => {
     const counts = new Map<string, number>()
@@ -330,7 +306,11 @@ function App() {
     () =>
       todos
         .filter((todo) => todo.dateKey === selectedDate)
-        .sort((left, right) => Number(left.done) - Number(right.done) || right.createdAt.localeCompare(left.createdAt)),
+        .sort(
+          (left, right) =>
+            Number(left.done) - Number(right.done) ||
+            right.createdAt.localeCompare(left.createdAt),
+        ),
     [selectedDate, todos],
   )
 
@@ -340,7 +320,6 @@ function App() {
   )
 
   const lastSevenEntries = entries.slice(0, 7)
-  const allEntryTodos = todos.filter((todo) => entries.some((entry) => entry.dateKey === todo.dateKey))
   const calendarCells = useMemo(() => createCalendarCells(visibleMonth, entries, todos), [entries, todos, visibleMonth])
   const selectedWeekDays = useMemo(() => getWeekDays(selectedWeek), [selectedWeek])
   const selectedWeekEntries = useMemo(
@@ -356,76 +335,16 @@ function App() {
     [selectedWeek, weeklySummaries],
   )
 
-  const filteredEntries = useMemo(() => {
-    const keyword = journalSearch.trim().toLowerCase()
-
-    return entries.filter((entry) => {
-      const matchesKeyword = !keyword
-        ? true
-        : [
-            entry.title,
-            entry.body,
-            entry.moodText,
-            entry.tags.join(' '),
-            entry.mood.quadrant,
-            entry.locationText,
-            entry.weatherText,
-          ]
-            .join(' ')
-            .toLowerCase()
-            .includes(keyword)
-
-      const matchesMonth = journalFilterMonth === 'all' ? true : entry.dateKey.startsWith(journalFilterMonth)
-      const matchesMood = journalFilterMood === 'all' ? true : entry.mood.level === journalFilterMood
-      const matchesTag = journalFilterTag === 'all' ? true : entry.tags.includes(journalFilterTag)
-
-      return matchesKeyword && matchesMonth && matchesMood && matchesTag
-    })
-  }, [entries, journalFilterMonth, journalFilterMood, journalFilterTag, journalSearch])
-
   const filteredBoardTodos = useMemo(() => {
-    const keyword = journalSearch.trim().toLowerCase()
-    const items = keyword
-      ? todos.filter((todo) => {
-          const entry = entryByDate.get(todo.dateKey)
-
-          return [
-            todo.title,
-            todo.dateKey,
-            entry?.title ?? '',
-            entry?.body ?? '',
-            entry?.moodText ?? '',
-            entry?.tags.join(' ') ?? '',
-            entry?.mood.quadrant ?? '',
-          ]
-            .join(' ')
-            .toLowerCase()
-            .includes(keyword)
-        })
-      : todos
-
-    return [...items].sort((left, right) => {
+    return [...todos].sort((left, right) => {
       if (left.done !== right.done) return Number(left.done) - Number(right.done)
       if (!left.done && left.dateKey !== right.dateKey) return left.dateKey.localeCompare(right.dateKey)
 
       return (right.completedAt ?? right.updatedAt).localeCompare(left.completedAt ?? left.updatedAt)
     })
-  }, [entryByDate, journalSearch, todos])
+  }, [todos])
 
-  const pendingChangeCount = changes.filter((change) => change.syncState === 'pending').length
-  const journalMonthOptions = useMemo(
-    () => [...new Set(entries.map((entry) => entry.dateKey.slice(0, 7)))].sort((left, right) => right.localeCompare(left)),
-    [entries],
-  )
-  const journalMoodOptions = useMemo(
-    () => [...new Set(entries.map((entry) => entry.mood.level))],
-    [entries],
-  )
-  const journalTagOptions = useMemo(
-    () => [...new Set(entries.flatMap((entry) => entry.tags))].sort((left, right) => left.localeCompare(right, 'zh-CN')),
-    [entries],
-  )
-  const completionRate = getCompletionRate(allEntryTodos)
+  const pendingChangeCount = [...entries, ...todos, ...attachments].filter((item) => item.syncState === 'pending').length
   const monthEntries = entries.filter((entry) => entry.dateKey.startsWith(visibleMonth))
   const monthTodos = todos.filter((todo) => todo.dateKey.startsWith(visibleMonth))
   const monthScore = average(monthEntries.map((entry) => entry.mood.score))
@@ -441,17 +360,16 @@ function App() {
     [attachments, entries, gameEngineSettings, todos],
   )
 
-  const todayScore = selectedEntry?.mood.score ?? 50
   const canSave = Boolean(draft.body.trim() || draft.moodText.trim() || draft.title.trim() || pendingFiles.length > 0)
   const canGenerateSummary = Boolean(aiConfig.endpoint.trim() && aiConfig.apiKey.trim() && selectedWeekEntries.length > 0)
+  const isWebDavConfigured = Boolean(
+    webDavConfig.url.trim() &&
+      webDavConfig.username.trim() &&
+      webDavConfig.password.trim() &&
+      webDavConfig.remotePath.trim(),
+  )
 
   const dashboardCardMetrics = [
-    {
-      id: 'latestMood' as const,
-      label: '最近心象',
-      value: `${latestEntry?.mood.score ?? todayScore}`,
-      tone: latestEntry ? `score-${latestEntry.mood.level}` : undefined,
-    },
     {
       id: 'streak' as const,
       label: '连续打卡',
@@ -469,7 +387,7 @@ function App() {
     },
     {
       id: 'pendingSync' as const,
-      label: '待同步',
+      label: '未同步内容',
       value: `${pendingChangeCount}`,
     },
     {
@@ -487,20 +405,20 @@ function App() {
     () => [
       {
         id: 'overdue',
-        label: '待推进',
+        label: '过去',
         note: '早于今天且尚未完成',
         items: filteredBoardTodos.filter((todo) => !todo.done && todo.dateKey < todayKey),
       },
       {
         id: 'today',
         label: '今天',
-        note: '今天要收口的事项',
+        note: '今天记录的事项',
         items: filteredBoardTodos.filter((todo) => !todo.done && todo.dateKey === todayKey),
       },
       {
         id: 'upcoming',
-        label: '稍后',
-        note: '未来日期或预排事项',
+        label: '以后',
+        note: '未来日期记录的事项',
         items: filteredBoardTodos.filter((todo) => !todo.done && todo.dateKey > todayKey),
       },
       {
@@ -523,38 +441,6 @@ function App() {
     [entryByDate, trendDateKeys],
   )
   const selectedMoodTrendIndex = moodTrendPoints.length > 0 ? moodTrendPoints.length - 1 : undefined
-  const ringEntry = selectedEntry ?? latestEntry
-  const selectedMetricDefinition = metricDefinitions.find((metricDefinition) => metricDefinition.id === selectedMetricId)
-  const selectedMetricRecords = selectedMetricDefinition
-    ? (metricRecordsByMetricId.get(selectedMetricDefinition.id) ?? [])
-    : []
-  const selectedMetricCurrentRecord = selectedMetricRecords.find((metricRecord) => metricRecord.dateKey === selectedDate)
-  const selectedMetricLatestRecord = selectedMetricRecords[selectedMetricRecords.length - 1]
-  const selectedMetricScaleMax = selectedMetricDefinition
-    ? getMetricScaleMax(selectedMetricDefinition, selectedMetricRecords)
-    : 100
-  const metricRows = useMemo(
-    () =>
-      metricDefinitions.map((metricDefinition) => {
-        const records = metricRecordsByMetricId.get(metricDefinition.id) ?? []
-        const latestRecord = records[records.length - 1]
-        const selectedDateRecord = records.find((metricRecord) => metricRecord.dateKey === selectedDate)
-        const scaleMax = getMetricScaleMax(metricDefinition, records)
-        const points: TrendPoint[] = trendDateKeys.map((dateKey) => ({
-          label: formatShortDateLabel(dateKey),
-          value: records.find((metricRecord) => metricRecord.dateKey === dateKey)?.value ?? null,
-        }))
-
-        return {
-          metricDefinition,
-          latestRecord,
-          selectedDateRecord,
-          scaleMax,
-          points,
-        }
-      }),
-    [metricDefinitions, metricRecordsByMetricId, selectedDate, trendDateKeys],
-  )
 
   const lastSevenAverage = average(lastSevenEntries.map((entry) => entry.mood.score))
   const moodWindowAverage = average(moodTrendPoints.flatMap((point) => (point.value == null ? [] : [point.value])))
@@ -695,20 +581,6 @@ function App() {
     }
   }
 
-  const handleToggleJournalEntrySelection = (entryId: string) => {
-    setSelectedJournalEntryIds((current) =>
-      current.includes(entryId) ? current.filter((item) => item !== entryId) : [...current, entryId],
-    )
-  }
-
-  const handleSelectAllFilteredEntries = () => {
-    setSelectedJournalEntryIds(filteredEntries.map((entry) => entry.id))
-  }
-
-  const handleClearSelectedEntries = () => {
-    setSelectedJournalEntryIds([])
-  }
-
   const handleDeleteJournalEntry = async (entry: JournalEntry) => {
     const confirmed = window.confirm(`确认删除 ${entry.dateKey} 的日记记录吗？这会同时删除关联图片。`)
     if (!confirmed) return
@@ -717,27 +589,9 @@ function App() {
 
     try {
       await deleteJournalEntry(entry)
-      setSelectedJournalEntryIds((current) => current.filter((id) => id !== entry.id))
       await reload()
     } catch (error) {
       setWriteError(error instanceof Error ? error.message : '删除日记失败。')
-    }
-  }
-
-  const handleDeleteSelectedJournalEntries = async () => {
-    if (selectedJournalEntryIds.length === 0) return
-
-    const confirmed = window.confirm(`确认删除已选的 ${selectedJournalEntryIds.length} 条日记吗？这会同时删除关联图片。`)
-    if (!confirmed) return
-
-    setWriteError('')
-
-    try {
-      await deleteJournalEntries(selectedJournalEntryIds)
-      setSelectedJournalEntryIds([])
-      await reload()
-    } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '批量删除日记失败。')
     }
   }
 
@@ -751,11 +605,6 @@ function App() {
   const openSettingsSection = (section: SettingsSection) => {
     setSettingsSection(section)
     navigateTo('settings')
-  }
-
-  const openJournalMode = (mode: JournalMode) => {
-    setJournalMode(mode)
-    navigateTo('journal')
   }
 
   const focusDate = (dateKey: string, nextView: ActiveView = activeView) => {
@@ -773,11 +622,22 @@ function App() {
     }
 
   const handleWebDavConfigChange =
-    (key: keyof WebDavConfig) => (event: ChangeEvent<HTMLInputElement>) => {
+    (key: WebDavTextConfigKey) => (event: ChangeEvent<HTMLInputElement>) => {
       const next = { ...webDavConfig, [key]: event.target.value }
       setWebDavConfig(next)
       window.localStorage.setItem(webDavConfigStorageKey, JSON.stringify(next))
     }
+
+  const handleWebDavAutoSyncChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const next = { ...webDavConfig, autoSyncDaily: event.target.checked }
+    setWebDavConfig(next)
+    window.localStorage.setItem(webDavConfigStorageKey, JSON.stringify(next))
+  }
+
+  const handleThemeModeChange = (next: ThemeMode) => {
+    setThemeMode(next)
+    window.localStorage.setItem(themeModeStorageKey, next)
+  }
 
   const persistGameEngineSettings = (next: GameEngineSettings) => {
     setGameEngineSettings(next)
@@ -801,85 +661,67 @@ function App() {
     )
   }
 
-  const handleMetricDraftChange =
-    (key: keyof MetricDraftState) => (event: ChangeEvent<HTMLInputElement>) => {
-      setMetricDraft((current) => ({ ...current, [key]: event.target.value }))
-    }
+  const handleWebDavSync = useCallback(async (source: 'manual' | 'startup' = 'manual') => {
+    if (isWebDavSyncing) return
 
-  const resetMetricDraft = () => setMetricDraft(emptyMetricDraft)
-
-  const handleEditMetricDefinition = (metricDefinition: MetricDefinition) => {
-    setMetricDraft({
-      id: metricDefinition.id,
-      name: metricDefinition.name,
-      unit: metricDefinition.unit,
-      color: metricDefinition.color,
-      targetValue: metricDefinition.targetValue != null ? `${metricDefinition.targetValue}` : '',
-    })
-    setSelectedMetricId(metricDefinition.id)
-  }
-
-  const handleSaveMetricDefinition = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const name = metricDraft.name.trim()
-    if (!name) return
-
-    setWriteError('')
-
-    try {
-      const targetValue = metricDraft.targetValue.trim()
-      const metricDefinition = await upsertMetricDefinition({
-        id: metricDraft.id,
-        name,
-        unit: metricDraft.unit.trim(),
-        color: metricDraft.color,
-        targetValue: targetValue ? Number(targetValue) : undefined,
-      })
-      setSelectedMetricId(metricDefinition.id)
-      resetMetricDraft()
-      await reload()
-    } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '保存指标失败。')
-    }
-  }
-
-  const handleDeleteMetricDefinition = async (metricDefinition: MetricDefinition) => {
-    setWriteError('')
-
-    try {
-      await deleteMetricDefinition(metricDefinition)
-      if (metricDraft.id === metricDefinition.id) {
-        resetMetricDraft()
+    if (!isWebDavConfigured) {
+      if (source === 'manual') {
+        setWriteError('请先配置 WebDAV')
+        setSettingsSection('webdav')
+        setActiveView('settings')
+        if (!isDesktopNav) {
+          setIsNavOpen(false)
+        }
       }
-      await reload()
-    } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '删除指标失败。')
-    }
-  }
-
-  const handleMetricValueDraftChange =
-    (metricId: string) => (event: ChangeEvent<HTMLInputElement>) => {
-      setMetricValueDrafts((current) => ({ ...current, [metricId]: event.target.value }))
+      return
     }
 
-  const handleSaveMetricRecord = async (metricDefinition: MetricDefinition) => {
-    const rawValue = metricValueDrafts[metricDefinition.id]?.trim() ?? ''
-    if (!rawValue) return
-
+    setIsWebDavSyncing(true)
     setWriteError('')
 
     try {
-      await upsertMetricRecord({
-        metricId: metricDefinition.id,
-        dateKey: selectedDate,
-        value: Number(rawValue),
-      })
-      setSelectedMetricId(metricDefinition.id)
+      const shouldPush = pendingChangeCount > 0
+      await (shouldPush ? pushWebDavSnapshot(webDavConfig) : pullWebDavSnapshot(webDavConfig))
+
+      window.localStorage.setItem(webDavLastAutoSyncStorageKey, todayKey)
       await reload()
     } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '保存指标数值失败。')
+      const message = error instanceof Error ? error.message : '同步失败。'
+
+      if (pendingChangeCount === 0 && /404|not found|不存在/i.test(message)) {
+        try {
+          await pushWebDavSnapshot(webDavConfig)
+
+          window.localStorage.setItem(webDavLastAutoSyncStorageKey, todayKey)
+          await reload()
+          return
+        } catch (fallbackError) {
+          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : '同步初始化失败。'
+          if (source === 'manual') setWriteError(fallbackMessage)
+          return
+        }
+      }
+
+      if (source === 'manual') setWriteError(message)
+    } finally {
+      setIsWebDavSyncing(false)
     }
-  }
+  }, [
+    isDesktopNav,
+    isWebDavConfigured,
+    isWebDavSyncing,
+    pendingChangeCount,
+    reload,
+    todayKey,
+    webDavConfig,
+  ])
+
+  useEffect(() => {
+    if (!hasLoadedLocalState || !webDavConfig.autoSyncDaily || !isWebDavConfigured || isWebDavSyncing) return
+    if (window.localStorage.getItem(webDavLastAutoSyncStorageKey) === todayKey) return
+
+    void handleWebDavSync('startup')
+  }, [handleWebDavSync, hasLoadedLocalState, isWebDavConfigured, isWebDavSyncing, todayKey, webDavConfig.autoSyncDaily])
 
   const handleGenerateSummary = async () => {
     if (!canGenerateSummary || isGeneratingSummary) return
@@ -961,7 +803,7 @@ function App() {
 
   return (
     <main className="shell">
-      <DynamicBackground />
+      <DynamicBackground mode={resolvedThemeMode} />
       <div
         className={`app-shell ${isDesktopNav ? '' : 'app-shell-bottom-nav'}`}
         style={{ ['--nav-width' as string]: isNavCollapsed ? '88px' : '296px' }}
@@ -975,9 +817,7 @@ function App() {
             navigationItems={navigationItems}
             onClose={() => setIsNavOpen(false)}
             onNavigate={navigateTo}
-            onOpenJournalBoard={() => openJournalMode('board')}
-            onOpenSettingsOverview={() => openSettingsSection('overview')}
-            onOpenSettingsAi={() => openSettingsSection('ai')}
+            onToggleCollapse={() => setIsNavCollapsed((current) => !current)}
           />
         )}
 
@@ -985,25 +825,19 @@ function App() {
           <div className="page">
             <AppHeader
               isDesktopNav={isDesktopNav}
-              isNavCollapsed={isNavCollapsed}
               todayLabel={todayHeaderLabel}
               activeViewLabel={activeNavItem?.label ?? '仪表盘'}
               locationLabel={weatherState.locationLabel}
               weatherText={weatherState.weatherText}
-              onToggleNav={() => {
-                if (isDesktopNav) {
-                  setIsNavCollapsed((current) => !current)
-                } else {
-                  setIsNavOpen((current) => !current)
-                }
-              }}
+              isWebDavSyncing={isWebDavSyncing}
+              onSyncWebDav={() => void handleWebDavSync('manual')}
+              onOpenSettings={() => openSettingsSection('overview')}
             />
 
             {activeView === 'dashboard' ? (
           <DashboardView
             selectedDate={selectedDate}
             selectedDateLabel={formatDateLabel(selectedDate)}
-            todayKey={todayKey}
             visibleDashboardCards={visibleDashboardCards}
             writeError={writeError}
             selectedEntry={selectedEntry}
@@ -1015,23 +849,13 @@ function App() {
             isSaving={isSaving}
             dayTodos={dayTodos}
             todoTitle={todoTitle}
-            ringEntry={ringEntry}
             lastSevenAverage={lastSevenAverage}
-            completionRate={completionRate}
-            entryCount={entries.length}
+            lastSevenEntryCount={lastSevenEntries.length}
             moodTrendPoints={moodTrendPoints}
             selectedMoodTrendIndex={selectedMoodTrendIndex}
             trendStartLabel={trendDateKeys[0]}
             trendEndLabel={trendDateKeys[trendDateKeys.length - 1]}
             moodWindowAverage={moodWindowAverage}
-            metricDraft={metricDraft}
-            metricRows={metricRows}
-            metricValueDrafts={metricValueDrafts}
-            selectedMetricId={selectedMetricId}
-            selectedMetricDefinition={selectedMetricDefinition}
-            selectedMetricCurrentRecord={selectedMetricCurrentRecord}
-            selectedMetricLatestRecord={selectedMetricLatestRecord}
-            selectedMetricScaleMax={selectedMetricScaleMax}
             onDateChange={(dateKey) => focusDate(dateKey, 'dashboard')}
             onDraftChange={handleDraftChange}
             onFilesChange={handleFilesChange}
@@ -1043,34 +867,14 @@ function App() {
             onDeleteAttachment={(attachment) => void handleDeleteAttachment(attachment)}
             onRemovePendingFile={handleRemovePendingFile}
             getCompletionRate={getCompletionRate}
-            getSignalValue={getSignalValue}
-            onMetricDraftChange={handleMetricDraftChange}
-            onSaveMetricDefinition={handleSaveMetricDefinition}
-            onResetMetricDraft={resetMetricDraft}
-            onEditMetricDefinition={handleEditMetricDefinition}
-            onDeleteMetricDefinition={(metricDefinition) => void handleDeleteMetricDefinition(metricDefinition)}
-            onMetricValueDraftChange={handleMetricValueDraftChange}
-            onSaveMetricRecord={(metricDefinition) => void handleSaveMetricRecord(metricDefinition)}
-            onSelectMetricId={setSelectedMetricId}
-            formatMetricValue={formatMetricValue}
           />
             ) : activeView === 'journal' ? (
           <JournalView
             journalMode={journalMode}
             journalModes={journalModes}
-            journalSearch={journalSearch}
-            journalFilterMonth={journalFilterMonth}
-            journalFilterMood={journalFilterMood}
-            journalFilterTag={journalFilterTag}
-            journalMonthOptions={journalMonthOptions}
-            journalMoodOptions={journalMoodOptions}
-            journalTagOptions={journalTagOptions}
-            selectedEntryIds={selectedJournalEntryIds}
             entries={entries}
-            filteredEntries={filteredEntries}
             todos={todos}
             filteredBoardTodos={filteredBoardTodos}
-            latestEntry={latestEntry}
             currentStreak={currentStreak}
             pendingChangeCount={pendingChangeCount}
             boardColumns={boardColumns}
@@ -1079,16 +883,8 @@ function App() {
             selectedDate={selectedDate}
             todoTitle={todoTitle}
             onJournalModeChange={setJournalMode}
-            onJournalSearchChange={setJournalSearch}
-            onJournalFilterMonthChange={setJournalFilterMonth}
-            onJournalFilterMoodChange={setJournalFilterMood}
-            onJournalFilterTagChange={setJournalFilterTag}
             onFocusDate={focusDate}
-            onToggleEntrySelection={handleToggleJournalEntrySelection}
-            onSelectAllFilteredEntries={handleSelectAllFilteredEntries}
-            onClearSelectedEntries={handleClearSelectedEntries}
             onDeleteEntry={(entry) => void handleDeleteJournalEntry(entry)}
-            onDeleteSelectedEntries={() => void handleDeleteSelectedJournalEntries()}
             onTodoTitleChange={setTodoTitle}
             onAddTodo={handleAddTodo}
             onToggleTodo={(todo) => void handleToggleTodo(todo)}
@@ -1118,14 +914,19 @@ function App() {
             isGeneratingSummary={isGeneratingSummary}
             summaryDraft={summaryDraft}
             summaryError={summaryError}
+            todoTitle={todoTitle}
             onPreviousMonth={() => setVisibleMonth(shiftMonth(visibleMonth, -1))}
             onNextMonth={() => setVisibleMonth(shiftMonth(visibleMonth, 1))}
-            onFocusDate={(dateKey) => focusDate(dateKey, 'dashboard')}
+            onFocusDate={(dateKey) => focusDate(dateKey, 'summary')}
             onSelectedWeekChange={(dateKey) => setSelectedWeek(getWeekKey(dateKey))}
             onOpenAiSettings={() => openSettingsSection('ai')}
             onGenerateSummary={() => void handleGenerateSummary()}
             onSummaryDraftChange={setSummaryDraft}
             onSaveSummary={() => void handleSaveSummaryDraft()}
+            onTodoTitleChange={setTodoTitle}
+            onAddTodo={handleAddTodo}
+            onToggleTodo={(todo) => void handleToggleTodo(todo)}
+            onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
             getCompletionRate={getCompletionRate}
             getHeatLevel={getHeatLevel}
           />
@@ -1148,11 +949,15 @@ function App() {
             visibleDashboardCards={visibleDashboardCards}
             aiConfig={aiConfig}
             webDavConfig={webDavConfig}
+            themeMode={themeMode}
+            resolvedThemeMode={resolvedThemeMode}
             onSettingsSectionChange={setSettingsSection}
             onReload={() => void reload()}
             onToggleDashboardCard={toggleDashboardCard}
             onAiConfigChange={handleAiConfigChange}
             onWebDavConfigChange={handleWebDavConfigChange}
+            onWebDavAutoSyncChange={handleWebDavAutoSyncChange}
+            onThemeModeChange={handleThemeModeChange}
             onSnapshotDaysChange={handleSnapshotDaysChange}
           />
             )}

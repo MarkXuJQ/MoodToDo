@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
-import { BarChart3, ChevronDown, Cloud, Database, RefreshCw, Settings2 } from 'lucide-react'
+import { BarChart3, ChevronDown, Cloud, Database, Monitor, Moon, RefreshCw, Settings2, SunMedium } from 'lucide-react'
 
 import { Metric } from '../components/ui/stat-primitives'
 import type { GameEngineSettings, GameEngineSnapshot } from '../lib/gameEngine'
@@ -11,7 +11,9 @@ import type {
   SettingsSection,
   SettingsSectionGroup,
   SettingsSectionOption,
+  ThemeMode,
   WebDavConfig,
+  WebDavTextConfigKey,
 } from '../types/app'
 
 type DashboardMetricCard = {
@@ -39,11 +41,15 @@ type SettingsViewProps = {
   visibleDashboardCards: DashboardMetricCard[]
   aiConfig: AiConfig
   webDavConfig: WebDavConfig
+  themeMode: ThemeMode
+  resolvedThemeMode: 'light' | 'dark'
   onSettingsSectionChange: (section: SettingsSection) => void
   onReload: () => void
   onToggleDashboardCard: (cardId: DashboardCardId) => void
   onAiConfigChange: (key: keyof AiConfig) => (event: ChangeEvent<HTMLInputElement>) => void
-  onWebDavConfigChange: (key: keyof WebDavConfig) => (event: ChangeEvent<HTMLInputElement>) => void
+  onWebDavConfigChange: (key: WebDavTextConfigKey) => (event: ChangeEvent<HTMLInputElement>) => void
+  onWebDavAutoSyncChange: (event: ChangeEvent<HTMLInputElement>) => void
+  onThemeModeChange: (mode: ThemeMode) => void
   onSnapshotDaysChange: (event: ChangeEvent<HTMLInputElement>) => void
 }
 
@@ -65,14 +71,23 @@ export function SettingsView({
   visibleDashboardCards,
   aiConfig,
   webDavConfig,
+  themeMode,
+  resolvedThemeMode,
   onSettingsSectionChange,
   onReload,
   onToggleDashboardCard,
   onAiConfigChange,
   onWebDavConfigChange,
+  onWebDavAutoSyncChange,
+  onThemeModeChange,
   onSnapshotDaysChange,
 }: SettingsViewProps) {
   const activeSettingsItem = settingsSections.find((item) => item.id === settingsSection)
+  const themeOptions: Array<{ id: ThemeMode; label: string; note: string; icon: typeof Monitor }> = [
+    { id: 'system', label: '跟随系统', note: '随设备外观自动切换', icon: Monitor },
+    { id: 'light', label: '日间', note: '明亮、轻量的记录环境', icon: SunMedium },
+    { id: 'dark', label: '夜间', note: '低亮度，适合夜间整理', icon: Moon },
+  ]
   const activeGroupId = useMemo(
     () => settingsSectionGroups.find((group) => group.items.some((item) => item.id === settingsSection))?.id ?? settingsSectionGroups[0]?.id ?? '',
     [settingsSection, settingsSectionGroups],
@@ -109,6 +124,21 @@ export function SettingsView({
         </div>
         <span className="pill">{activeSettingsItem?.label}</span>
       </div>
+
+      <label className="settings-mobile-nav">
+        <span>设置项</span>
+        <select value={settingsSection} onChange={(event) => onSettingsSectionChange(event.target.value as SettingsSection)}>
+          {settingsSectionGroups.map((group) => (
+            <optgroup label={group.label} key={group.id}>
+              {group.items.map((item) => (
+                <option value={item.id} key={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
 
       <div className="settings-layout">
         <aside className="settings-sidebar" aria-label="设置分组导航">
@@ -180,12 +210,12 @@ export function SettingsView({
                     <strong className="table-value">{databaseStatus.databasePath || '等待本地 API 返回'}</strong>
                     <span className="table-key">schema</span>
                     <strong className="table-value">v{databaseStatus.schemaVersion || '-'}</strong>
-                    <span className="table-key">pending changes</span>
+                    <span className="table-key">pending content</span>
                     <strong className="table-value">{pendingChangeCount}</strong>
                   </div>
 
                   <p className="note mt-3">
-                    主数据已经固定落在项目目录下的 SQLite 文件里。浏览器、端口和 PWA 安装状态改变时，只要本地 API 仍指向同一个文件，数据就不会跟着消失。
+                    主数据已经固定落在项目目录下的 SQLite 文件里。浏览器、端口和 PWA 安装状态改变时，只要本地 API 仍指向同一个文件，数据就不会跟着消失。今日台的云同步会把这个 SQLite 文件作为快照推送到 WebDAV。
                   </p>
 
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -299,6 +329,49 @@ export function SettingsView({
             </div>
           )}
 
+          {settingsSection === 'appearance' && (
+            <section className="section" aria-labelledby="appearance-settings-title">
+              <div className="section-head">
+                <div>
+                  <p className="eyebrow">Appearance</p>
+                  <h2 className="section-title" id="appearance-settings-title">
+                    外观偏好
+                  </h2>
+                </div>
+                <span className="pill">{resolvedThemeMode === 'dark' ? '夜间生效' : '日间生效'}</span>
+              </div>
+
+              <div className="theme-choice-grid" role="group" aria-label="外观模式">
+                {themeOptions.map((option) => {
+                  const Icon = option.icon
+                  const selected = themeMode === option.id
+
+                  return (
+                    <button
+                      className={`theme-choice ${selected ? 'theme-choice-active' : ''}`}
+                      type="button"
+                      key={option.id}
+                      aria-pressed={selected}
+                      onClick={() => onThemeModeChange(option.id)}
+                    >
+                      <span className="theme-choice-icon">
+                        <Icon size={20} aria-hidden="true" />
+                      </span>
+                      <span>
+                        <strong>{option.label}</strong>
+                        <small>{option.note}</small>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              <p className="note mt-3">
+                外观设置只保存在本机，用于调整界面和动态背景。数据内容、SQLite 文件和 WebDAV 同步不受外观模式影响。
+              </p>
+            </section>
+          )}
+
           {settingsSection === 'database' && (
             <section className="section" aria-labelledby="storage-settings-title">
               <div className="section-head">
@@ -341,7 +414,7 @@ export function SettingsView({
                   <strong className="table-value">{weeklySummariesCount}</strong>
                 </div>
                 <p className="note">
-                  当前主库是项目目录下的 SQLite 文件，不再依赖浏览器 profile 或端口隔离。后续 WebDAV 同步会基于这个文件中的变更日志生成可恢复备份。
+                  当前主库是项目目录下的 SQLite 文件，不再依赖浏览器 profile 或端口隔离。当前 WebDAV 使用整库快照做备份/恢复；后续多端合并会再使用这里的变更日志。
                 </p>
               </div>
             </section>
@@ -445,10 +518,22 @@ export function SettingsView({
                     placeholder="/xinxiangyi"
                   />
                 </label>
+                <label className="config-row cursor-pointer">
+                  <span>
+                    <strong className="block text-sm font-black text-ink-950">打开后每天自动同步</strong>
+                    <small className="block text-xs font-bold text-ink-400">每天首次打开应用时自动执行一次同步。</small>
+                  </span>
+                  <input
+                    className="size-5 accent-[var(--color-xin-700)]"
+                    type="checkbox"
+                    checked={webDavConfig.autoSyncDaily}
+                    onChange={onWebDavAutoSyncChange}
+                  />
+                </label>
               </div>
 
               <p className="note mt-3">
-                当前版本只保存同步配置和本地变更日志。下一步会把 `changes` 打包成 JSON 增量文件，并把图片附件按 `attachments/` 上传到 WebDAV。
+                当前版本会把本地 SQLite 数据库作为一个完整快照同步到 WebDAV 目录。首页的同步按钮会自动选择上传或拉取：本地有未同步内容时上传，本地没有未同步内容时尝试拉取远端快照。它适合单人多设备备份/恢复，还不是多端冲突合并。
               </p>
             </section>
           )}

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -11,18 +11,27 @@ const dataDir = process.env.XINXIANGYI_DATA_DIR
   : resolve(projectRoot, 'data')
 const databaseName = 'xinxiangyi.sqlite'
 const databasePath = resolve(dataDir, databaseName)
+const syncDir = resolve(dataDir, '.sync')
 const port = Number(process.env.XINXIANGYI_API_PORT ?? 8787)
 const host = process.env.XINXIANGYI_API_HOST ?? '127.0.0.1'
-const schemaVersion = 3
+const schemaVersion = 4
 
 mkdirSync(dataDir, { recursive: true })
+mkdirSync(syncDir, { recursive: true })
 
-const db = new DatabaseSync(databasePath)
+let db = new DatabaseSync(databasePath)
 
-db.exec(`
+const configureDatabaseConnection = () => {
+  db.exec(`
   PRAGMA foreign_keys = ON;
   PRAGMA journal_mode = DELETE;
   PRAGMA synchronous = NORMAL;
+  `)
+}
+
+configureDatabaseConnection()
+
+db.exec(`
 
   CREATE TABLE IF NOT EXISTS entries (
     id TEXT PRIMARY KEY,
@@ -230,6 +239,257 @@ const getMeta = () => ({
   apiBaseUrl: `http://${host}:${port}`,
   schemaVersion,
 })
+
+const quoteSqlString = (value) => `'${value.replaceAll("'", "''")}'`
+
+const normalizeRemotePath = (value) => {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  return raw || '/xinxiangyi'
+}
+
+const getWebDavConfig = (payload) => {
+  const url = typeof payload.url === 'string' ? payload.url.trim() : ''
+  const username = typeof payload.username === 'string' ? payload.username.trim() : ''
+  const password = typeof payload.password === 'string' ? payload.password : ''
+  const remotePath = normalizeRemotePath(payload.remotePath)
+
+  if (!url) {
+    throw new Error('请先配置 WebDAV Server URL。')
+  }
+
+  if (!username || !password) {
+    throw new Error('请先配置 WebDAV 用户名和应用密码。')
+  }
+
+  try {
+    new URL(url)
+  } catch {
+    throw new Error('WebDAV Server URL 不是合法地址。')
+  }
+
+  return {
+    url,
+    username,
+    password,
+    remotePath,
+  }
+}
+
+const getWebDavHeaders = (config, contentType) => ({
+  Authorization: `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`,
+  ...(contentType ? { 'Content-Type': contentType } : {}),
+})
+
+const getRemoteSegments = (...parts) =>
+  parts
+    .flatMap((part) => String(part ?? '').split('/'))
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+const getWebDavUrl = (config, ...parts) => {
+  const url = new URL(config.url)
+  const basePath = url.pathname.endsWith('/') ? url.pathname : `${url.pathname}/`
+  const relativePath = getRemoteSegments(config.remotePath, ...parts)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+
+  url.pathname = `${basePath}${relativePath}`.replace(/\/{2,}/g, '/')
+  url.search = ''
+  url.hash = ''
+
+  return url
+}
+
+const ensureWebDavCollection = async (config) => {
+  const segments = getRemoteSegments(config.remotePath)
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const url = getWebDavUrl({ ...config, remotePath: `/${segments.slice(0, index + 1).join('/')}` })
+    const response = await fetch(url, {
+      method: 'MKCOL',
+      headers: getWebDavHeaders(config),
+    })
+
+    if (![200, 201, 204, 405].includes(response.status)) {
+      const detail = await response.text().catch(() => '')
+      throw new Error(`创建 WebDAV 目录失败：${response.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
+    }
+  }
+}
+
+const createDatabaseSnapshot = () => {
+  const snapshotPath = resolve(syncDir, `xinxiangyi-${Date.now()}.sqlite`)
+
+  rmSync(snapshotPath, { force: true })
+  db.exec(`VACUUM INTO ${quoteSqlString(snapshotPath)}`)
+
+  return snapshotPath
+}
+
+const markLocalContentSynced = () => {
+  transaction(() => {
+    db.prepare(`UPDATE entries SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
+    db.prepare(`UPDATE todos SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
+    db.prepare(`UPDATE attachments SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
+    db.prepare(`UPDATE metric_definitions SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
+    db.prepare(`UPDATE metric_records SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
+    db.prepare(`UPDATE changes SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
+  })
+}
+
+const validateIncomingDatabase = (incomingPath) => {
+  const incomingDb = new DatabaseSync(incomingPath, { readOnly: true })
+
+  try {
+    const integrity = incomingDb.prepare('PRAGMA integrity_check').get()
+    const integrityValue = Object.values(integrity ?? {})[0]
+
+    if (integrityValue !== 'ok') {
+      throw new Error(`远端数据库完整性检查失败：${integrityValue}`)
+    }
+
+    const tables = incomingDb
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('entries', 'todos', 'attachments', 'changes')`)
+      .all()
+
+    if (tables.length < 4) {
+      throw new Error('远端数据库不是有效的心象仪数据文件。')
+    }
+  } finally {
+    incomingDb.close()
+  }
+}
+
+const pushWebDavSnapshot = async (request, response) => {
+  let config
+
+  try {
+    config = getWebDavConfig(await readJson(request))
+  } catch (error) {
+    sendJson(response, 400, { error: error instanceof Error ? error.message : 'WebDAV 配置无效。' })
+    return
+  }
+
+  let snapshotPath = ''
+
+  try {
+    await ensureWebDavCollection(config)
+    snapshotPath = createDatabaseSnapshot()
+
+    const databaseUrl = getWebDavUrl(config, databaseName)
+    const databaseBytes = readFileSync(snapshotPath)
+    const uploadResponse = await fetch(databaseUrl, {
+      method: 'PUT',
+      headers: getWebDavHeaders(config, 'application/vnd.sqlite3'),
+      body: databaseBytes,
+    })
+
+    if (!uploadResponse.ok) {
+      const detail = await uploadResponse.text().catch(() => '')
+      throw new Error(`上传 SQLite 快照失败：${uploadResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
+    }
+
+    const manifest = {
+      app: 'xinxiangyi',
+      databaseName,
+      schemaVersion,
+      pushedAt: nowIso(),
+      size: statSync(snapshotPath).size,
+    }
+    const manifestResponse = await fetch(getWebDavUrl(config, 'manifest.json'), {
+      method: 'PUT',
+      headers: getWebDavHeaders(config, 'application/json; charset=utf-8'),
+      body: JSON.stringify(manifest, null, 2),
+    })
+
+    if (!manifestResponse.ok) {
+      const detail = await manifestResponse.text().catch(() => '')
+      throw new Error(`上传同步清单失败：${manifestResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
+    }
+
+    markLocalContentSynced()
+
+    sendJson(response, 200, {
+      ok: true,
+      direction: 'push',
+      remotePath: config.remotePath,
+      file: databaseName,
+      size: manifest.size,
+      syncedAt: manifest.pushedAt,
+    })
+  } catch (error) {
+    sendJson(response, 502, { error: error instanceof Error ? error.message : 'WebDAV Push 失败。' })
+  } finally {
+    if (snapshotPath) {
+      rmSync(snapshotPath, { force: true })
+    }
+  }
+}
+
+const pullWebDavSnapshot = async (request, response) => {
+  let config
+
+  try {
+    config = getWebDavConfig(await readJson(request))
+  } catch (error) {
+    sendJson(response, 400, { error: error instanceof Error ? error.message : 'WebDAV 配置无效。' })
+    return
+  }
+
+  const incomingPath = resolve(syncDir, `incoming-${Date.now()}.sqlite`)
+  const backupPath = resolve(syncDir, `local-backup-${Date.now()}.sqlite`)
+
+  try {
+    const remoteResponse = await fetch(getWebDavUrl(config, databaseName), {
+      method: 'GET',
+      headers: getWebDavHeaders(config),
+    })
+
+    if (!remoteResponse.ok) {
+      const detail = await remoteResponse.text().catch(() => '')
+      throw new Error(`下载远端 SQLite 快照失败：${remoteResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
+    }
+
+    writeFileSync(incomingPath, Buffer.from(await remoteResponse.arrayBuffer()))
+    validateIncomingDatabase(incomingPath)
+
+    if (existsSync(databasePath)) {
+      copyFileSync(databasePath, backupPath)
+    }
+
+    db.close()
+
+    try {
+      copyFileSync(incomingPath, databasePath)
+      db = new DatabaseSync(databasePath)
+      configureDatabaseConnection()
+      ensureColumn('entries', 'weather_text', `weather_text TEXT NOT NULL DEFAULT ''`)
+      ensureColumn('entries', 'location_text', `location_text TEXT NOT NULL DEFAULT ''`)
+      db.exec(`PRAGMA user_version = ${schemaVersion}`)
+    } catch (error) {
+      if (existsSync(backupPath)) {
+        copyFileSync(backupPath, databasePath)
+      }
+      db = new DatabaseSync(databasePath)
+      configureDatabaseConnection()
+      throw error
+    }
+
+    sendJson(response, 200, {
+      ok: true,
+      direction: 'pull',
+      remotePath: config.remotePath,
+      file: databaseName,
+      size: statSync(databasePath).size,
+      backupPath: existsSync(backupPath) ? backupPath : '',
+      syncedAt: nowIso(),
+    })
+  } catch (error) {
+    sendJson(response, 502, { error: error instanceof Error ? error.message : 'WebDAV Pull 失败。' })
+  } finally {
+    rmSync(incomingPath, { force: true })
+  }
+}
 
 const normalizeChatCompletionsEndpoint = (value) => {
   const raw = typeof value === 'string' ? value.trim() : ''
@@ -936,6 +1196,16 @@ const route = async (request, response) => {
 
   if (request.method === 'POST' && pathname === '/api/ai/weekly-summary') {
     await requestWeeklySummary(request, response)
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/api/webdav/push') {
+    await pushWebDavSnapshot(request, response)
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/api/webdav/pull') {
+    await pullWebDavSnapshot(request, response)
     return
   }
 

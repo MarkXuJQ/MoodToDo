@@ -1,4 +1,5 @@
-import { CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Save, Settings2, Sparkles } from 'lucide-react'
+import type { FormEvent } from 'react'
+import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Circle, Plus, RefreshCw, Save, Settings2, Sparkles, Trash2 } from 'lucide-react'
 
 import { Metric } from '../components/ui/stat-primitives'
 import type { JournalEntry, TodoItem } from '../lib/db'
@@ -27,6 +28,7 @@ type SummaryViewProps = {
   isGeneratingSummary: boolean
   summaryDraft: string
   summaryError: string
+  todoTitle: string
   onPreviousMonth: () => void
   onNextMonth: () => void
   onFocusDate: (dateKey: string) => void
@@ -35,6 +37,10 @@ type SummaryViewProps = {
   onGenerateSummary: () => void
   onSummaryDraftChange: (value: string) => void
   onSaveSummary: () => void
+  onTodoTitleChange: (value: string) => void
+  onAddTodo: (event: FormEvent<HTMLFormElement>) => void
+  onToggleTodo: (todo: TodoItem) => void
+  onDeleteTodo: (todo: TodoItem) => void
   getCompletionRate: (items: TodoItem[]) => number
   getHeatLevel: (entry?: JournalEntry) => string
 }
@@ -62,6 +68,7 @@ export function SummaryView({
   isGeneratingSummary,
   summaryDraft,
   summaryError,
+  todoTitle,
   onPreviousMonth,
   onNextMonth,
   onFocusDate,
@@ -70,9 +77,18 @@ export function SummaryView({
   onGenerateSummary,
   onSummaryDraftChange,
   onSaveSummary,
+  onTodoTitleChange,
+  onAddTodo,
+  onToggleTodo,
+  onDeleteTodo,
   getCompletionRate,
   getHeatLevel,
 }: SummaryViewProps) {
+  const selectedDateTodos = [...todos]
+    .filter((todo) => todo.dateKey === selectedDate)
+    .sort((left, right) => Number(left.done) - Number(right.done) || right.createdAt.localeCompare(left.createdAt))
+  const selectedDateEntry = entries.find((entry) => entry.dateKey === selectedDate)
+
   return (
     <section className="py-3 sm:py-5" aria-labelledby="summary-title">
       <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -148,6 +164,59 @@ export function SummaryView({
             <i className="size-5 rounded border border-field-200 heat-good" />
             <i className="size-5 rounded border border-field-200 heat-bright" />
             <span>高亮</span>
+          </div>
+
+          <div className="calendar-day-todos" aria-labelledby="calendar-day-todos-title">
+            <div className="section-head mb-3">
+              <div>
+                <p className="eyebrow">{selectedDate}</p>
+                <h3 className="section-title text-lg" id="calendar-day-todos-title">
+                  当日 Todo
+                </h3>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <span className={`pill min-h-8 text-xs ${selectedDateEntry ? `score-${selectedDateEntry.mood.level}` : ''}`}>
+                  {selectedDateEntry ? `心象 ${selectedDateEntry.mood.score}` : '未打卡'}
+                </span>
+                <span className="pill min-h-8 text-xs">{getCompletionRate(selectedDateTodos)}%</span>
+              </div>
+            </div>
+
+            <form className="todo-capture-form" onSubmit={onAddTodo}>
+              <input
+                className="text-input"
+                value={todoTitle}
+                onChange={(event) => onTodoTitleChange(event.target.value)}
+                placeholder="给这一天添加一个 Todo"
+              />
+              <button className="icon-button-solid" type="submit" aria-label="新增当日 Todo">
+                <Plus size={20} aria-hidden="true" />
+              </button>
+            </form>
+
+            <ul className="calendar-day-todo-list" aria-label={`${selectedDate} Todo 列表`}>
+              {selectedDateTodos.map((todo) => (
+                <li className="todo-row" key={todo.id}>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label={todo.done ? '标记未完成' : '标记完成'}
+                    onClick={() => onToggleTodo(todo)}
+                  >
+                    {todo.done ? <CheckCircle2 size={20} aria-hidden="true" /> : <Circle size={20} aria-hidden="true" />}
+                  </button>
+                  <span className="todo-copy">
+                    <strong className={`break-words ${todo.done ? 'todo-done' : ''}`}>{todo.title}</strong>
+                    <small>{todo.dateKey}</small>
+                  </span>
+                  <button className="icon-button" type="button" aria-label={`删除 ${todo.title}`} onClick={() => onDeleteTodo(todo)}>
+                    <Trash2 size={16} aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            {selectedDateTodos.length === 0 && <p className="empty-state">这一天还没有 Todo，可以直接在这里补一条。</p>}
           </div>
         </section>
 

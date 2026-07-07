@@ -44,27 +44,6 @@ export type AttachmentRecord = {
   syncState: SyncState
 }
 
-export type MetricDefinition = {
-  id: string
-  name: string
-  unit: string
-  color: string
-  targetValue?: number
-  createdAt: string
-  updatedAt: string
-  syncState: SyncState
-}
-
-export type MetricRecord = {
-  id: string
-  metricId: string
-  dateKey: string
-  value: number
-  createdAt: string
-  updatedAt: string
-  syncState: SyncState
-}
-
 export type ChangeEntity = 'entry' | 'todo' | 'attachment' | 'metricDefinition' | 'metricRecord'
 export type ChangeOperation = 'upsert' | 'delete'
 
@@ -98,6 +77,23 @@ export type WeeklySummary = {
   updatedAt: string
 }
 
+export type WebDavSyncConfig = {
+  url: string
+  username: string
+  password: string
+  remotePath: string
+}
+
+export type WebDavSyncResult = {
+  ok: true
+  direction: 'push' | 'pull'
+  remotePath: string
+  file: string
+  size: number
+  syncedAt: string
+  backupPath?: string
+}
+
 export type LocalDatabaseMeta = {
   driver: string
   databaseName: string
@@ -110,8 +106,6 @@ export type LocalState = {
   entries: JournalEntry[]
   todos: TodoItem[]
   attachments: AttachmentRecord[]
-  metricDefinitions: MetricDefinition[]
-  metricRecords: MetricRecord[]
   changes: ChangeLogRecord[]
   weeklySummaries: WeeklySummary[]
   meta: LocalDatabaseMeta
@@ -282,39 +276,17 @@ export const deleteAttachment = async (attachment: AttachmentRecord) => {
   })
 }
 
-export const upsertMetricDefinition = async (payload: {
-  id?: string
-  name: string
-  unit: string
-  color: string
-  targetValue?: number
-}) => {
-  const { metricDefinition } = await apiFetch<{ metricDefinition: MetricDefinition }>('/api/metrics/definitions/upsert', {
+export const pushWebDavSnapshot = async (config: WebDavSyncConfig) =>
+  apiFetch<WebDavSyncResult>('/api/webdav/push', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(config),
   })
 
-  return metricDefinition
-}
-
-export const deleteMetricDefinition = async (metricDefinition: MetricDefinition) => {
-  await apiFetch<{ ok: true }>(`/api/metrics/definitions/${encodeURIComponent(metricDefinition.id)}`, {
-    method: 'DELETE',
-  })
-}
-
-export const upsertMetricRecord = async (payload: {
-  metricId: string
-  dateKey: string
-  value: number
-}) => {
-  const { metricRecord } = await apiFetch<{ metricRecord: MetricRecord }>('/api/metrics/records/upsert', {
+export const pullWebDavSnapshot = async (config: WebDavSyncConfig) =>
+  apiFetch<WebDavSyncResult>('/api/webdav/pull', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(config),
   })
-
-  return metricRecord
-}
 
 export const upsertWeeklySummary = async (
   weekKey: string,

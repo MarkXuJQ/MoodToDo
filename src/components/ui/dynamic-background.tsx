@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
-type PaletteMode = 'light' | 'dark'
+export type PaletteMode = 'light' | 'dark'
 
 type WashShape = {
   x: number
@@ -211,30 +211,8 @@ const drawBackground = (
   }
 }
 
-const readPreferredMode = (): PaletteMode => {
-  if (typeof window === 'undefined') return 'light'
-
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-const DynamicBackground = () => {
+const DynamicBackground = ({ mode }: { mode: PaletteMode }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const [mode, setMode] = useState<PaletteMode>(() => readPreferredMode())
-
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const updateMode = () => setMode(media.matches ? 'dark' : 'light')
-
-    updateMode()
-
-    if (typeof media.addEventListener === 'function') {
-      media.addEventListener('change', updateMode)
-      return () => media.removeEventListener('change', updateMode)
-    }
-
-    media.addListener(updateMode)
-    return () => media.removeListener(updateMode)
-  }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current

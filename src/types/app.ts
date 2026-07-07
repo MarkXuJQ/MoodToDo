@@ -4,7 +4,9 @@ export type ActiveView = 'dashboard' | 'journal' | 'summary' | 'settings'
 
 export type JournalMode = 'entries' | 'board'
 
-export type SettingsSection = 'overview' | 'cards' | 'database' | 'ai' | 'webdav' | 'engine'
+export type SettingsSection = 'overview' | 'cards' | 'appearance' | 'database' | 'ai' | 'webdav' | 'engine'
+
+export type ThemeMode = 'system' | 'light' | 'dark'
 
 export type NavItem = {
   id: ActiveView
@@ -47,7 +49,10 @@ export type WebDavConfig = {
   username: string
   password: string
   remotePath: string
+  autoSyncDaily: boolean
 }
+
+export type WebDavTextConfigKey = 'url' | 'username' | 'password' | 'remotePath'
 
 export type CalendarCell = {
   dateKey: string
@@ -66,19 +71,11 @@ export type DatabaseStatus = {
   lastLoadedAt: string
 }
 
-export type DashboardCardId = 'streak' | 'monthCheckin' | 'todoCompletion' | 'latestMood' | 'pendingSync' | 'attachments'
+export type DashboardCardId = 'streak' | 'monthCheckin' | 'todoCompletion' | 'pendingSync' | 'attachments'
 
 export type DashboardCardConfig = {
   id: DashboardCardId
   enabled: boolean
-}
-
-export type MetricDraftState = {
-  id?: string
-  name: string
-  unit: string
-  color: string
-  targetValue: string
 }
 
 export type WeatherState = {

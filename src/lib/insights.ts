@@ -1,27 +1,12 @@
 import type { MoodSignals } from './mood'
 import type { CalendarCell } from '../types/app'
-import type { JournalEntry, MetricDefinition, MetricRecord, TodoItem } from './db'
+import type { JournalEntry, TodoItem } from './db'
 import { addDays, getCalendarDates, getMonthDays, getTodayKey, getWeekDays } from './calendar'
 
 export const average = (values: number[]) => {
   if (values.length === 0) return 0
 
   return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
-}
-
-export const getMetricScaleMax = (metric: MetricDefinition, records: MetricRecord[]) => {
-  const values = records.map((record) => record.value)
-  const observed = values.length > 0 ? Math.max(...values) : 0
-  const target = metric.targetValue ?? 0
-
-  return Math.max(1, target, observed)
-}
-
-export const formatMetricValue = (value: number | null | undefined, unit: string) => {
-  if (value == null || Number.isNaN(value)) return `-${unit ? ` ${unit}` : ''}`.trim()
-  const normalized = Number.isInteger(value) ? `${value}` : value.toFixed(1)
-
-  return `${normalized}${unit ? ` ${unit}` : ''}`
 }
 
 export const parseTags = (value: string) =>
@@ -128,7 +113,9 @@ export const buildWeeklyPrompt = (weekKey: string, entries: JournalEntry[], todo
     const entry = entryMap.get(dateKey)
     const dayTodos = todoMap.get(dateKey) ?? []
     const todoText = dayTodos.length
-      ? dayTodos.map((todo) => `${todo.done ? '完成' : '未完成'}:${todo.title}`).join('；')
+      ? dayTodos
+          .map((todo) => `${todo.done ? '完成' : '未完成'}:${todo.title}`)
+          .join('；')
       : '无事项'
 
     if (!entry) {

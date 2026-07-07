@@ -4,10 +4,10 @@ import type {
   DashboardCardConfig,
   DraftState,
   JournalModeOption,
-  MetricDraftState,
   NavItem,
   SettingsSectionGroup,
   SettingsSectionOption,
+  ThemeMode,
   WebDavConfig,
 } from '../types/app'
 
@@ -29,30 +29,23 @@ export const defaultWebDavConfig: WebDavConfig = {
   username: '',
   password: '',
   remotePath: '/xinxiangyi',
+  autoSyncDaily: false,
 }
 
 export const aiConfigStorageKey = 'xinxiangyi-ai-config-v1'
 export const webDavConfigStorageKey = 'xinxiangyi-webdav-config-v1'
+export const webDavLastAutoSyncStorageKey = 'xinxiangyi-webdav-last-auto-sync-v1'
 export const gameEngineSettingsStorageKey = 'xinxiangyi-game-engine-settings-v1'
 export const dashboardCardsStorageKey = 'xinxiangyi-dashboard-cards-v1'
+export const themeModeStorageKey = 'xinxiangyi-theme-mode-v1'
 
 export const defaultDashboardCards: DashboardCardConfig[] = [
-  { id: 'latestMood', enabled: true },
   { id: 'streak', enabled: true },
   { id: 'todoCompletion', enabled: true },
   { id: 'monthCheckin', enabled: true },
   { id: 'pendingSync', enabled: true },
   { id: 'attachments', enabled: false },
 ]
-
-export const metricColorOptions = ['#176f66', '#3b68ae', '#7357ad', '#c68b20', '#bd4f3d', '#4d7c0f']
-
-export const emptyMetricDraft: MetricDraftState = {
-  name: '',
-  unit: '',
-  color: metricColorOptions[0],
-  targetValue: '',
-}
 
 export const navigationItems: NavItem[] = [
   { id: 'dashboard', label: '今日', note: '打卡、心情与 Todo' },
@@ -69,9 +62,10 @@ export const journalModes: JournalModeOption[] = [
 export const settingsSections: SettingsSectionOption[] = [
   { id: 'overview', label: '系统总览', note: '数据规模与引擎快照' },
   { id: 'cards', label: '统计卡片', note: '决定今日台展示哪些指标' },
+  { id: 'appearance', label: '外观偏好', note: '日间、夜间与系统外观' },
   { id: 'database', label: '本地数据库', note: 'SQLite 与持久化状态' },
   { id: 'ai', label: '大模型 API', note: '周总结代理与模型配置' },
-  { id: 'webdav', label: 'WebDAV', note: '坚果云同步预留' },
+  { id: 'webdav', label: 'WebDAV', note: '坚果云快照同步' },
   { id: 'engine', label: '游戏接口', note: '外部引擎消费快照' },
 ]
 
@@ -79,7 +73,7 @@ export const settingsSectionGroups: SettingsSectionGroup[] = [
   {
     id: 'workspace',
     label: '工作台',
-    items: settingsSections.filter((item) => ['overview', 'cards', 'engine'].includes(item.id)),
+    items: settingsSections.filter((item) => ['overview', 'cards', 'appearance', 'engine'].includes(item.id)),
   },
   {
     id: 'storage',
@@ -115,6 +109,12 @@ export const readWebDavConfig = (): WebDavConfig => {
   } catch {
     return defaultWebDavConfig
   }
+}
+
+export const readThemeMode = (): ThemeMode => {
+  const raw = window.localStorage.getItem(themeModeStorageKey)
+
+  return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : 'system'
 }
 
 export const readGameEngineSettings = (): GameEngineSettings => {

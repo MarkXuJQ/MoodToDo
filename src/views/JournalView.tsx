@@ -1,5 +1,5 @@
-import type { FormEvent } from 'react'
-import { CalendarDays, Check, Plus, Search, Square, Trash2 } from 'lucide-react'
+import { useMemo, useState, type FormEvent } from 'react'
+import { Plus, Trash2, X } from 'lucide-react'
 
 import { Metric } from '../components/ui/stat-primitives'
 import type { JournalEntry, TodoItem } from '../lib/db'
@@ -12,22 +12,80 @@ type BoardColumn = {
   items: TodoItem[]
 }
 
+type YearHeatmapCell = {
+  dateKey: string
+  inYear: boolean
+  entry?: JournalEntry
+  todos: TodoItem[]
+}
+
+const toDateKey = (date: Date) => {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+
+const addDays = (date: Date, days: number) => {
+  const next = new Date(date)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
+const getMondayIndex = (date: Date) => (date.getDay() + 6) % 7
+
+const buildYearHeatmapCells = (year: string, entries: JournalEntry[], todos: TodoItem[]): YearHeatmapCell[] => {
+  const entryMap = new Map(entries.map((entry) => [entry.dateKey, entry]))
+  const todoMap = new Map<string, TodoItem[]>()
+
+  for (const todo of todos) {
+    todoMap.set(todo.dateKey, [...(todoMap.get(todo.dateKey) ?? []), todo])
+  }
+
+  const start = new Date(Number(year), 0, 1)
+  const end = new Date(Number(year), 11, 31)
+  let cursor = addDays(start, -getMondayIndex(start))
+  const endPadding = 6 - getMondayIndex(end)
+  const finalDay = addDays(end, endPadding)
+  const cells: YearHeatmapCell[] = []
+
+  while (cursor <= finalDay) {
+    const dateKey = toDateKey(cursor)
+    cells.push({
+      dateKey,
+      inYear: dateKey.startsWith(year),
+      entry: entryMap.get(dateKey),
+      todos: todoMap.get(dateKey) ?? [],
+    })
+    cursor = addDays(cursor, 1)
+  }
+
+  return cells
+}
+
+const getHeatLevel = (entry?: JournalEntry) => {
+  if (!entry) return 'empty'
+  if (entry.mood.score < 35) return 'low'
+  if (entry.mood.score < 50) return 'stress'
+  if (entry.mood.score < 66) return 'steady'
+  if (entry.mood.score < 82) return 'good'
+
+  return 'bright'
+}
+
+const average = (values: number[]) => {
+  if (values.length === 0) return 0
+
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+}
+
 type JournalViewProps = {
   journalMode: JournalMode
   journalModes: JournalModeOption[]
-  journalSearch: string
-  journalFilterMonth: string
-  journalFilterMood: string
-  journalFilterTag: string
-  journalMonthOptions: string[]
-  journalMoodOptions: string[]
-  journalTagOptions: string[]
-  selectedEntryIds: string[]
   entries: JournalEntry[]
-  filteredEntries: JournalEntry[]
   todos: TodoItem[]
   filteredBoardTodos: TodoItem[]
-  latestEntry?: JournalEntry
   currentStreak: number
   pendingChangeCount: number
   boardColumns: BoardColumn[]
@@ -36,16 +94,8 @@ type JournalViewProps = {
   selectedDate: string
   todoTitle: string
   onJournalModeChange: (mode: JournalMode) => void
-  onJournalSearchChange: (value: string) => void
-  onJournalFilterMonthChange: (value: string) => void
-  onJournalFilterMoodChange: (value: string) => void
-  onJournalFilterTagChange: (value: string) => void
   onFocusDate: (dateKey: string, nextView: ActiveView) => void
-  onToggleEntrySelection: (entryId: string) => void
-  onSelectAllFilteredEntries: () => void
-  onClearSelectedEntries: () => void
   onDeleteEntry: (entry: JournalEntry) => void
-  onDeleteSelectedEntries: () => void
   onTodoTitleChange: (value: string) => void
   onAddTodo: (event: FormEvent<HTMLFormElement>) => void
   onToggleTodo: (todo: TodoItem) => void
@@ -55,19 +105,9 @@ type JournalViewProps = {
 export function JournalView({
   journalMode,
   journalModes,
-  journalSearch,
-  journalFilterMonth,
-  journalFilterMood,
-  journalFilterTag,
-  journalMonthOptions,
-  journalMoodOptions,
-  journalTagOptions,
-  selectedEntryIds,
   entries,
-  filteredEntries,
   todos,
   filteredBoardTodos,
-  latestEntry,
   currentStreak,
   pendingChangeCount,
   boardColumns,
@@ -76,21 +116,60 @@ export function JournalView({
   selectedDate,
   todoTitle,
   onJournalModeChange,
-  onJournalSearchChange,
-  onJournalFilterMonthChange,
-  onJournalFilterMoodChange,
-  onJournalFilterTagChange,
   onFocusDate,
-  onToggleEntrySelection,
-  onSelectAllFilteredEntries,
-  onClearSelectedEntries,
   onDeleteEntry,
-  onDeleteSelectedEntries,
   onTodoTitleChange,
   onAddTodo,
   onToggleTodo,
   onDeleteTodo,
 }: JournalViewProps) {
+  const [isTodoDialogOpen, setIsTodoDialogOpen] = useState(false)
+  const [dialogTodoDate, setDialogTodoDate] = useState(selectedDate)
+  const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear().toString())
+  const yearOptions = useMemo(
+    () =>
+      [...new Set(entries.map((entry) => entry.dateKey.slice(0, 4)))]
+        .sort((left, right) => right.localeCompare(left)),
+    [entries],
+  )
+  const activeYear = yearOptions.includes(selectedYear) ? selectedYear : (yearOptions[0] ?? selectedYear)
+  const yearEntries = useMemo(
+    () => entries.filter((entry) => entry.dateKey.startsWith(activeYear)),
+    [activeYear, entries],
+  )
+  const yearTodos = useMemo(
+    () => todos.filter((todo) => todo.dateKey.startsWith(activeYear)),
+    [activeYear, todos],
+  )
+  const yearHeatmapCells = useMemo(
+    () => buildYearHeatmapCells(activeYear, entries, todos),
+    [activeYear, entries, todos],
+  )
+  const yearAverageMood = average(yearEntries.map((entry) => entry.mood.score))
+  const yearCompletionRate =
+    yearTodos.length === 0 ? 0 : Math.round((yearTodos.filter((todo) => todo.done).length / yearTodos.length) * 100)
+
+  const openTodoDialog = () => {
+    setDialogTodoDate(selectedDate)
+    setIsTodoDialogOpen(true)
+  }
+
+  const closeTodoDialog = () => {
+    setIsTodoDialogOpen(false)
+  }
+
+  const handleDialogDateChange = (dateKey: string) => {
+    setDialogTodoDate(dateKey)
+    onFocusDate(dateKey, 'journal')
+  }
+
+  const handleDialogTodoSubmit = (event: FormEvent<HTMLFormElement>) => {
+    onAddTodo(event)
+    if (todoTitle.trim()) {
+      closeTodoDialog()
+    }
+  }
+
   return (
     <section className="py-3 sm:py-5" aria-labelledby="journal-browser-title">
       <div className="mb-3 flex flex-col gap-3 md:mb-4 md:flex-row md:items-center md:justify-between">
@@ -99,7 +178,7 @@ export function JournalView({
           <h2 className="section-title" id="journal-browser-title">
             日记浏览
           </h2>
-          <p className="mt-1 hidden text-sm font-bold text-ink-400 md:block">支持筛选、批量管理和回到任意一天继续编辑。</p>
+          <p className="mt-1 hidden text-sm font-bold text-ink-400 md:block">用年度热力图回看长期节奏，并回到任意一天继续编辑。</p>
         </div>
 
         <div className="journal-control-bar">
@@ -115,16 +194,6 @@ export function JournalView({
               </button>
             ))}
           </div>
-
-          <label className="flex min-h-11 w-full items-center gap-2 rounded-lg border border-field-200 bg-white px-3 md:w-[min(440px,100%)]">
-            <Search size={18} aria-hidden="true" />
-            <input
-              className="min-h-10 flex-1 border-0 bg-transparent p-0 outline-none"
-              value={journalSearch}
-              onChange={(event) => onJournalSearchChange(event.target.value)}
-              placeholder={journalMode === 'entries' ? '搜索标题、正文、心情、天气、标签' : '搜索 Todo、日期、关联日记'}
-            />
-          </label>
         </div>
       </div>
 
@@ -132,10 +201,10 @@ export function JournalView({
         {journalMode === 'entries' ? (
           <>
             <Metric label="日记总数" value={`${entries.length}`} />
-            <Metric label="搜索结果" value={`${filteredEntries.length}`} />
-            <Metric label="最近心象" value={`${latestEntry?.mood.score ?? 0}`} />
+            <Metric label={`${activeYear} 记录`} value={`${yearEntries.length}`} />
+            <Metric label="年度均分" value={`${yearAverageMood || 0}`} />
             <Metric label="连续打卡" value={`${currentStreak} 天`} />
-            <Metric label="待同步" value={`${pendingChangeCount}`} />
+            <Metric label="未同步内容" value={`${pendingChangeCount}`} />
           </>
         ) : (
           <>
@@ -153,69 +222,82 @@ export function JournalView({
 
       {journalMode === 'entries' ? (
         <>
-          <div className="journal-filter-bar">
-            <select className="select-input" value={journalFilterMonth} onChange={(event) => onJournalFilterMonthChange(event.target.value)}>
-              <option value="all">全部月份</option>
-              {journalMonthOptions.map((monthKey) => (
-                <option value={monthKey} key={monthKey}>
-                  {monthKey}
-                </option>
-              ))}
-            </select>
-            <select className="select-input" value={journalFilterMood} onChange={(event) => onJournalFilterMoodChange(event.target.value)}>
-              <option value="all">全部心象等级</option>
-              {journalMoodOptions.map((level) => (
-                <option value={level} key={level}>
-                  {level}
-                </option>
-              ))}
-            </select>
-            <select className="select-input" value={journalFilterTag} onChange={(event) => onJournalFilterTagChange(event.target.value)}>
-              <option value="all">全部标签</option>
-              {journalTagOptions.map((tag) => (
-                <option value={tag} key={tag}>
-                  #{tag}
-                </option>
-              ))}
-            </select>
-          </div>
+          <section className="section" aria-labelledby="year-heatmap-title">
+            <div className="section-head">
+              <div>
+                <p className="eyebrow">Year Heatmap</p>
+                <h3 className="section-title" id="year-heatmap-title">
+                  年度心象
+                </h3>
+              </div>
+              <label className="year-select">
+                <span>年份</span>
+                <select value={activeYear} onChange={(event) => setSelectedYear(event.target.value)}>
+                  {yearOptions.length > 0 ? (
+                    yearOptions.map((year) => (
+                      <option value={year} key={year}>
+                        {year}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={activeYear}>{activeYear}</option>
+                  )}
+                </select>
+              </label>
+            </div>
 
-          <div className="journal-batchbar">
-            <div className="journal-batch-copy">
-              <strong>{selectedEntryIds.length} 条已选</strong>
-              <span>{filteredEntries.length} 条当前结果</span>
+            <div className="year-heatmap-shell">
+              <div className="year-heatmap-weekdays" aria-hidden="true">
+                {['一', '', '三', '', '五', '', '日'].map((weekday, index) => (
+                  <span key={`${weekday}-${index}`}>{weekday}</span>
+                ))}
+              </div>
+              <div className="year-heatmap-grid">
+                {yearHeatmapCells.map((cell) => {
+                  const doneCount = cell.todos.filter((todo) => todo.done).length
+                  const label = cell.entry
+                    ? `${cell.dateKey}，心象 ${cell.entry.mood.score}，Todo ${doneCount}/${cell.todos.length}`
+                    : `${cell.dateKey}，未打卡`
+
+                  return (
+                    <button
+                      className={`year-heatmap-cell heat-${getHeatLevel(cell.entry)} ${cell.inYear ? '' : 'year-heatmap-cell-muted'}`}
+                      type="button"
+                      key={cell.dateKey}
+                      aria-label={label}
+                      title={label}
+                      onClick={() => onFocusDate(cell.dateKey, 'dashboard')}
+                    />
+                  )
+                })}
+              </div>
             </div>
-            <div className="journal-batch-actions">
-              <button className="button-secondary min-h-9 px-3" type="button" onClick={onSelectAllFilteredEntries}>
-                全选当前结果
-              </button>
-              <button className="button-secondary min-h-9 px-3" type="button" onClick={onClearSelectedEntries} disabled={selectedEntryIds.length === 0}>
-                清空选择
-              </button>
-              <button className="button-secondary min-h-9 px-3 text-coral-500" type="button" onClick={onDeleteSelectedEntries} disabled={selectedEntryIds.length === 0}>
-                <Trash2 size={16} aria-hidden="true" />
-                删除已选
-              </button>
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-2">
+                <span className="pill min-h-8 text-xs">{yearEntries.length} 次打卡</span>
+                <span className="pill min-h-8 text-xs">均分 {yearAverageMood || 0}</span>
+                <span className="pill min-h-8 text-xs">事项完成 {yearCompletionRate}%</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs font-black text-ink-400" aria-label="年度热力图图例">
+                <span>低</span>
+                <i className="size-4 rounded border border-field-200 heat-empty" />
+                <i className="size-4 rounded border border-field-200 heat-low" />
+                <i className="size-4 rounded border border-field-200 heat-steady" />
+                <i className="size-4 rounded border border-field-200 heat-good" />
+                <i className="size-4 rounded border border-field-200 heat-bright" />
+                <span>高</span>
+              </div>
             </div>
-          </div>
+          </section>
 
           <div className="journal-entry-list">
-            {filteredEntries.map((entry) => {
+            {yearEntries.map((entry) => {
               const entryTodos = todos.filter((todo) => todo.dateKey === entry.dateKey)
               const entryAttachments = attachmentCountByEntryId.get(entry.id) ?? 0
-              const isSelected = selectedEntryIds.includes(entry.id)
 
               return (
-                <article className={`journal-entry-row ${isSelected ? 'journal-entry-row-active' : ''}`} key={entry.id}>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label={isSelected ? `取消选择 ${entry.title}` : `选择 ${entry.title}`}
-                    onClick={() => onToggleEntrySelection(entry.id)}
-                  >
-                    {isSelected ? <Check size={18} aria-hidden="true" /> : <Square size={18} aria-hidden="true" />}
-                  </button>
-
+                <article className="journal-entry-row" key={entry.id}>
                   <button className="journal-entry-main" type="button" onClick={() => onFocusDate(entry.dateKey, 'dashboard')}>
                     <div className="journal-entry-date">
                       <span>{entry.dateKey}</span>
@@ -257,33 +339,15 @@ export function JournalView({
             })}
           </div>
 
-          {filteredEntries.length === 0 && <p className="empty-state">当前筛选条件下还没有匹配的日记。</p>}
+          {yearEntries.length === 0 && <p className="empty-state">这一年还没有日记记录。</p>}
         </>
       ) : (
         <>
-          <section className="board-toolbar" aria-label="Todo 看板快捷录入">
-            <label className="field-line">
-              <CalendarDays size={18} aria-hidden="true" />
-              <input
-                className="min-h-10 border-0 bg-transparent p-0 font-black text-ink-950 outline-none"
-                type="date"
-                value={selectedDate}
-                onChange={(event) => onFocusDate(event.target.value, 'journal')}
-              />
-            </label>
-
-            <form className="board-capture" onSubmit={onAddTodo}>
-              <input
-                className="text-input"
-                value={todoTitle}
-                onChange={(event) => onTodoTitleChange(event.target.value)}
-                placeholder="给这个日期快速记下一条 Todo"
-              />
-              <button className="button-primary" type="submit">
-                <Plus size={18} aria-hidden="true" />
-                添加
-              </button>
-            </form>
+          <section className="board-toolbar" aria-label="Todo 看板操作">
+            <button className="button-primary w-fit" type="button" onClick={openTodoDialog}>
+              <Plus size={18} aria-hidden="true" />
+              添加
+            </button>
           </section>
 
           <div className="board-grid">
@@ -321,6 +385,7 @@ export function JournalView({
                         </p>
 
                         <div className="flex flex-wrap gap-2">
+                          <span className="pill min-h-7 text-xs">归属 {todo.dateKey}</span>
                           <span className="pill min-h-7 text-xs">{attachmentCount} 图</span>
                           <span className="pill min-h-7 text-xs">{todo.syncState === 'pending' ? '待同步' : '已同步'}</span>
                           {entry?.tags.slice(0, 3).map((tag) => (
@@ -347,6 +412,51 @@ export function JournalView({
               </section>
             ))}
           </div>
+
+          {isTodoDialogOpen && (
+            <div className="dialog-backdrop" role="presentation">
+              <form className="todo-dialog" aria-labelledby="todo-dialog-title" onSubmit={handleDialogTodoSubmit}>
+                <div className="section-head mb-3">
+                  <div>
+                    <p className="eyebrow">Todo</p>
+                    <h3 className="section-title text-lg" id="todo-dialog-title">
+                      添加事项
+                    </h3>
+                  </div>
+                  <button className="icon-button" type="button" aria-label="关闭添加 Todo" onClick={closeTodoDialog}>
+                    <X size={18} aria-hidden="true" />
+                  </button>
+                </div>
+
+                <div className="grid gap-3">
+                  <label className="input-label">
+                    <span>日期</span>
+                    <input className="text-input" type="date" value={dialogTodoDate} onChange={(event) => handleDialogDateChange(event.target.value)} />
+                  </label>
+                  <label className="input-label">
+                    <span>事项</span>
+                    <input
+                      className="text-input"
+                      value={todoTitle}
+                      onChange={(event) => onTodoTitleChange(event.target.value)}
+                      placeholder="写下要推进的一件事"
+                      autoFocus
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 flex justify-end gap-2">
+                  <button className="button-secondary" type="button" onClick={closeTodoDialog}>
+                    取消
+                  </button>
+                  <button className="button-primary" type="submit">
+                    <Plus size={18} aria-hidden="true" />
+                    添加
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
         </>
       )}
     </section>

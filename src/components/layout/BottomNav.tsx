@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, Settings2, TrendingUp } from 'lucide-react'
+import { BarChart3, BookOpen, TrendingUp } from 'lucide-react'
 
 import type { ActiveView, NavItem } from '../../types/app'
 
@@ -9,26 +9,31 @@ type BottomNavProps = {
 }
 
 export function BottomNav({ activeView, navigationItems, onNavigate }: BottomNavProps) {
+  const primaryItems = navigationItems.filter((item) => item.id !== 'settings')
+
   return (
     <nav className="bottom-nav" aria-label="底部主导航">
-      {navigationItems.map((item) => {
+      {primaryItems.map((item) => {
+        const isActive = activeView === item.id
         const icon =
           item.id === 'dashboard' ? (
             <BarChart3 size={20} aria-hidden="true" />
           ) : item.id === 'journal' ? (
             <BookOpen size={20} aria-hidden="true" />
-          ) : item.id === 'summary' ? (
-            <TrendingUp size={20} aria-hidden="true" />
           ) : (
-            <Settings2 size={20} aria-hidden="true" />
+            <TrendingUp size={20} aria-hidden="true" />
           )
 
         return (
           <button
-            className={`bottom-nav-item ${activeView === item.id ? 'bottom-nav-item-active' : ''}`}
+            className={`bottom-nav-item ${isActive ? 'bottom-nav-item-active' : ''}`}
+            style={{
+              backgroundColor: isActive ? 'var(--color-xin-100)' : 'transparent',
+              color: isActive ? 'var(--color-xin-800)' : 'var(--color-ink-400)',
+            }}
             type="button"
             key={item.id}
-            aria-current={activeView === item.id ? 'page' : undefined}
+            aria-current={isActive ? 'page' : undefined}
             onClick={() => onNavigate(item.id)}
           >
             {icon}
