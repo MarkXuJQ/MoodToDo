@@ -33,20 +33,9 @@ try {
 
   await page.waitForFunction(
     async (expectedTitle) => {
-      const request = indexedDB.open('xinxiangyi_local')
-      const db = await new Promise((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result)
-        request.onerror = () => reject(request.error)
-      })
-      const tx = db.transaction(['entries'], 'readonly')
-      const allRequest = tx.objectStore('entries').getAll()
-      const entries = await new Promise((resolve, reject) => {
-        allRequest.onsuccess = () => resolve(allRequest.result)
-        allRequest.onerror = () => reject(allRequest.error)
-      })
-      db.close()
+      const state = await fetch('/api/state').then((response) => response.json())
 
-      return entries.some((entry) => entry.title === expectedTitle)
+      return state.entries.some((entry) => entry.title === expectedTitle)
     },
     title,
     { timeout: 5000 },
@@ -59,24 +48,13 @@ try {
   await page.getByRole('button', { name: '标记未完成' }).waitFor({ state: 'visible', timeout: 5000 })
 
   const todoDone = await page.evaluate(async (expectedTodo) => {
-    const request = indexedDB.open('xinxiangyi_local')
-    const db = await new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
-    })
-    const tx = db.transaction(['todos'], 'readonly')
-    const allRequest = tx.objectStore('todos').getAll()
-    const todos = await new Promise((resolve, reject) => {
-      allRequest.onsuccess = () => resolve(allRequest.result)
-      allRequest.onerror = () => reject(allRequest.error)
-    })
-    db.close()
+    const state = await fetch('/api/state').then((response) => response.json())
 
-    return todos.some((item) => item.title === expectedTodo && item.done)
+    return state.todos.some((item) => item.title === expectedTodo && item.done)
   }, todo)
 
   if (!todoDone) {
-    throw new Error('Todo was not marked done in IndexedDB.')
+    throw new Error('Todo was not marked done in SQLite.')
   }
 
   if (messages.length > 0) {

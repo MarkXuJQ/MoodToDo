@@ -6,7 +6,7 @@
 
 ## 当前能力
 
-- 在 localhost 直接运行，数据默认落到浏览器本地 IndexedDB：`xinxiangyi_local`。
+- 在 localhost 直接运行，主数据落到本地 SQLite 文件：`data/xinxiangyi.sqlite`。
 - 提供四个主界面框架：Dashboard、日记浏览、总结、总览。
 - 记录每日打卡日记、心情描述、标签和本地图片附件。
 - 添加、完成、删除当日 Todo。
@@ -15,8 +15,8 @@
 - 提供总结页面：用月历热力图观察心象分、打卡状态和事项完成情况。
 - 支持一周回顾：选择任意一周，查看心象均值、打卡天数、事项完成率和每日状态。
 - 支持 OpenAI-compatible 大模型 API 生成周总结，API Key 只保存在本机浏览器 `localStorage`。
-- 总览页提供本地数据库表计数和 WebDAV/坚果云同步配置草案。
-- 使用 IndexedDB 做本地持久化，图片以 Blob 存入 `attachments` 表。
+- 总览页提供本地 SQLite 文件状态、表计数和 WebDAV/坚果云同步配置草案。
+- 使用 SQLite 做本地持久化，图片先以 BLOB 存入 `attachments` 表。
 - 使用 `changes` 变更日志记录本地写入，为后续 WebDAV 增量同步预留结构。
 - 统计记录按 `月份 -> 周 -> 日期` 展示，不把每天记录铺平成单层列表。
 
@@ -41,11 +41,11 @@
 
 ## 数据结构
 
-IndexedDB 数据库名：`xinxiangyi_local`
+SQLite 数据库文件：`data/xinxiangyi.sqlite`
 
 - `entries`：每日记录，包含日期、正文、心情文本、心象分析结果和标签。
 - `todos`：每日事项，包含完成状态和完成时间。
-- `attachments`：本地附件，包含图片 Blob、文件名、类型、大小和关联日记。
+- `attachments`：本地附件，包含图片 BLOB、文件名、类型、大小和关联日记。
 - `changes`：同步队列，包含实体类型、实体 ID、操作、设备 ID、时间和快照。
 - `weeklySummaries`：周总结缓存，包含周起始日期、模型、服务商、总结正文和更新时间。
 
@@ -64,7 +64,7 @@ IndexedDB 数据库名：`xinxiangyi_local`
 
 - Endpoint 示例：`https://api.openai.com/v1/chat/completions`
 - Model 示例：`gpt-4o-mini`
-- API Key：只保存在当前浏览器本地，不写入 IndexedDB 同步队列。
+- API Key：只保存在当前浏览器本地，不写入 SQLite 同步队列。
 
 生成周总结时，应用会把选中一周的日期、心象分、象限、心情描述、日记正文、标签和 Todo 完成状态发送给配置的接口。生成结果会存入 `weeklySummaries`，之后可以继续手动修改和保存。
 
@@ -89,6 +89,12 @@ IndexedDB 数据库名：`xinxiangyi_local`
 ```bash
 npm install
 npm run dev
+```
+
+`npm run dev` 会同时启动本地 SQLite API 和 Vite 前端。默认数据库文件位于：
+
+```text
+data/xinxiangyi.sqlite
 ```
 
 局域网调试 Android：

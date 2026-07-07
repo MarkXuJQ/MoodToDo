@@ -1,73 +1,311 @@
-:root {
-  --surface: #f6f7f4;
-  --panel: #ffffff;
-  --panel-alt: #f0f4f1;
-  --field: #fbfcfa;
-  --text: #24302d;
-  --text-strong: #111816;
-  --muted: #68736f;
-  --muted-strong: #48534f;
-  --line: #d9e0dc;
-  --line-strong: #bfc9c4;
-  --accent: #1f766f;
-  --accent-soft: #b9ddd7;
-  --focus: #0d9488;
-  --teal: #168a7a;
-  --blue: #3867b7;
-  --amber: #c88915;
-  --amber-strong: #9b6200;
-  --coral: #c34a37;
-  --violet: #7753b8;
-  --font-sans:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+@import "tailwindcss";
 
-  color: var(--text);
-  background: var(--surface);
-  font: 16px/1.45 var(--font-sans);
-  letter-spacing: 0;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@theme {
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --color-ink-950: #111816;
+  --color-ink-800: #2a3632;
+  --color-ink-600: #56635f;
+  --color-ink-400: #7f8c87;
+  --color-field-50: #f7faf7;
+  --color-field-100: #eef4f0;
+  --color-field-200: #dbe7e1;
+  --color-field-300: #c3d2cb;
+  --color-xin-700: #176f66;
+  --color-xin-800: #0f5d56;
+  --color-xin-100: #dcefeb;
+  --color-sun-500: #c68b20;
+  --color-coral-500: #bd4f3d;
+  --color-river-500: #3b68ae;
+  --color-violet-500: #7357ad;
 }
 
-* {
-  box-sizing: border-box;
+@layer base {
+  :root {
+    color: var(--color-ink-800);
+    background: var(--color-field-100);
+    font: 16px/1.45 var(--font-sans);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    background: var(--color-field-100);
+  }
+
+  body {
+    min-width: 320px;
+    margin: 0;
+  }
+
+  button,
+  input,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  ::selection {
+    background: var(--color-xin-100);
+  }
 }
 
-html {
-  background: var(--surface);
-}
+@layer components {
+  .shell {
+    @apply min-h-svh bg-field-100 text-ink-800;
+  }
 
-body {
-  min-width: 320px;
-  margin: 0;
-}
+  .page {
+    @apply mx-auto w-[min(1240px,calc(100%-24px))] pb-10 md:w-[min(1240px,calc(100%-48px))];
+  }
 
-button,
-input,
-textarea {
-  font: inherit;
-}
+  .topbar {
+    @apply flex flex-col gap-4 py-6 md:flex-row md:items-end md:justify-between md:py-8;
+  }
 
-button {
-  -webkit-tap-highlight-color: transparent;
-}
+  .eyebrow {
+    @apply m-0 text-xs font-black uppercase tracking-normal text-xin-700;
+  }
 
-h1 {
-  color: var(--text-strong);
-  font-size: 1.9rem;
-  line-height: 1.12;
-  letter-spacing: 0;
-}
+  .app-title {
+    @apply m-0 text-4xl font-black leading-none tracking-normal text-ink-950;
+  }
 
-h2 {
-  color: var(--text-strong);
-  font-size: 1.12rem;
-  line-height: 1.2;
-  letter-spacing: 0;
-}
+  .status-pills {
+    @apply flex flex-wrap gap-2;
+  }
 
-::selection {
-  background: var(--accent-soft);
+  .pill {
+    @apply inline-flex min-h-9 items-center gap-2 rounded-full border border-field-200 bg-white px-3 text-sm font-bold text-ink-600;
+  }
+
+  .tabs {
+    @apply grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-field-200 bg-field-200 md:grid-cols-5;
+  }
+
+  .tab {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 bg-white px-3 text-sm font-black text-ink-600 transition-colors hover:bg-field-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-xin-100;
+  }
+
+  .tab-active {
+    @apply bg-xin-700 text-white hover:bg-xin-700;
+  }
+
+  .toolbar {
+    @apply mt-5 grid gap-3 md:grid-cols-[minmax(240px,1.3fr)_repeat(4,minmax(0,1fr))];
+  }
+
+  .field-line,
+  .metric-line {
+    @apply min-h-16 rounded-lg border border-field-200 bg-white px-4;
+  }
+
+  .field-line {
+    @apply flex items-center gap-3;
+  }
+
+  .metric-line {
+    @apply flex flex-col justify-center;
+  }
+
+  .metric-label {
+    @apply text-xs font-bold text-ink-400;
+  }
+
+  .metric-value {
+    @apply text-2xl font-black leading-none text-ink-950;
+  }
+
+  .workspace-grid {
+    @apply mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)];
+  }
+
+  .side-stack {
+    @apply grid gap-5;
+  }
+
+  .section {
+    @apply rounded-lg border border-field-200 bg-white p-5;
+  }
+
+  .section-flat {
+    @apply border-t border-field-200 py-5;
+  }
+
+  .section-head {
+    @apply mb-4 flex items-start justify-between gap-4;
+  }
+
+  .section-title {
+    @apply m-0 text-xl font-black leading-tight text-ink-950;
+  }
+
+  .section-icon {
+    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-field-200 bg-field-50 text-xin-700;
+  }
+
+  .input-label {
+    @apply grid gap-2 text-sm font-bold text-ink-600;
+  }
+
+  .text-input,
+  .text-area {
+    @apply w-full rounded-lg border border-field-200 bg-field-50 px-3 text-ink-950 outline-none transition-colors focus:border-xin-700 focus:bg-white focus:ring-4 focus:ring-xin-100;
+  }
+
+  .text-input {
+    @apply min-h-11;
+  }
+
+  .text-area {
+    @apply min-h-28 py-3;
+  }
+
+  .button-primary {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-xin-700 bg-xin-700 px-4 text-sm font-black text-white transition-colors hover:bg-xin-800 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .button-secondary {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-field-200 bg-field-50 px-4 text-sm font-black text-ink-800 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .icon-button {
+    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-field-200 bg-white text-ink-600 transition-colors hover:border-field-300 hover:bg-field-50;
+  }
+
+  .icon-button-solid {
+    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-xin-700 bg-xin-700 text-white transition-colors hover:bg-xin-800;
+  }
+
+  .todo-row {
+    @apply grid min-h-12 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-field-200 py-2 last:border-b-0;
+  }
+
+  .todo-done {
+    @apply text-ink-400 line-through;
+  }
+
+  .empty-state {
+    @apply rounded-lg border border-dashed border-field-300 bg-field-50 p-4 text-sm font-bold text-ink-400;
+  }
+
+  .score-ring {
+    @apply grid size-28 place-items-center rounded-full border-[10px] border-xin-100 bg-white;
+  }
+
+  .progress-track {
+    @apply block h-2.5 overflow-hidden rounded-full bg-field-200;
+  }
+
+  .progress-fill {
+    width: var(--value);
+    @apply block h-full rounded-full bg-xin-700;
+  }
+
+  .progress-fill.clarity {
+    @apply bg-xin-700;
+  }
+
+  .progress-fill.load {
+    @apply bg-coral-500;
+  }
+
+  .progress-fill.energy {
+    @apply bg-sun-500;
+  }
+
+  .progress-fill.recovery {
+    @apply bg-river-500;
+  }
+
+  .progress-fill.reflection {
+    @apply bg-violet-500;
+  }
+
+  .table-grid {
+    @apply grid grid-cols-1 overflow-hidden rounded-lg border border-field-200 md:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)];
+  }
+
+  .table-key {
+    @apply min-w-0 bg-field-50 px-3 pb-1 pt-3 text-sm font-black text-ink-600 md:min-h-11 md:border-b md:border-field-200 md:py-3;
+  }
+
+  .table-value {
+    overflow-wrap: anywhere;
+    @apply min-w-0 border-b border-field-200 px-3 pb-3 text-sm font-black text-ink-950 md:min-h-11 md:py-3 md:text-right;
+  }
+
+  .note {
+    @apply border-l-4 border-river-500 bg-field-50 px-3 py-3 text-sm font-bold text-ink-600;
+  }
+
+  .heat-empty {
+    @apply bg-field-50;
+  }
+
+  .heat-low {
+    @apply bg-[#f4d6d0];
+  }
+
+  .heat-stress {
+    @apply bg-[#f2dfb7];
+  }
+
+  .heat-steady {
+    @apply bg-[#d8e3f2];
+  }
+
+  .heat-good {
+    @apply bg-[#cbe6df];
+  }
+
+  .heat-bright {
+    @apply bg-[#ded5ef];
+  }
+
+  .score-低谷 {
+    @apply text-coral-500;
+  }
+
+  .score-承压 {
+    @apply text-sun-500;
+  }
+
+  .score-平稳 {
+    @apply text-river-500;
+  }
+
+  .score-舒展 {
+    @apply text-xin-700;
+  }
+
+  .score-高亮 {
+    @apply text-violet-500;
+  }
+
+  .density-compact .topbar {
+    @apply py-5;
+  }
+
+  .density-compact .toolbar,
+  .density-compact .workspace-grid,
+  .density-compact .side-stack {
+    @apply gap-3;
+  }
+
+  .density-compact .section {
+    @apply p-4;
+  }
+
+  .density-compact .text-area {
+    @apply min-h-24;
+  }
 }

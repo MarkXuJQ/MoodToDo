@@ -1,5 +1,7 @@
-import Dexie, { type Table } from 'dexie'
 import { analyzeMood, type MoodAnalysis } from './mood'
+
+export const localDatabaseName = 'xinxiangyi.sqlite'
+export const localDatabaseDriver = 'SQLite'
 
 export type SyncState = 'pending' | 'synced' | 'conflict'
 
@@ -71,47 +73,45 @@ export type WeeklySummary = {
   updatedAt: string
 }
 
-class LocalTodoDatabase extends Dexie {
-  entries!: Table<JournalEntry, string>
-  todos!: Table<TodoItem, string>
-  attachments!: Table<AttachmentRecord, string>
-  changes!: Table<ChangeLogRecord, number>
-  weeklySummaries!: Table<WeeklySummary, string>
-
-  constructor() {
-    super('xinxiangyi_local')
-    this.version(1).stores({
-      entries: 'id, &dateKey, updatedAt, syncState, mood.score',
-      todos: 'id, dateKey, done, updatedAt, syncState',
-      attachments: 'id, entryId, dateKey, updatedAt, syncState',
-      changes: '++seq, entity, entityId, changedAt, syncState',
-    })
-    this.version(2).stores({
-      entries: 'id, &dateKey, updatedAt, syncState, mood.score',
-      todos: 'id, dateKey, done, updatedAt, syncState',
-      attachments: 'id, entryId, dateKey, updatedAt, syncState',
-      changes: '++seq, entity, entityId, changedAt, syncState',
-      weeklySummaries: '&weekKey, updatedAt, provider, model',
-    })
-    this.version(3).stores({
-      entries: 'id, &dateKey, updatedAt, syncState, mood.score',
-      todos: 'id, dateKey, done, createdAt, updatedAt, syncState',
-      attachments: 'id, entryId, dateKey, createdAt, updatedAt, syncState',
-      changes: '++seq, entity, entityId, changedAt, syncState',
-      weeklySummaries: '&weekKey, updatedAt, provider, model',
-    })
-  }
+export type LocalDatabaseMeta = {
+  driver: string
+  databaseName: string
+  databasePath: string
+  apiBaseUrl: string
+  schemaVersion: number
 }
 
-export const db = new LocalTodoDatabase()
+export type LocalState = {
+  entries: JournalEntry[]
+  todos: TodoItem[]
+  attachments: AttachmentRecord[]
+  changes: ChangeLogRecord[]
+  weeklySummaries: WeeklySummary[]
+  meta: LocalDatabaseMeta
+}
+
+type AttachmentPayload = Omit<AttachmentRecord, 'blob'> & {
+  dataBase64: string
+}
+
+type LocalStatePayload = Omit<LocalState, 'attachments'> & {
+  attachments: AttachmentPayload[]
+}
+
+type PendingFilePayload = {
+  name: string
+  type: string
+  size: number
+  dataBase64: string
+}
+
+const apiBaseUrl = import.meta.env.VITE_LOCAL_API_URL ?? ''
 
 const createId = (prefix: string) => {
   const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
   return `${prefix}_${random}`
 }
-
-const nowIso = () => new Date().toISOString()
 
 const getDeviceId = () => {
   const key = 'xinxiangyi-device-id'
@@ -126,126 +126,119 @@ const getDeviceId = () => {
   return id
 }
 
-const appendChange = async (
-  entity: ChangeEntity,
-  entityId: string,
-  operation: ChangeOperation,
-  payload: unknown,
-) => {
-  await db.changes.add({
-    entity,
-    entityId,
-    operation,
-    changedAt: nowIso(),
-    deviceId: getDeviceId(),
-    syncState: 'pending',
-    payload,
+const apiFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Xinxiangyi-Device-Id': getDeviceId(),
+      ...init?.headers,
+    },
   })
+  const payload = (await response.json().catch(() => ({}))) as { error?: string }
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? `本地 SQLite API 请求失败：${response.status}`)
+  }
+
+  return payload as T
+}
+
+const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+  const bytes = new Uint8Array(buffer)
+  const chunkSize = 0x8000
+  const chunks: string[] = []
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize)
+    chunks.push(String.fromCharCode(...chunk))
+  }
+
+  return globalThis.btoa(chunks.join(''))
+}
+
+const base64ToBlob = (dataBase64: string, type: string) => {
+  const binary = globalThis.atob(dataBase64)
+  const chunkSize = 0x8000
+  const chunks: ArrayBuffer[] = []
+
+  for (let index = 0; index < binary.length; index += chunkSize) {
+    const slice = binary.slice(index, index + chunkSize)
+    const bytes = new Uint8Array(slice.length)
+
+    for (let byteIndex = 0; byteIndex < slice.length; byteIndex += 1) {
+      bytes[byteIndex] = slice.charCodeAt(byteIndex)
+    }
+
+    chunks.push(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+  }
+
+  return new Blob(chunks, { type })
+}
+
+const fileToPayload = async (file: File): Promise<PendingFilePayload> => ({
+  name: file.name,
+  type: file.type,
+  size: file.size,
+  dataBase64: arrayBufferToBase64(await file.arrayBuffer()),
+})
+
+const mapAttachment = (attachment: AttachmentPayload): AttachmentRecord => ({
+  ...attachment,
+  blob: base64ToBlob(attachment.dataBase64, attachment.type),
+})
+
+export const getLocalState = async (): Promise<LocalState> => {
+  const payload = await apiFetch<LocalStatePayload>('/api/state')
+
+  return {
+    ...payload,
+    attachments: payload.attachments.map(mapAttachment),
+  }
 }
 
 export const upsertJournalEntry = async (draft: EntryDraft, files: File[]) => {
-  const timestamp = nowIso()
-  const existing = await db.entries.where('dateKey').equals(draft.dateKey).first()
   const mood = analyzeMood(draft.moodText)
-  const entry: JournalEntry = {
-    id: existing?.id ?? createId('entry'),
-    dateKey: draft.dateKey,
-    title: draft.title,
-    body: draft.body,
-    moodText: draft.moodText,
-    mood,
-    tags: draft.tags,
-    createdAt: existing?.createdAt ?? timestamp,
-    updatedAt: timestamp,
-    syncState: 'pending',
-  }
-
-  await db.transaction('rw', db.entries, db.attachments, db.changes, async () => {
-    await db.entries.put(entry)
-    await appendChange('entry', entry.id, 'upsert', entry)
-
-    for (const file of files) {
-      const attachment: AttachmentRecord = {
-        id: createId('attachment'),
-        entryId: entry.id,
-        dateKey: entry.dateKey,
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        blob: file,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        syncState: 'pending',
-      }
-
-      await db.attachments.put(attachment)
-      await appendChange('attachment', attachment.id, 'upsert', {
-        ...attachment,
-        blob: {
-          type: attachment.type,
-          size: attachment.size,
-        },
-      })
-    }
+  const filePayloads = await Promise.all(files.map(fileToPayload))
+  const { entry } = await apiFetch<{ entry: JournalEntry }>('/api/entries/upsert', {
+    method: 'POST',
+    body: JSON.stringify({
+      draft,
+      mood,
+      files: filePayloads,
+    }),
   })
 
   return entry
 }
 
 export const addTodo = async (dateKey: string, title: string) => {
-  const timestamp = nowIso()
-  const todo: TodoItem = {
-    id: createId('todo'),
-    dateKey,
-    title,
-    done: false,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    syncState: 'pending',
-  }
-
-  await db.transaction('rw', db.todos, db.changes, async () => {
-    await db.todos.add(todo)
-    await appendChange('todo', todo.id, 'upsert', todo)
+  const { todo } = await apiFetch<{ todo: TodoItem }>('/api/todos', {
+    method: 'POST',
+    body: JSON.stringify({ dateKey, title }),
   })
 
   return todo
 }
 
 export const setTodoDone = async (todo: TodoItem, done: boolean) => {
-  const timestamp = nowIso()
-  const next: TodoItem = {
-    ...todo,
-    done,
-    completedAt: done ? timestamp : undefined,
-    updatedAt: timestamp,
-    syncState: 'pending',
-  }
-
-  await db.transaction('rw', db.todos, db.changes, async () => {
-    await db.todos.put(next)
-    await appendChange('todo', next.id, 'upsert', next)
+  const { todo: next } = await apiFetch<{ todo: TodoItem }>(`/api/todos/${encodeURIComponent(todo.id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ done }),
   })
 
   return next
 }
 
 export const deleteTodo = async (todo: TodoItem) => {
-  await db.transaction('rw', db.todos, db.changes, async () => {
-    await db.todos.delete(todo.id)
-    await appendChange('todo', todo.id, 'delete', todo)
+  await apiFetch<{ ok: true }>(`/api/todos/${encodeURIComponent(todo.id)}`, {
+    method: 'DELETE',
   })
 }
 
 export const deleteAttachment = async (attachment: AttachmentRecord) => {
-  await db.transaction('rw', db.attachments, db.changes, async () => {
-    await db.attachments.delete(attachment.id)
-    await appendChange('attachment', attachment.id, 'delete', {
-      id: attachment.id,
-      entryId: attachment.entryId,
-      dateKey: attachment.dateKey,
-      name: attachment.name,
-    })
+  await apiFetch<{ ok: true }>(`/api/attachments/${encodeURIComponent(attachment.id)}`, {
+    method: 'DELETE',
   })
 }
 
@@ -255,17 +248,10 @@ export const upsertWeeklySummary = async (
   model: string,
   provider = 'openai-compatible',
 ) => {
-  const timestamp = nowIso()
-  const existing = await db.weeklySummaries.get(weekKey)
-  const summary: WeeklySummary = {
-    weekKey,
-    content,
-    model,
-    provider,
-    createdAt: existing?.createdAt ?? timestamp,
-    updatedAt: timestamp,
-  }
+  const { summary } = await apiFetch<{ summary: WeeklySummary }>('/api/summaries/upsert', {
+    method: 'POST',
+    body: JSON.stringify({ weekKey, content, model, provider }),
+  })
 
-  await db.weeklySummaries.put(summary)
   return summary
 }

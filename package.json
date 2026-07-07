@@ -4,17 +4,19 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "api": "node --disable-warning=ExperimentalWarning server/local-api.mjs",
+    "dev": "node scripts/dev-local.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
     "smoke:local": "node scripts/smoke-local.mjs"
   },
   "dependencies": {
-    "dexie": "^4.4.4",
+    "@tailwindcss/vite": "^4.3.2",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "tailwindcss": "^4.3.2",
     "vite-plugin-pwa": "^1.3.0"
   },
   "devDependencies": {
