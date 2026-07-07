@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
-import { BarChart3, ChevronDown, Cloud, Database, Monitor, Moon, RefreshCw, Settings2, SunMedium } from 'lucide-react'
+import { ArrowLeft, BarChart3, ChevronDown, Cloud, Database, Monitor, Moon, RefreshCw, Settings2, SunMedium } from 'lucide-react'
 
 import { Metric } from '../components/ui/stat-primitives'
 import type { GameEngineSettings, GameEngineSnapshot } from '../lib/gameEngine'
@@ -27,6 +27,8 @@ type SettingsViewProps = {
   settingsSection: SettingsSection
   settingsSections: SettingsSectionOption[]
   settingsSectionGroups: SettingsSectionGroup[]
+  isDesktopNav: boolean
+  settingsMenuKey: number
   databaseStatus: DatabaseStatus
   entriesCount: number
   todosCount: number
@@ -57,6 +59,8 @@ export function SettingsView({
   settingsSection,
   settingsSections,
   settingsSectionGroups,
+  isDesktopNav,
+  settingsMenuKey,
   databaseStatus,
   entriesCount,
   todosCount,
@@ -95,6 +99,7 @@ export function SettingsView({
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(settingsSectionGroups.map((group) => [group.id, group.id === activeGroupId])),
   )
+  const [mobileSettingsLevel, setMobileSettingsLevel] = useState<'menu' | 'detail'>(isDesktopNav ? 'detail' : 'menu')
 
   useEffect(() => {
     if (!activeGroupId) return
@@ -112,33 +117,60 @@ export function SettingsView({
     }))
   }
 
+  useEffect(() => {
+    setMobileSettingsLevel(isDesktopNav ? 'detail' : 'menu')
+  }, [isDesktopNav, settingsMenuKey])
+
+  const handleSettingsSectionChange = (section: SettingsSection) => {
+    onSettingsSectionChange(section)
+    if (!isDesktopNav) {
+      setMobileSettingsLevel('detail')
+    }
+  }
+
+  const showMobileMenu = !isDesktopNav && mobileSettingsLevel === 'menu'
+  const settingsIntro = showMobileMenu ? '选择一个设置项继续调整。' : activeSettingsItem?.note
+
   return (
     <section className="py-3 sm:py-5" aria-labelledby="settings-title">
+      {!isDesktopNav && mobileSettingsLevel === 'detail' && (
+        <button className="settings-back-button" type="button" onClick={() => setMobileSettingsLevel('menu')}>
+          <ArrowLeft size={18} aria-hidden="true" />
+          设置项
+        </button>
+      )}
+
       <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="eyebrow">Preferences</p>
           <h2 className="section-title" id="settings-title">
             设置
           </h2>
-          <p className="mt-1 text-sm font-bold text-ink-400">{activeSettingsItem?.note}</p>
+          <p className="mt-1 text-sm font-bold text-ink-400">{settingsIntro}</p>
         </div>
-        <span className="pill">{activeSettingsItem?.label}</span>
+        {!showMobileMenu && <span className="pill">{activeSettingsItem?.label}</span>}
       </div>
 
-      <label className="settings-mobile-nav">
-        <span>设置项</span>
-        <select value={settingsSection} onChange={(event) => onSettingsSectionChange(event.target.value as SettingsSection)}>
+      {showMobileMenu ? (
+        <div className="settings-mobile-menu" aria-label="设置项">
           {settingsSectionGroups.map((group) => (
-            <optgroup label={group.label} key={group.id}>
-              {group.items.map((item) => (
-                <option value={item.id} key={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </optgroup>
+            <section className="settings-mobile-menu-group" key={group.id}>
+              <h3>{group.label}</h3>
+              <div className="settings-mobile-menu-items">
+                {group.items.map((item) => (
+                  <button className="settings-mobile-menu-item" type="button" key={item.id} onClick={() => handleSettingsSectionChange(item.id)}>
+                    <span>
+                      <strong>{item.label}</strong>
+                      <small>{item.note}</small>
+                    </span>
+                    <ChevronDown className="-rotate-90 text-ink-400" size={18} aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            </section>
           ))}
-        </select>
-      </label>
+        </div>
+      ) : (
 
       <div className="settings-layout">
         <aside className="settings-sidebar" aria-label="设置分组导航">
@@ -163,7 +195,7 @@ export function SettingsView({
                         className={`settings-link ${settingsSection === item.id ? 'settings-link-active' : ''}`}
                         type="button"
                         key={item.id}
-                        onClick={() => onSettingsSectionChange(item.id)}
+                        onClick={() => handleSettingsSectionChange(item.id)}
                       >
                         <strong className="block text-sm font-black text-ink-950">{item.label}</strong>
                         <small className="block text-xs font-bold text-ink-400">{item.note}</small>
@@ -219,7 +251,7 @@ export function SettingsView({
                   </p>
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button className="button-secondary min-h-9 px-3" type="button" onClick={() => onSettingsSectionChange('database')}>
+                    <button className="button-secondary min-h-9 px-3" type="button" onClick={() => handleSettingsSectionChange('database')}>
                       看详细结构
                     </button>
                     <button className="button-secondary min-h-9 px-3" type="button" onClick={onReload}>
@@ -257,7 +289,7 @@ export function SettingsView({
                     这里暴露的是给后续游戏引擎消费的稳定快照，网页本身不渲染世界场景，只负责把情绪与行动数据整理好。
                   </p>
 
-                  <button className="button-secondary mt-3 min-h-9 px-3" type="button" onClick={() => onSettingsSectionChange('engine')}>
+                  <button className="button-secondary mt-3 min-h-9 px-3" type="button" onClick={() => handleSettingsSectionChange('engine')}>
                     调整接口参数
                   </button>
                 </section>
@@ -438,7 +470,7 @@ export function SettingsView({
                 <label className="input-label">
                   <span>Endpoint</span>
                   <input
-                    className="text-input bg-white"
+                    className="text-input"
                     value={aiConfig.endpoint}
                     onChange={onAiConfigChange('endpoint')}
                     placeholder="https://api.openai.com/v1/chat/completions"
@@ -446,12 +478,12 @@ export function SettingsView({
                 </label>
                 <label className="input-label">
                   <span>Model</span>
-                  <input className="text-input bg-white" value={aiConfig.model} onChange={onAiConfigChange('model')} placeholder="gpt-4o-mini" />
+                  <input className="text-input" value={aiConfig.model} onChange={onAiConfigChange('model')} placeholder="gpt-4o-mini" />
                 </label>
                 <label className="input-label">
                   <span>API Key</span>
                   <input
-                    className="text-input bg-white"
+                    className="text-input"
                     value={aiConfig.apiKey}
                     onChange={onAiConfigChange('apiKey')}
                     placeholder="只保存在本机浏览器"
@@ -484,7 +516,7 @@ export function SettingsView({
                 <label className="input-label">
                   <span>Server URL</span>
                   <input
-                    className="text-input bg-white"
+                    className="text-input"
                     value={webDavConfig.url}
                     onChange={onWebDavConfigChange('url')}
                     placeholder="https://dav.jianguoyun.com/dav/"
@@ -493,7 +525,7 @@ export function SettingsView({
                 <label className="input-label">
                   <span>Username</span>
                   <input
-                    className="text-input bg-white"
+                    className="text-input"
                     value={webDavConfig.username}
                     onChange={onWebDavConfigChange('username')}
                     placeholder="坚果云账号邮箱"
@@ -502,7 +534,7 @@ export function SettingsView({
                 <label className="input-label">
                   <span>Password</span>
                   <input
-                    className="text-input bg-white"
+                    className="text-input"
                     value={webDavConfig.password}
                     onChange={onWebDavConfigChange('password')}
                     placeholder="坚果云应用密码"
@@ -512,7 +544,7 @@ export function SettingsView({
                 <label className="input-label">
                   <span>Remote Path</span>
                   <input
-                    className="text-input bg-white"
+                    className="text-input"
                     value={webDavConfig.remotePath}
                     onChange={onWebDavConfigChange('remotePath')}
                     placeholder="/xinxiangyi"
@@ -592,6 +624,7 @@ export function SettingsView({
           )}
         </div>
       </div>
+      )}
     </section>
   )
 }

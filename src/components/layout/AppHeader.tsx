@@ -41,28 +41,28 @@ export function AppHeader({
           </div>
         )}
 
-        <div className="topbar-context-group">
-          <div className="topbar-context" aria-label="今日环境">
-            <span className="context-pill">
-              <CalendarDays size={16} aria-hidden="true" />
-              {todayLabel}
-            </span>
-            <span className="context-pill">
-              <MapPin size={16} aria-hidden="true" />
-              {locationLabel}
-            </span>
-            <span className="context-pill">
-              <LocateFixed size={16} aria-hidden="true" />
-              {weatherText}
-            </span>
-          </div>
-          {isDesktopNav && (
+        {isDesktopNav && (
+          <div className="topbar-context-group">
+            <div className="topbar-context" aria-label="今日环境">
+              <span className="context-pill">
+                <CalendarDays size={16} aria-hidden="true" />
+                {todayLabel}
+              </span>
+              <span className="context-pill">
+                <MapPin size={16} aria-hidden="true" />
+                {locationLabel}
+              </span>
+              <span className="context-pill">
+                <LocateFixed size={16} aria-hidden="true" />
+                {weatherText}
+              </span>
+            </div>
             <button className="button-secondary topbar-sync-button" type="button" disabled={isWebDavSyncing} onClick={onSyncWebDav}>
               {isWebDavSyncing ? <RefreshCw className="animate-spin" size={16} aria-hidden="true" /> : <Cloud size={16} aria-hidden="true" />}
               同步
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </header>
   )

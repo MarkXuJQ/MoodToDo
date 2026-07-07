@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
 
+import { DatePickerButton } from '../components/ui/date-picker-button'
 import { Metric } from '../components/ui/stat-primitives'
 import type { JournalEntry, TodoItem } from '../lib/db'
 import type { ActiveView, JournalMode, JournalModeOption } from '../types/app'
@@ -429,10 +430,16 @@ export function JournalView({
                 </div>
 
                 <div className="grid gap-3">
-                  <label className="input-label">
+                  <div className="input-label">
                     <span>日期</span>
-                    <input className="text-input" type="date" value={dialogTodoDate} onChange={(event) => handleDialogDateChange(event.target.value)} />
-                  </label>
+                    <DatePickerButton
+                      label="Todo 日期"
+                      value={dialogTodoDate}
+                      valueLabel={dialogTodoDate.replaceAll('-', '/')}
+                      onChange={handleDialogDateChange}
+                      compact
+                    />
+                  </div>
                   <label className="input-label">
                     <span>事项</span>
                     <input

@@ -65,6 +65,7 @@ import {
   getCompletionRate,
   getCurrentStreak,
   getHeatLevel,
+  getSignalValue,
   getLongestStreak,
   parseTags,
 } from './lib/insights'
@@ -96,6 +97,7 @@ function App() {
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [isNavCollapsed, setIsNavCollapsed] = useState(() => window.localStorage.getItem(navCollapseStorageKey) === '1')
   const [isDesktopNav, setIsDesktopNav] = useState(() => window.matchMedia('(min-width: 1024px)').matches)
+  const [settingsMenuKey, setSettingsMenuKey] = useState(0)
   const [journalMode, setJournalMode] = useState<JournalMode>('entries')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('overview')
   const [entries, setEntries] = useState<JournalEntry[]>([])
@@ -443,6 +445,19 @@ function App() {
   const selectedMoodTrendIndex = moodTrendPoints.length > 0 ? moodTrendPoints.length - 1 : undefined
 
   const lastSevenAverage = average(lastSevenEntries.map((entry) => entry.mood.score))
+  const moodBreakdownItems = useMemo(() => {
+    const sourceEntries = entries.slice(0, 7)
+    const averageSignal = (key: keyof JournalEntry['mood']['signals']) =>
+      average(sourceEntries.map((entry) => getSignalValue(entry.mood.signals, key)))
+
+    return [
+      { id: 'clarity', label: '清晰度', value: averageSignal('clarity'), note: '清楚、踏实、积极的表达' },
+      { id: 'load', label: '负荷度', value: averageSignal('load'), note: '压力、疲惫与紧张的强度' },
+      { id: 'energy', label: '能量感', value: averageSignal('energy'), note: '推进、专注与行动信号' },
+      { id: 'recovery', label: '修复感', value: averageSignal('recovery'), note: '休息、恢复与被照顾感' },
+      { id: 'reflection', label: '反思度', value: averageSignal('reflection'), note: '复盘、计划与自我观察' },
+    ]
+  }, [entries])
   const moodWindowAverage = average(moodTrendPoints.flatMap((point) => (point.value == null ? [] : [point.value])))
 
   const handleDraftChange =
@@ -604,6 +619,12 @@ function App() {
 
   const openSettingsSection = (section: SettingsSection) => {
     setSettingsSection(section)
+    navigateTo('settings')
+  }
+
+  const openSettingsMenu = () => {
+    setSettingsSection('overview')
+    setSettingsMenuKey((current) => current + 1)
     navigateTo('settings')
   }
 
@@ -831,7 +852,7 @@ function App() {
               weatherText={weatherState.weatherText}
               isWebDavSyncing={isWebDavSyncing}
               onSyncWebDav={() => void handleWebDavSync('manual')}
-              onOpenSettings={() => openSettingsSection('overview')}
+              onOpenSettings={openSettingsMenu}
             />
 
             {activeView === 'dashboard' ? (
@@ -851,6 +872,7 @@ function App() {
             todoTitle={todoTitle}
             lastSevenAverage={lastSevenAverage}
             lastSevenEntryCount={lastSevenEntries.length}
+            moodBreakdownItems={moodBreakdownItems}
             moodTrendPoints={moodTrendPoints}
             selectedMoodTrendIndex={selectedMoodTrendIndex}
             trendStartLabel={trendDateKeys[0]}
@@ -935,6 +957,8 @@ function App() {
             settingsSection={settingsSection}
             settingsSections={settingsSections}
             settingsSectionGroups={settingsSectionGroups}
+            isDesktopNav={isDesktopNav}
+            settingsMenuKey={settingsMenuKey}
             databaseStatus={databaseStatus}
             entriesCount={entries.length}
             todosCount={todos.length}

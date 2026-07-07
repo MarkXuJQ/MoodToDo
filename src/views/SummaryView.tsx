@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
-import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Circle, Plus, RefreshCw, Save, Settings2, Sparkles, Trash2 } from 'lucide-react'
+import { CheckCircle2, ChevronLeft, ChevronRight, Circle, Plus, RefreshCw, Save, Settings2, Sparkles, Trash2 } from 'lucide-react'
 
+import { DatePickerButton } from '../components/ui/date-picker-button'
 import { Metric } from '../components/ui/stat-primitives'
 import type { JournalEntry, TodoItem } from '../lib/db'
 import type { CalendarCell } from '../types/app'
@@ -99,15 +100,23 @@ export function SummaryView({
           </h2>
         </div>
 
-        <div className="flex items-center gap-2" aria-label="月份切换">
+        <div className="month-switcher" aria-label="月份切换">
           <button className="icon-button" type="button" aria-label="上个月" onClick={onPreviousMonth}>
             <ChevronLeft size={18} aria-hidden="true" />
           </button>
-          <strong className="min-w-32 text-center font-black text-ink-950">{visibleMonthLabel}</strong>
+          <strong>{visibleMonthLabel}</strong>
           <button className="icon-button" type="button" aria-label="下个月" onClick={onNextMonth}>
             <ChevronRight size={18} aria-hidden="true" />
           </button>
         </div>
+      </div>
+
+      <div className="summary-overview-metrics" aria-label="本月概况">
+        <Metric label="本月心象均值" value={`${monthScore || 0}`} />
+        <Metric label="本月打卡率" value={`${monthCheckinRate}%`} />
+        <Metric label="本月完成率" value={`${monthCompletionRate}%`} />
+        <Metric label="连续打卡" value={`${currentStreak} 天`} />
+        <Metric label="最长连续" value={`${longestStreak} 天`} />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
@@ -137,7 +146,7 @@ export function SummaryView({
 
               return (
                 <button
-                  className={`grid min-h-16 grid-rows-[auto_1fr_auto] rounded-lg border border-field-200 p-2 text-left text-ink-950 transition-colors hover:border-field-300 ${cell.inMonth ? '' : 'opacity-35'} heat-${getHeatLevel(cell.entry)} ${cell.dateKey === selectedDate ? 'ring-2 ring-xin-700 ring-offset-2' : ''}`}
+                  className={`calendar-heat-cell heat-${getHeatLevel(cell.entry)} ${cell.inMonth ? '' : 'calendar-heat-cell-muted'} ${cell.dateKey === selectedDate ? 'calendar-heat-cell-selected' : ''}`}
                   type="button"
                   key={cell.dateKey}
                   onClick={() => onFocusDate(cell.dateKey)}
@@ -146,7 +155,7 @@ export function SummaryView({
                   <span className="text-xs font-black">{dayNumber}</span>
                   {cell.entry && <strong className="self-center text-lg font-black leading-none">{cell.entry.mood.score}</strong>}
                   {cell.todos.length > 0 && (
-                    <small className="justify-self-end rounded-full bg-white/70 px-1.5 text-[11px] font-black">
+                    <small className="calendar-todo-chip">
                       {cell.todos.filter((todo) => todo.done).length}/{cell.todos.length}
                     </small>
                   )}
@@ -229,15 +238,14 @@ export function SummaryView({
               </h2>
             </div>
 
-            <label className="flex min-h-10 items-center gap-2 rounded-lg border border-field-200 bg-field-50 px-2">
-              <CalendarDays size={16} aria-hidden="true" />
-              <input
-                className="min-h-8 border-0 bg-transparent p-0 outline-none"
-                type="date"
-                value={selectedWeek}
-                onChange={(event) => onSelectedWeekChange(event.target.value)}
-              />
-            </label>
+            <DatePickerButton
+              className="summary-week-picker"
+              label="周起点"
+              value={selectedWeek}
+              valueLabel={selectedWeek.replaceAll('-', '/')}
+              onChange={onSelectedWeekChange}
+              compact
+            />
           </div>
 
           <div className="mb-3 grid gap-3 sm:grid-cols-3">
@@ -253,7 +261,7 @@ export function SummaryView({
 
               return (
                 <button
-                  className="grid min-h-22 gap-1 rounded-lg border border-field-200 bg-field-50 p-2 text-left transition-colors hover:bg-white"
+                  className="week-day-card"
                   type="button"
                   key={dateKey}
                   onClick={() => onFocusDate(dateKey)}
@@ -301,14 +309,6 @@ export function SummaryView({
             />
           </label>
         </section>
-      </div>
-
-      <div className="secondary-metrics mt-5 md:grid-cols-5">
-        <Metric label="本月心象均值" value={`${monthScore || 0}`} />
-        <Metric label="本月打卡率" value={`${monthCheckinRate}%`} />
-        <Metric label="本月完成率" value={`${monthCompletionRate}%`} />
-        <Metric label="连续打卡" value={`${currentStreak} 天`} />
-        <Metric label="最长连续" value={`${longestStreak} 天`} />
       </div>
     </section>
   )

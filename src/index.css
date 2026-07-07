@@ -114,16 +114,17 @@
   }
 
   .topbar-context-group {
-    @apply hidden min-w-0 items-center justify-end gap-2 md:flex;
+    @apply hidden min-w-0 items-center justify-end gap-2 lg:flex;
   }
 
   .mobile-topbar-actions {
-    @apply flex shrink-0 items-center gap-2 md:hidden;
+    @apply flex shrink-0 items-center gap-2 lg:hidden;
   }
 
   .mobile-cloud-button,
   .mobile-settings-button {
     @apply size-11;
+    transition: none;
   }
 
   .topbar-sync-button {
@@ -159,7 +160,7 @@
   }
 
   .topbar-context {
-    @apply hidden flex-nowrap items-center gap-2 overflow-x-auto pb-1 md:flex md:flex-wrap md:justify-end md:overflow-visible md:pb-0;
+    @apply hidden flex-nowrap items-center gap-2 overflow-x-auto pb-1 lg:flex lg:flex-wrap lg:justify-end lg:overflow-visible lg:pb-0;
   }
 
   .pill {
@@ -269,7 +270,7 @@
   }
 
   .dashboard-desktop-summary {
-    @apply hidden md:grid;
+    @apply hidden lg:grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
 
@@ -287,8 +288,62 @@
     @apply min-w-0;
   }
 
+  .date-picker-button {
+    @apply relative min-h-16 min-w-0 overflow-hidden rounded-md border border-white/70 bg-[rgba(255,255,255,0.74)] text-left text-ink-950 backdrop-blur-lg transition-colors hover:border-field-300 hover:bg-white;
+    box-shadow: 0 6px 18px rgba(17, 24, 22, 0.035);
+  }
+
+  .date-picker-trigger {
+    @apply flex min-h-16 w-full cursor-pointer items-center gap-3 border-0 bg-transparent px-4 text-left text-inherit;
+  }
+
+  .date-picker-trigger svg {
+    @apply shrink-0 text-ink-600;
+  }
+
+  .date-picker-copy {
+    @apply grid min-w-0 gap-0.5;
+  }
+
+  .date-picker-copy small {
+    @apply text-xs font-bold text-ink-400;
+  }
+
+  .date-picker-copy strong {
+    @apply truncate text-lg font-black leading-tight text-ink-950;
+  }
+
+  .date-picker-input {
+    @apply pointer-events-none absolute bottom-1 left-1 size-px opacity-0;
+  }
+
+  .date-picker-button-compact {
+    @apply min-h-10 rounded-full;
+    box-shadow: none;
+  }
+
+  .date-picker-button-compact .date-picker-trigger {
+    @apply min-h-10 px-3;
+  }
+
+  .date-picker-button-compact .date-picker-copy {
+    @apply gap-0;
+  }
+
+  .date-picker-button-compact .date-picker-copy small {
+    @apply text-[11px] uppercase;
+  }
+
+  .date-picker-button-compact .date-picker-copy strong {
+    @apply text-sm;
+  }
+
+  .mobile-date-picker {
+    @apply mt-2 w-fit max-w-full lg:hidden;
+  }
+
   .mobile-date-control {
-    @apply mt-2 flex min-h-9 w-fit items-center gap-2 rounded-full border border-field-200 bg-field-50 px-3 text-xs font-black text-ink-400 md:hidden;
+    @apply mt-2 flex min-h-9 w-fit items-center gap-2 rounded-full border border-field-200 bg-field-50 px-3 text-xs font-black text-ink-400 lg:hidden;
   }
 
   .mobile-date-control input {
@@ -349,15 +404,15 @@
   }
 
   .dashboard-side-insight {
-    @apply hidden md:block;
+    @apply hidden lg:block;
   }
 
   .dashboard-todo-panel {
-    @apply hidden md:block;
+    @apply hidden lg:block;
   }
 
   .mobile-todo-panel {
-    @apply mb-4 rounded-md border border-field-200 bg-[rgba(247,250,247,0.72)] p-3 md:hidden;
+    @apply mb-4 rounded-md border border-field-200 bg-[rgba(247,250,247,0.72)] p-3 lg:hidden;
   }
 
   .mobile-panel-head {
@@ -512,7 +567,7 @@
   }
 
   .mood-score-compact {
-    @apply grid items-center gap-3 md:grid-cols-[116px_minmax(0,1fr)] lg:grid-cols-1;
+    @apply grid grid-cols-[116px_minmax(0,1fr)] items-center gap-3;
   }
 
   .mood-score-summary {
@@ -525,15 +580,63 @@
   }
 
   .mood-score-summary strong {
-    @apply text-3xl font-black leading-none text-ink-950;
+    @apply text-sm font-black leading-tight text-ink-950;
+  }
+
+  .mood-breakdown-list {
+    @apply mt-4 grid gap-3;
+  }
+
+  .mood-breakdown-row {
+    @apply grid grid-cols-[minmax(0,1fr)_72px_32px] items-center gap-2 rounded-md border border-field-200 bg-field-50 px-3 py-2;
+  }
+
+  .mood-breakdown-copy {
+    @apply min-w-0;
+  }
+
+  .mood-breakdown-copy span {
+    @apply block text-xs font-black text-ink-950;
+  }
+
+  .mood-breakdown-copy small {
+    @apply mt-0.5 block truncate text-[11px] font-bold text-ink-400;
+  }
+
+  .mood-breakdown-meter {
+    @apply h-2 overflow-hidden rounded-full bg-field-200;
+  }
+
+  .mood-breakdown-meter i {
+    @apply block h-full rounded-full bg-xin-700;
+  }
+
+  .mood-breakdown-row > strong {
+    @apply text-right text-xs font-black text-ink-950;
   }
 
   .dashboard-visual-grid {
-    @apply mt-5 hidden gap-5 md:grid xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)];
+    @apply mt-5 hidden gap-5 lg:grid xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)];
   }
 
   .secondary-metrics {
     @apply hidden gap-3 md:grid;
+  }
+
+  .summary-overview-metrics {
+    @apply mb-5 grid grid-cols-5 gap-1.5 sm:gap-3;
+  }
+
+  .summary-overview-metrics .metric-line {
+    @apply min-h-12 px-2 sm:min-h-14 sm:px-3;
+  }
+
+  .summary-overview-metrics .metric-label {
+    @apply truncate text-[10px] sm:text-xs;
+  }
+
+  .summary-overview-metrics .metric-value {
+    @apply truncate text-base sm:text-xl;
   }
 
   .mini-metrics {
@@ -578,6 +681,42 @@
 
   .calendar-day-todos {
     @apply mt-5 border-t border-field-200 pt-4;
+  }
+
+  .month-switcher {
+    @apply flex h-11 w-fit max-w-full items-center gap-1 overflow-hidden rounded-full border border-white/75 bg-[rgba(255,255,255,0.64)] p-1 backdrop-blur-md;
+  }
+
+  .month-switcher strong {
+    @apply min-w-24 px-2 text-center text-sm font-black text-ink-950 sm:min-w-32 sm:text-base;
+  }
+
+  .month-switcher .icon-button {
+    @apply size-9 rounded-full border-transparent bg-transparent shadow-none hover:border-field-200 hover:bg-white/70;
+  }
+
+  .calendar-heat-cell {
+    @apply grid min-h-16 grid-rows-[auto_1fr_auto] rounded-lg border border-field-200 p-2 text-left text-ink-950 transition-colors hover:border-field-300;
+  }
+
+  .calendar-heat-cell-muted {
+    @apply opacity-35;
+  }
+
+  .calendar-heat-cell-selected {
+    @apply ring-2 ring-xin-700 ring-offset-2;
+  }
+
+  .calendar-todo-chip {
+    @apply justify-self-end rounded-full border border-white/60 bg-white/70 px-1.5 text-[11px] font-black text-ink-800;
+  }
+
+  .summary-week-picker {
+    @apply shrink-0;
+  }
+
+  .week-day-card {
+    @apply grid min-h-22 gap-1 rounded-lg border border-field-200 bg-field-50 p-2 text-left transition-colors hover:border-field-300 hover:bg-[rgba(255,255,255,0.72)];
   }
 
   .calendar-day-todo-list {
@@ -771,11 +910,11 @@
   }
 
   .settings-layout {
-    @apply grid gap-5 md:grid-cols-[220px_minmax(0,1fr)];
+    @apply grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)];
   }
 
   .settings-sidebar {
-    @apply hidden gap-3 overflow-x-auto md:flex md:flex-col md:overflow-visible md:self-start xl:sticky xl:top-28;
+    @apply hidden gap-3 overflow-x-auto lg:flex lg:flex-col lg:overflow-visible lg:self-start xl:sticky xl:top-28;
   }
 
   .settings-group {
@@ -823,11 +962,43 @@
   }
 
   .settings-mobile-nav {
-    @apply mb-4 grid gap-2 rounded-md border border-white/75 bg-[rgba(255,255,255,0.78)] p-3 text-sm font-black text-ink-600 md:hidden;
+    @apply mb-4 grid gap-2 rounded-md border border-white/75 bg-[rgba(255,255,255,0.78)] p-3 text-sm font-black text-ink-600 lg:hidden;
   }
 
   .settings-mobile-nav select {
     @apply min-h-11 rounded-md border border-field-200 bg-field-50 px-3 text-base font-black text-ink-950 outline-none;
+  }
+
+  .settings-back-button {
+    @apply mb-3 inline-flex min-h-10 items-center gap-2 rounded-md border border-white/75 bg-[rgba(255,255,255,0.78)] px-3 text-sm font-black text-ink-800;
+  }
+
+  .settings-mobile-menu {
+    @apply grid gap-4 lg:hidden;
+  }
+
+  .settings-mobile-menu-group {
+    @apply rounded-md border border-white/75 bg-[rgba(255,255,255,0.78)] p-3;
+  }
+
+  .settings-mobile-menu-group h3 {
+    @apply m-0 px-1 pb-2 text-xs font-black uppercase tracking-normal text-xin-700;
+  }
+
+  .settings-mobile-menu-items {
+    @apply grid gap-2;
+  }
+
+  .settings-mobile-menu-item {
+    @apply grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md border border-field-200 bg-field-50 px-3 text-left;
+  }
+
+  .settings-mobile-menu-item strong {
+    @apply block text-base font-black text-ink-950;
+  }
+
+  .settings-mobile-menu-item small {
+    @apply mt-1 block text-xs font-bold text-ink-400;
   }
 
   .theme-choice-grid {
@@ -1040,9 +1211,14 @@
   :root[data-theme='dark'] .section,
   :root[data-theme='dark'] .metric-line,
   :root[data-theme='dark'] .field-line,
+  :root[data-theme='dark'] .date-picker-button,
+  :root[data-theme='dark'] .month-switcher,
   :root[data-theme='dark'] .nav-drawer,
   :root[data-theme='dark'] .bottom-nav,
   :root[data-theme='dark'] .settings-mobile-nav,
+  :root[data-theme='dark'] .settings-back-button,
+  :root[data-theme='dark'] .settings-mobile-menu-group,
+  :root[data-theme='dark'] .settings-mobile-menu-item,
   :root[data-theme='dark'] .settings-group,
   :root[data-theme='dark'] .settings-link,
   :root[data-theme='dark'] .config-row,
@@ -1072,7 +1248,9 @@
   :root[data-theme='dark'] .nav-link,
   :root[data-theme='dark'] .mobile-todo-panel,
   :root[data-theme='dark'] .context-strip,
+  :root[data-theme='dark'] .week-day-card,
   :root[data-theme='dark'] .mood-score-summary,
+  :root[data-theme='dark'] .mood-breakdown-row,
   :root[data-theme='dark'] .empty-state,
   :root[data-theme='dark'] .note,
   :root[data-theme='dark'] .table-key,
@@ -1089,6 +1267,11 @@
   :root[data-theme='dark'] .text-area:focus,
   :root[data-theme='dark'] .select-input:focus {
     background-color: rgba(21, 33, 30, 0.96);
+  }
+
+  :root[data-theme='dark'] .date-picker-button:hover,
+  :root[data-theme='dark'] .week-day-card:hover {
+    background-color: rgba(24, 38, 35, 0.96);
   }
 
   :root[data-theme='dark'] .nav-link-active,
@@ -1127,6 +1310,41 @@
 
   :root[data-theme='dark'] .heat-empty {
     background-color: rgba(23, 33, 31, 0.88);
+  }
+
+  :root[data-theme='dark'] .heat-low {
+    background-color: rgba(112, 45, 38, 0.74);
+  }
+
+  :root[data-theme='dark'] .heat-stress {
+    background-color: rgba(120, 84, 28, 0.74);
+  }
+
+  :root[data-theme='dark'] .heat-steady {
+    background-color: rgba(41, 72, 118, 0.74);
+  }
+
+  :root[data-theme='dark'] .heat-good {
+    background-color: rgba(30, 91, 82, 0.78);
+  }
+
+  :root[data-theme='dark'] .heat-bright {
+    background-color: rgba(77, 58, 126, 0.78);
+  }
+
+  :root[data-theme='dark'] .calendar-heat-cell {
+    border-color: rgba(126, 151, 142, 0.28);
+    color: var(--color-ink-950);
+  }
+
+  :root[data-theme='dark'] .calendar-heat-cell-selected {
+    --tw-ring-offset-color: #111a18;
+  }
+
+  :root[data-theme='dark'] .calendar-todo-chip {
+    border-color: rgba(126, 151, 142, 0.28);
+    background-color: rgba(17, 26, 24, 0.68);
+    color: var(--color-ink-950);
   }
 
   :root[data-theme='dark'] .ring-track {

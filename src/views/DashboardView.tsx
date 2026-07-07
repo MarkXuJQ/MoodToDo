@@ -1,6 +1,5 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import {
-  CalendarDays,
   CheckCircle2,
   Circle,
   ImagePlus,
@@ -11,6 +10,7 @@ import {
 } from 'lucide-react'
 
 import { AttachmentThumb } from '../components/ui/attachment-thumb'
+import { DatePickerButton } from '../components/ui/date-picker-button'
 import { ImagePreviewDialog } from '../components/ui/image-preview-dialog'
 import { ProgressRing, TrendChart, type TrendPoint } from '../components/ui/data-viz'
 import { Metric } from '../components/ui/stat-primitives'
@@ -22,6 +22,13 @@ type DashboardMetricCard = {
   label: string
   value: string
   tone?: string
+}
+
+type MoodBreakdownItem = {
+  id: string
+  label: string
+  value: number
+  note: string
 }
 
 type DashboardViewProps = {
@@ -40,6 +47,7 @@ type DashboardViewProps = {
   todoTitle: string
   lastSevenAverage: number
   lastSevenEntryCount: number
+  moodBreakdownItems: MoodBreakdownItem[]
   moodTrendPoints: TrendPoint[]
   selectedMoodTrendIndex?: number
   trendStartLabel: string
@@ -74,6 +82,7 @@ export function DashboardView({
   todoTitle,
   lastSevenAverage,
   lastSevenEntryCount,
+  moodBreakdownItems,
   moodTrendPoints,
   selectedMoodTrendIndex,
   trendStartLabel,
@@ -142,15 +151,13 @@ export function DashboardView({
       </h1>
 
       <section className="toolbar dashboard-desktop-summary" aria-label="日期选择">
-        <label className="field-line">
-          <CalendarDays size={18} aria-hidden="true" />
-          <input
-            className="min-h-10 border-0 bg-transparent p-0 font-black text-ink-950 outline-none"
-            type="date"
-            value={selectedDate}
-            onChange={(event) => onDateChange(event.target.value)}
-          />
-        </label>
+        <DatePickerButton
+          className="dashboard-date-picker"
+          label="记录日期"
+          value={selectedDate}
+          valueLabel={selectedDate.replaceAll('-', '/')}
+          onChange={onDateChange}
+        />
         {visibleDashboardCards.length > 0 ? (
           visibleDashboardCards.map((card) => (
             <Metric label={card.label} value={card.value} tone={card.tone} key={card.id} />
@@ -173,10 +180,14 @@ export function DashboardView({
               <h2 className="section-title" id="journal-title">
                 今日记录
               </h2>
-              <label className="mobile-date-control">
-                <span>日期</span>
-                <input type="date" value={selectedDate} onChange={(event) => onDateChange(event.target.value)} />
-              </label>
+              <DatePickerButton
+                className="mobile-date-picker"
+                label="日期"
+                value={selectedDate}
+                valueLabel={selectedDateLabel}
+                onChange={onDateChange}
+                compact
+              />
             </div>
             <span className={`pill score-${selectedEntry?.mood.level ?? '平稳'}`}>{selectedEntry?.mood.level ?? '未记录'}</span>
           </div>
@@ -372,20 +383,36 @@ export function DashboardView({
             </div>
 
             {lastSevenEntryCount > 0 ? (
-              <div className="mood-score-compact">
-                <ProgressRing
-                  value={lastSevenAverage}
-                  max={100}
-                  color={moodAverageColor}
-                  valueText={`${lastSevenAverage}`}
-                  size={116}
-                />
-                <div className="mood-score-summary">
-                  <span>最近均分</span>
-                  <strong>{lastSevenAverage}</strong>
-                  <small>来自最近 {lastSevenEntryCount} 条心情记录</small>
+              <>
+                <div className="mood-score-compact">
+                  <ProgressRing
+                    value={lastSevenAverage}
+                    max={100}
+                    color={moodAverageColor}
+                    valueText={`${lastSevenAverage}`}
+                    size={116}
+                  />
+                  <div className="mood-score-summary">
+                    <span>最近均分</span>
+                    <strong>{lastSevenAverage >= 70 ? '状态舒展，适合推进重点事项。' : lastSevenAverage >= 55 ? '状态平稳，可以保持节奏。' : '状态偏紧，适合降低负荷。'}</strong>
+                    <small>来自最近 {lastSevenEntryCount} 条心情记录</small>
+                  </div>
                 </div>
-              </div>
+                <div className="mood-breakdown-list" aria-label="心象维度拆解">
+                  {moodBreakdownItems.map((item) => (
+                    <div className="mood-breakdown-row" key={item.id}>
+                      <div className="mood-breakdown-copy">
+                        <span>{item.label}</span>
+                        <small>{item.note}</small>
+                      </div>
+                      <div className="mood-breakdown-meter" aria-label={`${item.label} ${item.value}`}>
+                        <i style={{ width: `${Math.max(0, Math.min(100, item.value))}%` }} />
+                      </div>
+                      <strong>{item.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : (
               <p className="empty-state">保存第一条日记后生成心象分。</p>
             )}
