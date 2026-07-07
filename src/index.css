@@ -70,6 +70,10 @@
     @apply relative min-h-svh lg:grid lg:grid-cols-[var(--nav-width)_minmax(0,1fr)];
   }
 
+  .app-shell-bottom-nav .page {
+    @apply pb-28;
+  }
+
   .content-shell {
     @apply min-w-0;
   }
@@ -79,11 +83,11 @@
   }
 
   .topbar {
-    @apply sticky top-0 z-20 py-4;
+    @apply sticky top-0 z-20 py-2 sm:py-4;
   }
 
   .topbar-main {
-    @apply flex flex-col gap-3 border-b border-white/60 bg-[rgba(238,244,240,0.72)] pb-4 backdrop-blur-xl md:flex-row md:items-center md:justify-between;
+    @apply flex items-center justify-between gap-2 border-b border-white/60 bg-[rgba(238,244,240,0.72)] pb-3 backdrop-blur-xl sm:gap-3 sm:pb-4 md:flex-row md:items-center md:justify-between;
     box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
   }
 
@@ -116,7 +120,7 @@
   }
 
   .topbar-context {
-    @apply flex flex-wrap items-center gap-2 md:justify-end;
+    @apply hidden flex-nowrap items-center gap-2 overflow-x-auto pb-1 md:flex md:flex-wrap md:justify-end md:overflow-visible md:pb-0;
   }
 
   .pill {
@@ -124,7 +128,11 @@
   }
 
   .context-pill {
-    @apply inline-flex min-h-9 max-w-full items-center gap-2 rounded-full border border-white/75 bg-white/78 px-3 text-sm font-bold text-ink-600 backdrop-blur-md;
+    @apply inline-flex min-h-8 max-w-full shrink-0 items-center gap-1.5 rounded-full border border-white/75 bg-white/78 px-2.5 text-xs font-bold text-ink-600 backdrop-blur-md sm:min-h-9 sm:gap-2 sm:px-3 sm:text-sm;
+  }
+
+  .context-pill svg {
+    @apply size-4 shrink-0;
   }
 
   .nav-backdrop {
@@ -179,18 +187,50 @@
     @apply block w-full rounded-lg px-2 py-2 text-left text-sm font-black text-ink-600 transition-colors hover:bg-field-50 hover:text-ink-950;
   }
 
+  .bottom-nav {
+    @apply fixed inset-x-3 bottom-3 z-30 grid grid-cols-4 gap-1 rounded-2xl border border-white/75 bg-[rgba(252,253,252,0.88)] p-1.5 shadow-[0_18px_60px_rgba(17,24,22,0.16)] backdrop-blur-xl lg:hidden;
+  }
+
+  .bottom-nav-item {
+    @apply grid min-h-14 place-items-center gap-0.5 rounded-xl px-1 text-[11px] font-black text-ink-400 transition-colors;
+  }
+
+  .bottom-nav-item svg {
+    @apply size-5;
+  }
+
+  .bottom-nav-item-active {
+    @apply bg-xin-100 text-xin-800;
+  }
+
   .toolbar {
-    @apply mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.1fr)_repeat(4,minmax(0,1fr))];
+    @apply mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(180px,0.95fr)_repeat(5,minmax(0,1fr))];
+  }
+
+  .dashboard-desktop-summary {
+    @apply hidden md:grid;
   }
 
   .field-line,
   .metric-line {
-    @apply min-h-16 rounded-md border border-white/70 bg-[rgba(255,255,255,0.74)] px-4 backdrop-blur-lg;
+    @apply min-h-16 min-w-0 rounded-md border border-white/70 bg-[rgba(255,255,255,0.74)] px-4 backdrop-blur-lg;
     box-shadow: 0 6px 18px rgba(17, 24, 22, 0.035);
   }
 
   .field-line {
     @apply flex items-center gap-3;
+  }
+
+  .field-line input {
+    @apply min-w-0;
+  }
+
+  .mobile-date-control {
+    @apply mt-2 flex min-h-9 w-fit items-center gap-2 rounded-full border border-field-200 bg-field-50 px-3 text-xs font-black text-ink-400 md:hidden;
+  }
+
+  .mobile-date-control input {
+    @apply border-0 bg-transparent p-0 text-xs font-black text-ink-950 outline-none;
   }
 
   .metric-line {
@@ -202,19 +242,43 @@
   }
 
   .metric-value {
-    @apply text-2xl font-black leading-none text-ink-950;
+    @apply truncate text-2xl font-black leading-none text-ink-950;
   }
 
   .workspace-grid {
-    @apply mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.88fr)];
+    @apply mt-3 grid gap-4 sm:mt-5 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.88fr)];
   }
 
   .side-stack {
     @apply grid gap-5;
   }
 
+  .dashboard-side-insight {
+    @apply hidden md:block;
+  }
+
+  .dashboard-todo-panel {
+    @apply hidden md:block;
+  }
+
+  .mobile-todo-panel {
+    @apply mb-4 rounded-md border border-field-200 bg-[rgba(247,250,247,0.72)] p-3 md:hidden;
+  }
+
+  .mobile-panel-head {
+    @apply mb-3 flex items-start justify-between gap-3;
+  }
+
+  .mobile-panel-title {
+    @apply m-0 text-lg font-black leading-tight text-ink-950;
+  }
+
+  .mobile-todo-list {
+    @apply m-0 max-h-36 list-none overflow-y-auto p-0;
+  }
+
   .section {
-    @apply rounded-md border border-white/70 bg-[rgba(255,255,255,0.78)] p-5 backdrop-blur-lg;
+    @apply rounded-md border border-white/70 bg-[rgba(255,255,255,0.78)] p-4 backdrop-blur-lg sm:p-5;
     box-shadow: 0 8px 24px rgba(17, 24, 22, 0.035);
   }
 
@@ -341,7 +405,11 @@
   }
 
   .dashboard-visual-grid {
-    @apply mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)];
+    @apply mt-5 hidden gap-5 md:grid xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)];
+  }
+
+  .secondary-metrics {
+    @apply hidden gap-3 md:grid;
   }
 
   .mini-metrics {
@@ -616,6 +684,10 @@
 
   .journal-filter-bar {
     @apply mb-3 grid gap-3 md:grid-cols-3;
+  }
+
+  .journal-control-bar {
+    @apply flex w-full flex-col gap-3 md:w-auto md:items-end;
   }
 
   .journal-batchbar {

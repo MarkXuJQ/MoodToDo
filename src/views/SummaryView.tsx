@@ -74,7 +74,7 @@ export function SummaryView({
   getHeatLevel,
 }: SummaryViewProps) {
   return (
-    <section className="py-5" aria-labelledby="summary-title">
+    <section className="py-3 sm:py-5" aria-labelledby="summary-title">
       <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="eyebrow">Traceable Progress</p>
@@ -92,14 +92,6 @@ export function SummaryView({
             <ChevronRight size={18} aria-hidden="true" />
           </button>
         </div>
-      </div>
-
-      <div className="mb-5 grid gap-3 md:grid-cols-5">
-        <Metric label="本月心象均值" value={`${monthScore || 0}`} />
-        <Metric label="本月打卡率" value={`${monthCheckinRate}%`} />
-        <Metric label="本月完成率" value={`${monthCompletionRate}%`} />
-        <Metric label="连续打卡" value={`${currentStreak} 天`} />
-        <Metric label="最长连续" value={`${longestStreak} 天`} />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
@@ -240,6 +232,14 @@ export function SummaryView({
             />
           </label>
         </section>
+      </div>
+
+      <div className="secondary-metrics mt-5 md:grid-cols-5">
+        <Metric label="本月心象均值" value={`${monthScore || 0}`} />
+        <Metric label="本月打卡率" value={`${monthCheckinRate}%`} />
+        <Metric label="本月完成率" value={`${monthCompletionRate}%`} />
+        <Metric label="连续打卡" value={`${currentStreak} 天`} />
+        <Metric label="最长连续" value={`${longestStreak} 天`} />
       </div>
     </section>
   )

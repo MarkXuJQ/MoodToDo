@@ -167,12 +167,12 @@ export function DashboardView({
   }
 
   return (
-    <section className="py-5" aria-labelledby="dashboard-title">
+    <section className="py-3 sm:py-5" aria-labelledby="dashboard-title">
       <h1 className="sr-only" id="dashboard-title">
         今日台
       </h1>
 
-      <section className="toolbar" aria-label="日期选择">
+      <section className="toolbar dashboard-desktop-summary" aria-label="日期选择">
         <label className="field-line">
           <CalendarDays size={18} aria-hidden="true" />
           <input
@@ -204,6 +204,10 @@ export function DashboardView({
               <h2 className="section-title" id="journal-title">
                 今日记录
               </h2>
+              <label className="mobile-date-control">
+                <span>日期</span>
+                <input type="date" value={selectedDate} onChange={(event) => onDateChange(event.target.value)} />
+              </label>
             </div>
             <span className={`pill score-${selectedEntry?.mood.level ?? '平稳'}`}>{selectedEntry?.mood.level ?? '未记录'}</span>
           </div>
@@ -212,6 +216,46 @@ export function DashboardView({
             <span className="context-label">环境</span>
             <strong>{selectedEntryContextText}</strong>
           </div>
+
+          <section className="mobile-todo-panel" aria-labelledby="mobile-todo-title">
+            <div className="mobile-panel-head">
+              <div>
+                <p className="eyebrow">Todo</p>
+                <h3 className="mobile-panel-title" id="mobile-todo-title">
+                  今日事项
+                </h3>
+              </div>
+              <span className="pill min-h-8 text-xs">{getCompletionRate(dayTodos)}%</span>
+            </div>
+
+            <form className="mb-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2" onSubmit={onAddTodo}>
+              <input className="text-input" value={todoTitle} onChange={(event) => onTodoTitleChange(event.target.value)} placeholder="新增一个事项" />
+              <button className="icon-button-solid" type="submit" aria-label="新增事项">
+                <Plus size={20} aria-hidden="true" />
+              </button>
+            </form>
+
+            <ul className="mobile-todo-list" aria-label="今日事项列表">
+              {dayTodos.map((todo) => (
+                <li className="todo-row" key={todo.id}>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label={todo.done ? '标记未完成' : '标记完成'}
+                    onClick={() => onToggleTodo(todo)}
+                  >
+                    {todo.done ? <CheckCircle2 size={20} aria-hidden="true" /> : <Circle size={20} aria-hidden="true" />}
+                  </button>
+                  <span className={`break-words font-bold text-ink-950 ${todo.done ? 'todo-done' : ''}`}>{todo.title}</span>
+                  <button className="icon-button" type="button" aria-label={`删除 ${todo.title}`} onClick={() => onDeleteTodo(todo)}>
+                    <Trash2 size={16} aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            {dayTodos.length === 0 && <p className="empty-state">今天还没有事项。</p>}
+          </section>
 
           <form className="grid gap-3" onSubmit={onSave}>
             <label className="input-label">
@@ -299,7 +343,7 @@ export function DashboardView({
         </section>
 
         <div className="side-stack">
-          <section className="section" aria-labelledby="todo-title">
+          <section className="section dashboard-todo-panel" aria-labelledby="todo-title">
             <div className="section-head">
               <div>
                 <p className="eyebrow">Todo</p>
@@ -339,7 +383,7 @@ export function DashboardView({
             {dayTodos.length === 0 && <p className="empty-state">今天还没有事项。</p>}
           </section>
 
-          <section className="section" aria-labelledby="stats-title">
+          <section className="section dashboard-side-insight" aria-labelledby="stats-title">
             <div className="section-head">
               <div>
                 <p className="eyebrow">Mood Space</p>

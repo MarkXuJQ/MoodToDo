@@ -55,9 +55,9 @@ export const emptyMetricDraft: MetricDraftState = {
 }
 
 export const navigationItems: NavItem[] = [
-  { id: 'dashboard', label: '仪表盘', note: '记录、Todo 与心象分' },
-  { id: 'journal', label: '日记浏览', note: '历史记录与 Todo 看板' },
-  { id: 'summary', label: '总结', note: '热力图、周回顾与 AI 总结' },
+  { id: 'dashboard', label: '今日', note: '打卡、心情与 Todo' },
+  { id: 'journal', label: '记录', note: '历史日记与 Todo 看板' },
+  { id: 'summary', label: '回顾', note: '热力图、周回顾与 AI 总结' },
   { id: 'settings', label: '设置', note: '系统总览、同步与接口配置' },
 ]
 

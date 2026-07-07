@@ -92,17 +92,17 @@ export function JournalView({
   onDeleteTodo,
 }: JournalViewProps) {
   return (
-    <section className="py-5" aria-labelledby="journal-browser-title">
-      <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <section className="py-3 sm:py-5" aria-labelledby="journal-browser-title">
+      <div className="mb-3 flex flex-col gap-3 md:mb-4 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="eyebrow">Journal Browser</p>
           <h2 className="section-title" id="journal-browser-title">
             日记浏览
           </h2>
-          <p className="mt-1 text-sm font-bold text-ink-400">支持筛选、批量管理和回到任意一天继续编辑。</p>
+          <p className="mt-1 hidden text-sm font-bold text-ink-400 md:block">支持筛选、批量管理和回到任意一天继续编辑。</p>
         </div>
 
-        <div className="flex w-full flex-col gap-3 md:w-auto md:items-end">
+        <div className="journal-control-bar">
           <div className="segmented-control" aria-label="日记浏览模式">
             {journalModes.map((mode) => (
               <button
@@ -128,7 +128,7 @@ export function JournalView({
         </div>
       </div>
 
-      <div className="mb-5 grid gap-3 md:grid-cols-5">
+      <div className="secondary-metrics mb-5 md:grid-cols-5">
         {journalMode === 'entries' ? (
           <>
             <Metric label="日记总数" value={`${entries.length}`} />

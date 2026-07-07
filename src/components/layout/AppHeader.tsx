@@ -1,8 +1,7 @@
-import { CalendarDays, LocateFixed, MapPin, Menu, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
+import { CalendarDays, LocateFixed, MapPin, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
 type AppHeaderProps = {
   isDesktopNav: boolean
-  isNavOpen: boolean
   isNavCollapsed: boolean
   todayLabel: string
   activeViewLabel: string
@@ -13,7 +12,6 @@ type AppHeaderProps = {
 
 export function AppHeader({
   isDesktopNav,
-  isNavOpen,
   isNavCollapsed,
   todayLabel,
   activeViewLabel,
@@ -21,27 +19,23 @@ export function AppHeader({
   weatherText,
   onToggleNav,
 }: AppHeaderProps) {
-  const toggleLabel = isDesktopNav ? (isNavCollapsed ? '展开侧栏' : '收起侧栏') : isNavOpen ? '关闭菜单' : '打开菜单'
+  const toggleLabel = isNavCollapsed ? '展开侧栏' : '收起侧栏'
 
   return (
     <header className="topbar">
       <div className="topbar-main">
         <div className="topbar-brand">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={toggleLabel}
-            aria-expanded={isDesktopNav ? !isNavCollapsed : isNavOpen}
-            onClick={onToggleNav}
-          >
-            {isDesktopNav ? (
-              isNavCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />
-            ) : isNavOpen ? (
-              <X size={18} aria-hidden="true" />
-            ) : (
-              <Menu size={18} aria-hidden="true" />
-            )}
-          </button>
+          {isDesktopNav && (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={toggleLabel}
+              aria-expanded={!isNavCollapsed}
+              onClick={onToggleNav}
+            >
+              {isNavCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
+            </button>
+          )}
           <div className="topbar-copy">
             <strong className="topbar-appname">{activeViewLabel}</strong>
           </div>

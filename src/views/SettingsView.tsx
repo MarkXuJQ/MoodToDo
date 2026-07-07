@@ -98,7 +98,7 @@ export function SettingsView({
   }
 
   return (
-    <section className="py-5" aria-labelledby="settings-title">
+    <section className="py-3 sm:py-5" aria-labelledby="settings-title">
       <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="eyebrow">Preferences</p>
@@ -149,7 +149,7 @@ export function SettingsView({
         <div className="grid gap-5">
           {settingsSection === 'overview' && (
             <>
-              <div className="grid gap-3 md:grid-cols-5">
+              <div className="secondary-metrics md:grid-cols-5">
                 <Metric label="数据库" value={databaseStatus.databaseName} />
                 <Metric label="日记" value={`${entriesCount}`} />
                 <Metric label="事项" value={`${todosCount}`} />

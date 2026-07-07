@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from '
 
 import './App.css'
 import { AppHeader } from './components/layout/AppHeader'
+import { BottomNav } from './components/layout/BottomNav'
 import { NavDrawer } from './components/layout/NavDrawer'
 import DynamicBackground from './components/ui/dynamic-background'
 import {
@@ -961,25 +962,29 @@ function App() {
   return (
     <main className="shell">
       <DynamicBackground />
-      <div className="app-shell" style={{ ['--nav-width' as string]: isNavCollapsed ? '88px' : '296px' }}>
-        <NavDrawer
-          isDesktop={isDesktopNav}
-          isOpen={isNavOpen}
-          isCollapsed={isNavCollapsed}
-          activeView={activeView}
-          navigationItems={navigationItems}
-          onClose={() => setIsNavOpen(false)}
-          onNavigate={navigateTo}
-          onOpenJournalBoard={() => openJournalMode('board')}
-          onOpenSettingsOverview={() => openSettingsSection('overview')}
-          onOpenSettingsAi={() => openSettingsSection('ai')}
-        />
+      <div
+        className={`app-shell ${isDesktopNav ? '' : 'app-shell-bottom-nav'}`}
+        style={{ ['--nav-width' as string]: isNavCollapsed ? '88px' : '296px' }}
+      >
+        {isDesktopNav && (
+          <NavDrawer
+            isDesktop={isDesktopNav}
+            isOpen={isNavOpen}
+            isCollapsed={isNavCollapsed}
+            activeView={activeView}
+            navigationItems={navigationItems}
+            onClose={() => setIsNavOpen(false)}
+            onNavigate={navigateTo}
+            onOpenJournalBoard={() => openJournalMode('board')}
+            onOpenSettingsOverview={() => openSettingsSection('overview')}
+            onOpenSettingsAi={() => openSettingsSection('ai')}
+          />
+        )}
 
         <div className="content-shell">
           <div className="page">
             <AppHeader
               isDesktopNav={isDesktopNav}
-              isNavOpen={isNavOpen}
               isNavCollapsed={isNavCollapsed}
               todayLabel={todayHeaderLabel}
               activeViewLabel={activeNavItem?.label ?? '仪表盘'}
@@ -1154,6 +1159,7 @@ function App() {
           </div>
         </div>
       </div>
+      {!isDesktopNav && <BottomNav activeView={activeView} navigationItems={navigationItems} onNavigate={navigateTo} />}
     </main>
   )
 }

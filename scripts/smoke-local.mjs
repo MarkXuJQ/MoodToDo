@@ -79,10 +79,11 @@ try {
     { timeout: 5000 },
   )
 
-  await page.getByPlaceholder('新增一个事项').fill(todo)
-  await page.getByRole('button', { name: '新增事项' }).click()
-  await page.getByText(todo).waitFor({ state: 'visible', timeout: 5000 })
-  const todoRow = page.getByRole('listitem').filter({ hasText: todo })
+  const dashboardTodoPanel = page.locator('.dashboard-todo-panel')
+  await dashboardTodoPanel.getByPlaceholder('新增一个事项').fill(todo)
+  await dashboardTodoPanel.getByRole('button', { name: '新增事项' }).click()
+  await dashboardTodoPanel.getByText(todo).waitFor({ state: 'visible', timeout: 5000 })
+  const todoRow = dashboardTodoPanel.getByRole('listitem').filter({ hasText: todo })
   await todoRow.getByRole('button', { name: '标记完成' }).click()
   await todoRow.getByRole('button', { name: '标记未完成' }).waitFor({ state: 'visible', timeout: 5000 })
 
@@ -96,7 +97,7 @@ try {
     throw new Error('Todo was not marked done in SQLite.')
   }
 
-  await openNavigationTarget(/日记浏览/)
+  await openNavigationTarget(/记录|日记浏览/)
   await page.getByPlaceholder('搜索标题、正文、心情、天气、标签').fill(title)
   await page.getByLabel(`选择 ${title}`).click()
   await page.getByRole('button', { name: '删除已选' }).click()
