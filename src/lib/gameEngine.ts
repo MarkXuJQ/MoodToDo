@@ -19,7 +19,7 @@ export type GameEngineSnapshot = {
   generatedAt: string
   renderMode: 'external-engine'
   contract: {
-    source: 'xinxiangyi-indexeddb'
+    source: 'xinxiangyi-sqlite'
     renderer: 'external-game-engine'
     mountPointId: string
   }
@@ -150,7 +150,7 @@ export const createGameEngineSnapshot = (
     generatedAt: new Date().toISOString(),
     renderMode: 'external-engine',
     contract: {
-      source: 'xinxiangyi-indexeddb',
+      source: 'xinxiangyi-sqlite',
       renderer: 'external-game-engine',
       mountPointId: gameEngineMountPointId,
     },

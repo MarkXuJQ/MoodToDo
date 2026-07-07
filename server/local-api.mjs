@@ -13,7 +13,7 @@ const databaseName = 'xinxiangyi.sqlite'
 const databasePath = resolve(dataDir, databaseName)
 const port = Number(process.env.XINXIANGYI_API_PORT ?? 8787)
 const host = process.env.XINXIANGYI_API_HOST ?? '127.0.0.1'
-const schemaVersion = 2
+const schemaVersion = 3
 
 mkdirSync(dataDir, { recursive: true })
 
@@ -30,6 +30,8 @@ db.exec(`
     title TEXT NOT NULL,
     body TEXT NOT NULL,
     mood_text TEXT NOT NULL,
+    weather_text TEXT NOT NULL DEFAULT '',
+    location_text TEXT NOT NULL DEFAULT '',
     mood_json TEXT NOT NULL,
     tags_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -116,6 +118,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_metric_records_date_key ON metric_records(date_key);
 `)
 
+const ensureColumn = (table, column, definition) => {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all()
+  if (columns.some((item) => item.name === column)) return
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`)
+}
+
+ensureColumn('entries', 'weather_text', `weather_text TEXT NOT NULL DEFAULT ''`)
+ensureColumn('entries', 'location_text', `location_text TEXT NOT NULL DEFAULT ''`)
+
 db.exec(`PRAGMA user_version = ${schemaVersion}`)
 
 const nowIso = () => new Date().toISOString()
@@ -138,6 +149,8 @@ const rowToEntry = (row) => ({
   title: row.title,
   body: row.body,
   moodText: row.mood_text,
+  weatherText: row.weather_text ?? '',
+  locationText: row.location_text ?? '',
   mood: parseJson(row.mood_json, {}),
   tags: parseJson(row.tags_json, []),
   createdAt: row.created_at,
@@ -445,6 +458,8 @@ const upsertEntry = async (request, response) => {
     title: draft.title,
     body: draft.body,
     moodText: draft.moodText,
+    weatherText: draft.weatherText ?? existing?.weather_text ?? '',
+    locationText: draft.locationText ?? existing?.location_text ?? '',
     mood,
     tags: draft.tags,
     createdAt: existing?.created_at ?? timestamp,
@@ -456,16 +471,18 @@ const upsertEntry = async (request, response) => {
   transaction(() => {
     db.prepare(`
       INSERT INTO entries (
-        id, date_key, title, body, mood_text, mood_json, tags_json, created_at, updated_at, sync_state
+        id, date_key, title, body, mood_text, weather_text, location_text, mood_json, tags_json, created_at, updated_at, sync_state
       )
       VALUES (
-        $id, $dateKey, $title, $body, $moodText, $moodJson, $tagsJson, $createdAt, $updatedAt, $syncState
+        $id, $dateKey, $title, $body, $moodText, $weatherText, $locationText, $moodJson, $tagsJson, $createdAt, $updatedAt, $syncState
       )
       ON CONFLICT(id) DO UPDATE SET
         date_key = excluded.date_key,
         title = excluded.title,
         body = excluded.body,
         mood_text = excluded.mood_text,
+        weather_text = excluded.weather_text,
+        location_text = excluded.location_text,
         mood_json = excluded.mood_json,
         tags_json = excluded.tags_json,
         updated_at = excluded.updated_at,
@@ -476,6 +493,8 @@ const upsertEntry = async (request, response) => {
       $title: entry.title,
       $body: entry.body,
       $moodText: entry.moodText,
+      $weatherText: entry.weatherText,
+      $locationText: entry.locationText,
       $moodJson: JSON.stringify(entry.mood),
       $tagsJson: JSON.stringify(entry.tags),
       $createdAt: entry.createdAt,
@@ -533,6 +552,77 @@ const upsertEntry = async (request, response) => {
   })
 
   sendJson(response, 200, { entry })
+}
+
+const deleteEntryRows = (entryRows, deviceId) => {
+  for (const row of entryRows) {
+    const entry = rowToEntry(row)
+    const attachmentsForEntry = db.prepare('SELECT * FROM attachments WHERE entry_id = ?').all(entry.id).map(rowToAttachment)
+
+    db.prepare('DELETE FROM entries WHERE id = ?').run(entry.id)
+
+    for (const attachment of attachmentsForEntry) {
+      appendChange(
+        'attachment',
+        attachment.id,
+        'delete',
+        {
+          id: attachment.id,
+          entryId: attachment.entryId,
+          dateKey: attachment.dateKey,
+          name: attachment.name,
+        },
+        deviceId,
+      )
+    }
+
+    appendChange('entry', entry.id, 'delete', entry, deviceId)
+  }
+}
+
+const deleteEntry = async (request, response, id) => {
+  const existing = db.prepare('SELECT * FROM entries WHERE id = ?').get(id)
+
+  if (!existing) {
+    sendJson(response, 404, { error: 'Journal entry not found.' })
+    return
+  }
+
+  const deviceId = getDeviceId(request)
+
+  transaction(() => {
+    deleteEntryRows([existing], deviceId)
+  })
+
+  sendJson(response, 200, { ok: true })
+}
+
+const deleteEntriesBatch = async (request, response) => {
+  const payload = await readJson(request)
+  const ids = Array.isArray(payload.ids)
+    ? [...new Set(payload.ids.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean))]
+    : []
+
+  if (ids.length === 0) {
+    sendJson(response, 400, { error: '请选择至少一条日记记录。' })
+    return
+  }
+
+  const placeholders = ids.map(() => '?').join(', ')
+  const entryRows = db.prepare(`SELECT * FROM entries WHERE id IN (${placeholders})`).all(...ids)
+
+  if (entryRows.length === 0) {
+    sendJson(response, 404, { error: '没有找到可删除的日记记录。' })
+    return
+  }
+
+  const deviceId = getDeviceId(request)
+
+  transaction(() => {
+    deleteEntryRows(entryRows, deviceId)
+  })
+
+  sendJson(response, 200, { ok: true, deletedCount: entryRows.length })
 }
 
 const addTodo = async (request, response) => {
@@ -851,6 +941,17 @@ const route = async (request, response) => {
 
   if (request.method === 'POST' && pathname === '/api/entries/upsert') {
     await upsertEntry(request, response)
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/api/entries/batch-delete') {
+    await deleteEntriesBatch(request, response)
+    return
+  }
+
+  const entryMatch = pathname.match(/^\/api\/entries\/([^/]+)$/)
+  if (entryMatch && request.method === 'DELETE') {
+    await deleteEntry(request, response, decodeURIComponent(entryMatch[1]))
     return
   }
 

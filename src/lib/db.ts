@@ -11,6 +11,8 @@ export type JournalEntry = {
   title: string
   body: string
   moodText: string
+  weatherText: string
+  locationText: string
   mood: MoodAnalysis
   tags: string[]
   createdAt: string
@@ -82,6 +84,8 @@ export type EntryDraft = {
   title: string
   body: string
   moodText: string
+  weatherText?: string
+  locationText?: string
   tags: string[]
 }
 
@@ -233,6 +237,19 @@ export const upsertJournalEntry = async (draft: EntryDraft, files: File[]) => {
   })
 
   return entry
+}
+
+export const deleteJournalEntry = async (entry: JournalEntry) => {
+  await apiFetch<{ ok: true }>(`/api/entries/${encodeURIComponent(entry.id)}`, {
+    method: 'DELETE',
+  })
+}
+
+export const deleteJournalEntries = async (entryIds: string[]) => {
+  await apiFetch<{ ok: true; deletedCount: number }>('/api/entries/batch-delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids: entryIds }),
+  })
 }
 
 export const addTodo = async (dateKey: string, title: string) => {

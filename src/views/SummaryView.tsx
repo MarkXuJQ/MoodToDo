@@ -1,0 +1,246 @@
+import { CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Save, Settings2, Sparkles } from 'lucide-react'
+
+import { Metric } from '../components/ui/stat-primitives'
+import type { JournalEntry, TodoItem } from '../lib/db'
+import type { CalendarCell } from '../types/app'
+
+type SummaryViewProps = {
+  visibleMonthLabel: string
+  monthScore: number
+  monthCheckinRate: number
+  monthCompletionRate: number
+  currentStreak: number
+  longestStreak: number
+  monthEntriesCount: number
+  calendarCells: CalendarCell[]
+  selectedDate: string
+  selectedWeek: string
+  selectedWeekScore: number
+  selectedWeekEntryCount: number
+  selectedWeekCompletionRate: number
+  selectedWeekDays: string[]
+  entries: JournalEntry[]
+  todos: TodoItem[]
+  aiConfigured: boolean
+  aiModel: string
+  canGenerateSummary: boolean
+  isGeneratingSummary: boolean
+  summaryDraft: string
+  summaryError: string
+  onPreviousMonth: () => void
+  onNextMonth: () => void
+  onFocusDate: (dateKey: string) => void
+  onSelectedWeekChange: (dateKey: string) => void
+  onOpenAiSettings: () => void
+  onGenerateSummary: () => void
+  onSummaryDraftChange: (value: string) => void
+  onSaveSummary: () => void
+  getCompletionRate: (items: TodoItem[]) => number
+  getHeatLevel: (entry?: JournalEntry) => string
+}
+
+export function SummaryView({
+  visibleMonthLabel,
+  monthScore,
+  monthCheckinRate,
+  monthCompletionRate,
+  currentStreak,
+  longestStreak,
+  monthEntriesCount,
+  calendarCells,
+  selectedDate,
+  selectedWeek,
+  selectedWeekScore,
+  selectedWeekEntryCount,
+  selectedWeekCompletionRate,
+  selectedWeekDays,
+  entries,
+  todos,
+  aiConfigured,
+  aiModel,
+  canGenerateSummary,
+  isGeneratingSummary,
+  summaryDraft,
+  summaryError,
+  onPreviousMonth,
+  onNextMonth,
+  onFocusDate,
+  onSelectedWeekChange,
+  onOpenAiSettings,
+  onGenerateSummary,
+  onSummaryDraftChange,
+  onSaveSummary,
+  getCompletionRate,
+  getHeatLevel,
+}: SummaryViewProps) {
+  return (
+    <section className="py-5" aria-labelledby="summary-title">
+      <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="eyebrow">Traceable Progress</p>
+          <h2 className="section-title" id="summary-title">
+            总结
+          </h2>
+        </div>
+
+        <div className="flex items-center gap-2" aria-label="月份切换">
+          <button className="icon-button" type="button" aria-label="上个月" onClick={onPreviousMonth}>
+            <ChevronLeft size={18} aria-hidden="true" />
+          </button>
+          <strong className="min-w-32 text-center font-black text-ink-950">{visibleMonthLabel}</strong>
+          <button className="icon-button" type="button" aria-label="下个月" onClick={onNextMonth}>
+            <ChevronRight size={18} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-5 grid gap-3 md:grid-cols-5">
+        <Metric label="本月心象均值" value={`${monthScore || 0}`} />
+        <Metric label="本月打卡率" value={`${monthCheckinRate}%`} />
+        <Metric label="本月完成率" value={`${monthCompletionRate}%`} />
+        <Metric label="连续打卡" value={`${currentStreak} 天`} />
+        <Metric label="最长连续" value={`${longestStreak} 天`} />
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
+        <section className="section" aria-labelledby="calendar-title">
+          <div className="section-head">
+            <div>
+              <p className="eyebrow">Calendar Heatmap</p>
+              <h2 className="section-title" id="calendar-title">
+                心情日历
+              </h2>
+            </div>
+            <span className="pill">{monthEntriesCount} 次打卡</span>
+          </div>
+
+          <div className="mb-2 grid grid-cols-7 gap-2" aria-hidden="true">
+            {['一', '二', '三', '四', '五', '六', '日'].map((weekday) => (
+              <span className="text-center text-xs font-black text-ink-400" key={weekday}>
+                {weekday}
+              </span>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-2">
+            {calendarCells.map((cell) => {
+              const dayNumber = Number(cell.dateKey.slice(-2))
+              const completion = getCompletionRate(cell.todos)
+
+              return (
+                <button
+                  className={`grid min-h-16 grid-rows-[auto_1fr_auto] rounded-lg border border-field-200 p-2 text-left text-ink-950 transition-colors hover:border-field-300 ${cell.inMonth ? '' : 'opacity-35'} heat-${getHeatLevel(cell.entry)} ${cell.dateKey === selectedDate ? 'ring-2 ring-xin-700 ring-offset-2' : ''}`}
+                  type="button"
+                  key={cell.dateKey}
+                  onClick={() => onFocusDate(cell.dateKey)}
+                  aria-label={`${cell.dateKey}，${cell.entry ? `心象分 ${cell.entry.mood.score}` : '未打卡'}，完成率 ${completion}%`}
+                >
+                  <span className="text-xs font-black">{dayNumber}</span>
+                  {cell.entry && <strong className="self-center text-lg font-black leading-none">{cell.entry.mood.score}</strong>}
+                  {cell.todos.length > 0 && (
+                    <small className="justify-self-end rounded-full bg-white/70 px-1.5 text-[11px] font-black">
+                      {cell.todos.filter((todo) => todo.done).length}/{cell.todos.length}
+                    </small>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="mt-4 flex items-center justify-end gap-1.5 text-xs font-black text-ink-400" aria-label="热力图图例">
+            <span>未打卡</span>
+            <i className="size-5 rounded border border-field-200 heat-empty" />
+            <i className="size-5 rounded border border-field-200 heat-low" />
+            <i className="size-5 rounded border border-field-200 heat-stress" />
+            <i className="size-5 rounded border border-field-200 heat-steady" />
+            <i className="size-5 rounded border border-field-200 heat-good" />
+            <i className="size-5 rounded border border-field-200 heat-bright" />
+            <span>高亮</span>
+          </div>
+        </section>
+
+        <section className="section" aria-labelledby="week-title">
+          <div className="section-head">
+            <div>
+              <p className="eyebrow">Weekly Review</p>
+              <h2 className="section-title" id="week-title">
+                一周回顾
+              </h2>
+            </div>
+
+            <label className="flex min-h-10 items-center gap-2 rounded-lg border border-field-200 bg-field-50 px-2">
+              <CalendarDays size={16} aria-hidden="true" />
+              <input
+                className="min-h-8 border-0 bg-transparent p-0 outline-none"
+                type="date"
+                value={selectedWeek}
+                onChange={(event) => onSelectedWeekChange(event.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="mb-3 grid gap-3 sm:grid-cols-3">
+            <Metric label="本周心象" value={`${selectedWeekScore || 0}`} />
+            <Metric label="本周打卡" value={`${selectedWeekEntryCount}/7`} />
+            <Metric label="事项完成" value={`${selectedWeekCompletionRate}%`} />
+          </div>
+
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-7 lg:grid-cols-2 xl:grid-cols-7">
+            {selectedWeekDays.map((dateKey) => {
+              const entry = entries.find((item) => item.dateKey === dateKey)
+              const dayItems = todos.filter((todo) => todo.dateKey === dateKey)
+
+              return (
+                <button
+                  className="grid min-h-22 gap-1 rounded-lg border border-field-200 bg-field-50 p-2 text-left transition-colors hover:bg-white"
+                  type="button"
+                  key={dateKey}
+                  onClick={() => onFocusDate(dateKey)}
+                >
+                  <span className="text-xs font-black text-ink-950">{dateKey.slice(5)}</span>
+                  <strong className="text-xl font-black leading-none text-ink-950">{entry?.mood.score ?? '-'}</strong>
+                  <small className="truncate text-xs font-bold text-ink-400">{entry?.mood.quadrant ?? '未打卡'}</small>
+                  <em className="truncate text-xs not-italic font-bold text-ink-400">
+                    {dayItems.length ? `${dayItems.filter((todo) => todo.done).length}/${dayItems.length}` : '无事项'}
+                  </em>
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-field-200 bg-field-50 p-3 text-sm font-bold text-ink-600">
+            <Settings2 size={17} aria-hidden="true" />
+            <span className="truncate">{aiConfigured ? `${aiModel} 已配置` : '在设置页配置大模型 API 后可生成周总结'}</span>
+            <button className="button-secondary min-h-9 px-3" type="button" onClick={onOpenAiSettings}>
+              设置
+            </button>
+          </div>
+
+          <div className="my-3 flex flex-wrap gap-3">
+            <button className="button-primary" type="button" disabled={!canGenerateSummary || isGeneratingSummary} onClick={onGenerateSummary}>
+              {isGeneratingSummary ? <RefreshCw size={18} aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}
+              {isGeneratingSummary ? '生成中' : '生成周总结'}
+            </button>
+            <button className="button-secondary" type="button" disabled={!summaryDraft.trim()} onClick={onSaveSummary}>
+              <Save size={18} aria-hidden="true" />
+              保存总结
+            </button>
+          </div>
+
+          {summaryError && <p className="mb-3 rounded-lg border border-coral-500/30 bg-[#fff1ee] px-3 py-2 font-black text-coral-500">{summaryError}</p>}
+
+          <label className="input-label">
+            <span>周总结</span>
+            <textarea
+              className="text-area min-h-56"
+              value={summaryDraft}
+              onChange={(event) => onSummaryDraftChange(event.target.value)}
+              placeholder={selectedWeekEntryCount ? '生成后可继续手动修改。' : '本周还没有打卡记录。'}
+              rows={10}
+            />
+          </label>
+        </section>
+      </div>
+    </section>
+  )
+}
