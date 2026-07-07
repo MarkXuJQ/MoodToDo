@@ -21,7 +21,7 @@ const db = new DatabaseSync(databasePath)
 
 db.exec(`
   PRAGMA foreign_keys = ON;
-  PRAGMA journal_mode = WAL;
+  PRAGMA journal_mode = DELETE;
   PRAGMA synchronous = NORMAL;
 
   CREATE TABLE IF NOT EXISTS entries (
@@ -171,6 +171,142 @@ const getMeta = () => ({
   apiBaseUrl: `http://${host}:${port}`,
   schemaVersion,
 })
+
+const normalizeChatCompletionsEndpoint = (value) => {
+  const raw = typeof value === 'string' ? value.trim() : ''
+
+  if (!raw) {
+    throw new Error('请先配置大模型 Endpoint。')
+  }
+
+  let url
+
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error('Endpoint 不是合法的 URL。请填写完整的 http(s) 地址。')
+  }
+
+  const normalizedPath = url.pathname.replace(/\/+$/, '')
+
+  if (
+    normalizedPath === '' ||
+    normalizedPath === '/' ||
+    normalizedPath === '/v1' ||
+    normalizedPath.startsWith('/docs')
+  ) {
+    url.pathname = '/v1/chat/completions'
+    url.search = ''
+    return url.toString()
+  }
+
+  if (normalizedPath.endsWith('/chat/completions')) {
+    url.pathname = normalizedPath
+    return url.toString()
+  }
+
+  if (normalizedPath.endsWith('/responses')) {
+    throw new Error('当前周总结只支持 Chat Completions 兼容接口，请填写 /v1/chat/completions 或可自动补全的基础网关地址。')
+  }
+
+  return url.toString()
+}
+
+const extractAiContent = (payload) => {
+  if (payload?.error?.message) {
+    throw new Error(payload.error.message)
+  }
+
+  return payload?.choices?.[0]?.message?.content ?? payload?.output_text ?? ''
+}
+
+const requestWeeklySummary = async (request, response) => {
+  const payload = await readJson(request)
+  let endpoint = ''
+  const apiKey = typeof payload.apiKey === 'string' ? payload.apiKey.trim() : ''
+  const model = typeof payload.model === 'string' ? payload.model.trim() : ''
+  const messages = Array.isArray(payload.messages) ? payload.messages : []
+  const temperature = typeof payload.temperature === 'number' ? payload.temperature : 0.4
+
+  try {
+    endpoint = normalizeChatCompletionsEndpoint(payload.endpoint)
+  } catch (error) {
+    sendJson(response, 400, {
+      error: error instanceof Error ? error.message : 'Endpoint 配置无效。',
+    })
+    return
+  }
+
+  if (!apiKey) {
+    sendJson(response, 400, { error: '请先配置大模型 API Key。' })
+    return
+  }
+
+  if (!model) {
+    sendJson(response, 400, { error: '请先配置模型名称。' })
+    return
+  }
+
+  if (messages.length === 0) {
+    sendJson(response, 400, { error: '本次总结没有可发送的消息内容。' })
+    return
+  }
+
+  let upstreamResponse
+
+  try {
+    upstreamResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature,
+      }),
+    })
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : '未知网络错误。'
+    sendJson(response, 502, {
+      error: `本地代理无法连接到上游模型接口。请检查 Endpoint、网络、HTTPS 证书或代理设置。原始错误：${detail}`,
+    })
+    return
+  }
+
+  const responseText = await upstreamResponse.text()
+  let upstreamPayload = {}
+
+  try {
+    upstreamPayload = responseText ? JSON.parse(responseText) : {}
+  } catch {
+    upstreamPayload = {}
+  }
+
+  try {
+    const content = extractAiContent(upstreamPayload).trim()
+
+    if (!upstreamResponse.ok) {
+      throw new Error(content || `请求失败：${upstreamResponse.status}`)
+    }
+
+    if (!content) {
+      throw new Error(responseText || '模型没有返回可用内容。')
+    }
+
+    sendJson(response, 200, {
+      content,
+      model,
+      resolvedEndpoint: endpoint,
+    })
+  } catch (error) {
+    sendJson(response, upstreamResponse.ok ? 502 : upstreamResponse.status, {
+      error: error instanceof Error ? error.message : '生成周总结失败。',
+      upstreamStatus: upstreamResponse.status,
+    })
+  }
+}
 
 const appendChange = (entity, entityId, operation, payload, deviceId) => {
   db.prepare(`
@@ -511,6 +647,11 @@ const route = async (request, response) => {
 
   if (request.method === 'GET' && pathname === '/api/state') {
     sendJson(response, 200, getState())
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/api/ai/weekly-summary') {
+    await requestWeeklySummary(request, response)
     return
   }
 

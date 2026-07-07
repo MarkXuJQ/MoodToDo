@@ -41,6 +41,7 @@
   body {
     min-width: 320px;
     margin: 0;
+    background: #e8efeb;
   }
 
   button,
@@ -60,15 +61,26 @@
 
 @layer components {
   .shell {
-    @apply min-h-svh bg-field-100 text-ink-800;
+    @apply relative isolate min-h-svh overflow-x-hidden text-ink-800;
+    background:
+      linear-gradient(180deg, rgba(247, 250, 247, 0.68) 0%, rgba(238, 244, 240, 0.54) 38%, rgba(230, 236, 233, 0.72) 100%);
   }
 
   .page {
-    @apply mx-auto w-[min(1240px,calc(100%-24px))] pb-10 md:w-[min(1240px,calc(100%-48px))];
+    @apply relative z-10 mx-auto w-[min(1320px,calc(100%-24px))] pb-10 md:w-[min(1320px,calc(100%-48px))];
   }
 
   .topbar {
-    @apply flex flex-col gap-4 py-6 md:flex-row md:items-end md:justify-between md:py-8;
+    @apply sticky top-0 z-20 py-4;
+  }
+
+  .topbar-main {
+    @apply flex flex-col gap-4 border-b border-white/60 bg-[rgba(238,244,240,0.72)] pb-4 backdrop-blur-xl md:flex-row md:items-end md:justify-between;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+
+  .topbar-brand {
+    @apply flex items-start gap-3;
   }
 
   .eyebrow {
@@ -79,33 +91,74 @@
     @apply m-0 text-4xl font-black leading-none tracking-normal text-ink-950;
   }
 
+  .view-summary {
+    @apply mt-1 flex flex-col gap-0.5 text-sm font-bold text-ink-400;
+  }
+
+  .view-summary strong {
+    @apply text-sm font-black text-ink-950;
+  }
+
   .status-pills {
     @apply flex flex-wrap gap-2;
   }
 
   .pill {
-    @apply inline-flex min-h-9 items-center gap-2 rounded-full border border-field-200 bg-white px-3 text-sm font-bold text-ink-600;
+    @apply inline-flex min-h-9 items-center gap-2 rounded-full border border-white/70 bg-[rgba(255,255,255,0.72)] px-3 text-sm font-bold text-ink-600 backdrop-blur-md;
   }
 
-  .tabs {
-    @apply grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-field-200 bg-field-200 md:grid-cols-5;
+  .nav-backdrop {
+    @apply fixed inset-0 z-30 bg-ink-950/18 backdrop-blur-[2px];
   }
 
-  .tab {
-    @apply inline-flex min-h-12 items-center justify-center gap-2 bg-white px-3 text-sm font-black text-ink-600 transition-colors hover:bg-field-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-xin-100;
+  .nav-drawer {
+    @apply fixed left-0 top-0 z-40 flex h-svh w-[min(320px,88vw)] -translate-x-full flex-col border-r border-white/70 bg-[rgba(252,253,252,0.88)] p-5 shadow-[0_24px_80px_rgba(17,24,22,0.12)] backdrop-blur-xl transition-transform duration-200;
   }
 
-  .tab-active {
-    @apply bg-xin-700 text-white hover:bg-xin-700;
+  .nav-drawer-open {
+    @apply translate-x-0;
+  }
+
+  .nav-drawer-head {
+    @apply border-b border-field-200 pb-4;
+  }
+
+  .nav-list {
+    @apply mt-4 grid gap-2;
+  }
+
+  .nav-link {
+    @apply grid min-h-16 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-lg border border-transparent bg-[rgba(247,250,247,0.68)] px-3 text-left transition-colors hover:border-white/60 hover:bg-white/80;
+  }
+
+  .nav-link-active {
+    @apply border-xin-700 bg-xin-100;
+  }
+
+  .nav-link-icon {
+    @apply inline-flex size-10 items-center justify-center rounded-lg border border-white/70 bg-white/84 text-xin-700;
+  }
+
+  .nav-shortcuts {
+    @apply mt-auto border-t border-field-200 pt-4;
+  }
+
+  .nav-shortcuts-title {
+    @apply mb-2 text-xs font-black uppercase text-ink-400;
+  }
+
+  .nav-sub-link {
+    @apply block w-full rounded-lg px-2 py-2 text-left text-sm font-black text-ink-600 transition-colors hover:bg-field-50 hover:text-ink-950;
   }
 
   .toolbar {
-    @apply mt-5 grid gap-3 md:grid-cols-[minmax(240px,1.3fr)_repeat(4,minmax(0,1fr))];
+    @apply mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1.25fr)_repeat(4,minmax(0,1fr))];
   }
 
   .field-line,
   .metric-line {
-    @apply min-h-16 rounded-lg border border-field-200 bg-white px-4;
+    @apply min-h-16 rounded-md border border-white/70 bg-[rgba(255,255,255,0.74)] px-4 backdrop-blur-lg;
+    box-shadow: 0 10px 30px rgba(17, 24, 22, 0.04);
   }
 
   .field-line {
@@ -125,7 +178,7 @@
   }
 
   .workspace-grid {
-    @apply mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)];
+    @apply mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.34fr)_minmax(320px,0.82fr)];
   }
 
   .side-stack {
@@ -133,7 +186,8 @@
   }
 
   .section {
-    @apply rounded-lg border border-field-200 bg-white p-5;
+    @apply rounded-md border border-white/70 bg-[rgba(255,255,255,0.78)] p-5 backdrop-blur-lg;
+    box-shadow: 0 16px 44px rgba(17, 24, 22, 0.05);
   }
 
   .section-flat {
@@ -149,7 +203,7 @@
   }
 
   .section-icon {
-    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-field-200 bg-field-50 text-xin-700;
+    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-field-200 bg-field-50 text-xin-700;
   }
 
   .input-label {
@@ -158,7 +212,7 @@
 
   .text-input,
   .text-area {
-    @apply w-full rounded-lg border border-field-200 bg-field-50 px-3 text-ink-950 outline-none transition-colors focus:border-xin-700 focus:bg-white focus:ring-4 focus:ring-xin-100;
+    @apply w-full rounded-md border border-white/75 bg-[rgba(247,250,247,0.8)] px-3 text-ink-950 outline-none transition-colors focus:border-xin-700 focus:bg-white focus:ring-4 focus:ring-xin-100;
   }
 
   .text-input {
@@ -170,19 +224,31 @@
   }
 
   .button-primary {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-xin-700 bg-xin-700 px-4 text-sm font-black text-white transition-colors hover:bg-xin-800 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-xin-700 bg-xin-700 px-4 text-sm font-black text-white transition-colors hover:bg-xin-800 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .button-secondary {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-field-200 bg-field-50 px-4 text-sm font-black text-ink-800 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-white/75 bg-[rgba(247,250,247,0.78)] px-4 text-sm font-black text-ink-800 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .icon-button {
-    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-field-200 bg-white text-ink-600 transition-colors hover:border-field-300 hover:bg-field-50;
+    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-white/75 bg-white/82 text-ink-600 transition-colors hover:border-field-300 hover:bg-field-50;
   }
 
   .icon-button-solid {
-    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-xin-700 bg-xin-700 text-white transition-colors hover:bg-xin-800;
+    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-xin-700 bg-xin-700 text-white transition-colors hover:bg-xin-800;
+  }
+
+  .segmented-control {
+    @apply inline-grid grid-cols-2 gap-px overflow-hidden rounded-md border border-field-200 bg-field-200;
+  }
+
+  .segment {
+    @apply inline-flex min-h-10 items-center justify-center bg-white px-4 text-sm font-black text-ink-600 transition-colors hover:bg-field-50;
+  }
+
+  .segment-active {
+    @apply bg-xin-700 text-white hover:bg-xin-700;
   }
 
   .todo-row {
@@ -194,7 +260,7 @@
   }
 
   .empty-state {
-    @apply rounded-lg border border-dashed border-field-300 bg-field-50 p-4 text-sm font-bold text-ink-400;
+    @apply rounded-md border border-dashed border-field-300 bg-[rgba(247,250,247,0.65)] p-4 text-sm font-bold text-ink-400;
   }
 
   .score-ring {
@@ -244,7 +310,75 @@
   }
 
   .note {
-    @apply border-l-4 border-river-500 bg-field-50 px-3 py-3 text-sm font-bold text-ink-600;
+    @apply border-l-4 border-river-500 bg-[rgba(247,250,247,0.72)] px-3 py-3 text-sm font-bold text-ink-600;
+  }
+
+  .board-toolbar {
+    @apply mb-4 grid gap-3 xl:grid-cols-[220px_minmax(0,1fr)];
+  }
+
+  .board-capture {
+    @apply grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto];
+  }
+
+  .board-grid {
+    @apply grid gap-4 xl:grid-cols-4;
+  }
+
+  .board-column {
+    @apply min-w-0 rounded-md border border-white/70 bg-[rgba(255,255,255,0.8)] backdrop-blur-lg;
+  }
+
+  .board-column-head {
+    @apply flex items-start justify-between gap-3 border-b border-field-200 px-4 py-4;
+  }
+
+  .board-column-title {
+    @apply m-0 text-base font-black text-ink-950;
+  }
+
+  .board-column-note {
+    @apply mt-1 text-xs font-bold text-ink-400;
+  }
+
+  .board-column-body {
+    @apply grid gap-3 p-3;
+  }
+
+  .board-card {
+    @apply grid gap-3 rounded-md border border-white/70 bg-[rgba(247,250,247,0.82)] p-3;
+  }
+
+  .board-card-meta {
+    @apply flex items-center justify-between gap-2;
+  }
+
+  .board-date-link {
+    @apply inline-flex min-h-8 items-center rounded-md border border-white/75 bg-white/86 px-2 text-xs font-black text-ink-600 transition-colors hover:border-xin-700 hover:text-xin-800;
+  }
+
+  .board-card-actions {
+    @apply flex items-center justify-between gap-2;
+  }
+
+  .settings-layout {
+    @apply grid gap-5 xl:grid-cols-[220px_minmax(0,1fr)];
+  }
+
+  .settings-sidebar {
+    @apply flex gap-2 overflow-x-auto xl:sticky xl:top-28 xl:flex-col xl:self-start;
+  }
+
+  .settings-link {
+    @apply min-w-52 rounded-md border border-white/75 bg-[rgba(255,255,255,0.78)] px-4 py-3 text-left transition-colors hover:bg-field-50 xl:min-w-0;
+  }
+
+  .settings-link-active {
+    @apply border-xin-700 bg-xin-100;
+  }
+
+  .config-row {
+    @apply flex flex-col gap-3 rounded-md border border-white/70 bg-[rgba(247,250,247,0.75)] p-3 sm:flex-row sm:items-center sm:justify-between;
   }
 
   .heat-empty {
@@ -289,23 +423,5 @@
 
   .score-高亮 {
     @apply text-violet-500;
-  }
-
-  .density-compact .topbar {
-    @apply py-5;
-  }
-
-  .density-compact .toolbar,
-  .density-compact .workspace-grid,
-  .density-compact .side-stack {
-    @apply gap-3;
-  }
-
-  .density-compact .section {
-    @apply p-4;
-  }
-
-  .density-compact .text-area {
-    @apply min-h-24;
   }
 }

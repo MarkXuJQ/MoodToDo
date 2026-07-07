@@ -11,15 +11,16 @@ import {
   Cloud,
   Database,
   ImagePlus,
+  Menu,
   Plus,
   RefreshCw,
   Save,
   Search,
   Settings2,
-  SlidersHorizontal,
   Sparkles,
   Trash2,
   TrendingUp,
+  X,
 } from 'lucide-react'
 import './App.css'
 import {
@@ -44,8 +45,13 @@ import {
   defaultGameEngineSettings,
   type GameEngineSettings,
 } from './lib/gameEngine'
+import DynamicBackground from './components/ui/dynamic-background'
 
-type ActiveView = 'dashboard' | 'journal' | 'summary' | 'overview' | 'settings'
+type ActiveView = 'dashboard' | 'journal' | 'summary' | 'settings'
+
+type JournalMode = 'entries' | 'board'
+
+type SettingsSection = 'overview' | 'cards' | 'database' | 'ai' | 'webdav' | 'engine'
 
 type DraftState = {
   title: string
@@ -99,9 +105,11 @@ type DatabaseStatus = {
   lastLoadedAt: string
 }
 
-type ViewPreferences = {
-  dashboardFocus: 'balanced' | 'writing' | 'review'
-  density: 'comfortable' | 'compact'
+type DashboardCardId = 'streak' | 'monthCheckin' | 'todoCompletion' | 'latestMood' | 'pendingSync' | 'attachments'
+
+type DashboardCardConfig = {
+  id: DashboardCardId
+  enabled: boolean
 }
 
 const emptyDraft: DraftState = {
@@ -127,12 +135,16 @@ const defaultWebDavConfig: WebDavConfig = {
 const aiConfigStorageKey = 'xinxiangyi-ai-config-v1'
 const webDavConfigStorageKey = 'xinxiangyi-webdav-config-v1'
 const gameEngineSettingsStorageKey = 'xinxiangyi-game-engine-settings-v1'
-const viewPreferencesStorageKey = 'xinxiangyi-view-preferences-v1'
+const dashboardCardsStorageKey = 'xinxiangyi-dashboard-cards-v1'
 
-const defaultViewPreferences: ViewPreferences = {
-  dashboardFocus: 'balanced',
-  density: 'comfortable',
-}
+const defaultDashboardCards: DashboardCardConfig[] = [
+  { id: 'latestMood', enabled: true },
+  { id: 'streak', enabled: true },
+  { id: 'todoCompletion', enabled: true },
+  { id: 'monthCheckin', enabled: true },
+  { id: 'pendingSync', enabled: true },
+  { id: 'attachments', enabled: false },
+]
 
 const getTodayKey = () => {
   const today = new Date()
@@ -441,38 +453,22 @@ const readGameEngineSettings = (): GameEngineSettings => {
   }
 }
 
-const readViewPreferences = (): ViewPreferences => {
-  const raw = window.localStorage.getItem(viewPreferencesStorageKey)
+const readDashboardCards = (): DashboardCardConfig[] => {
+  const raw = window.localStorage.getItem(dashboardCardsStorageKey)
 
-  if (!raw) return defaultViewPreferences
+  if (!raw) return defaultDashboardCards
 
   try {
-    const parsed = JSON.parse(raw) as Partial<ViewPreferences>
+    const parsed = JSON.parse(raw) as DashboardCardConfig[]
+    const byId = new Map(parsed.map((item) => [item.id, item.enabled]))
 
-    return {
-      dashboardFocus:
-        parsed.dashboardFocus === 'writing' || parsed.dashboardFocus === 'review'
-          ? parsed.dashboardFocus
-          : defaultViewPreferences.dashboardFocus,
-      density: parsed.density === 'compact' ? 'compact' : defaultViewPreferences.density,
-    }
+    return defaultDashboardCards.map((item) => ({
+      ...item,
+      enabled: byId.get(item.id) ?? item.enabled,
+    }))
   } catch {
-    return defaultViewPreferences
+    return defaultDashboardCards
   }
-}
-
-const extractAiContent = (payload: unknown) => {
-  const chatPayload = payload as {
-    choices?: Array<{ message?: { content?: string } }>
-    output_text?: string
-    error?: { message?: string }
-  }
-
-  if (chatPayload.error?.message) {
-    throw new Error(chatPayload.error.message)
-  }
-
-  return chatPayload.choices?.[0]?.message?.content ?? chatPayload.output_text ?? ''
 }
 
 const formatBytes = (size: number) => {
@@ -481,6 +477,27 @@ const formatBytes = (size: number) => {
 
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
+
+const navigationItems: Array<{ id: ActiveView; label: string; note: string }> = [
+  { id: 'dashboard', label: '今日台', note: '记录、Todo 与心象分' },
+  { id: 'journal', label: '日记浏览', note: '历史记录与 Todo 看板' },
+  { id: 'summary', label: '总结', note: '热力图、周回顾与 AI 总结' },
+  { id: 'settings', label: '设置', note: '系统总览、同步与接口配置' },
+]
+
+const journalModes: Array<{ id: JournalMode; label: string }> = [
+  { id: 'entries', label: '记录' },
+  { id: 'board', label: 'Todo 看板' },
+]
+
+const settingsSections: Array<{ id: SettingsSection; label: string; note: string }> = [
+  { id: 'overview', label: '系统总览', note: '数据规模与引擎快照' },
+  { id: 'cards', label: '统计卡片', note: '决定今日台展示哪些指标' },
+  { id: 'database', label: '本地数据库', note: 'SQLite 与持久化状态' },
+  { id: 'ai', label: '大模型 API', note: '周总结代理与模型配置' },
+  { id: 'webdav', label: 'WebDAV', note: '坚果云同步预留' },
+  { id: 'engine', label: '游戏接口', note: '外部引擎消费快照' },
+]
 
 const Metric = ({ label, value, tone }: { label: string; value: string; tone?: string }) => (
   <div className="metric-line">
@@ -541,6 +558,9 @@ const AttachmentThumb = ({
 
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>('dashboard')
+  const [isNavOpen, setIsNavOpen] = useState(false)
+  const [journalMode, setJournalMode] = useState<JournalMode>('entries')
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('overview')
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([])
@@ -555,7 +575,7 @@ function App() {
   const [aiConfig, setAiConfig] = useState<AiConfig>(defaultAiConfig)
   const [webDavConfig, setWebDavConfig] = useState<WebDavConfig>(defaultWebDavConfig)
   const [gameEngineSettings, setGameEngineSettings] = useState<GameEngineSettings>(defaultGameEngineSettings)
-  const [viewPreferences, setViewPreferences] = useState<ViewPreferences>(defaultViewPreferences)
+  const [dashboardCards, setDashboardCards] = useState<DashboardCardConfig[]>(defaultDashboardCards)
   const [journalSearch, setJournalSearch] = useState('')
   const [summaryDraft, setSummaryDraft] = useState('')
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
@@ -603,7 +623,7 @@ function App() {
     setAiConfig(readAiConfig())
     setWebDavConfig(readWebDavConfig())
     setGameEngineSettings(readGameEngineSettings())
-    setViewPreferences(readViewPreferences())
+    setDashboardCards(readDashboardCards())
     void reload()
   }, [])
 
@@ -639,7 +659,18 @@ function App() {
     [attachments, selectedEntry],
   )
 
+  const todayKey = getTodayKey()
   const latestEntry = entries[0]
+  const entryByDate = useMemo(() => new Map(entries.map((entry) => [entry.dateKey, entry])), [entries])
+  const attachmentCountByEntryId = useMemo(() => {
+    const counts = new Map<string, number>()
+
+    for (const attachment of attachments) {
+      counts.set(attachment.entryId, (counts.get(attachment.entryId) ?? 0) + 1)
+    }
+
+    return counts
+  }, [attachments])
   const monthGroups = useMemo(() => createMonthGroups(entries, todos), [entries, todos])
   const lastSevenEntries = entries.slice(0, 7)
   const allEntryTodos = todos.filter((todo) => entries.some((entry) => entry.dateKey === todo.dateKey))
@@ -669,6 +700,34 @@ function App() {
         .includes(keyword),
     )
   }, [entries, journalSearch])
+  const filteredBoardTodos = useMemo(() => {
+    const keyword = journalSearch.trim().toLowerCase()
+    const items = keyword
+      ? todos.filter((todo) => {
+          const entry = entryByDate.get(todo.dateKey)
+
+          return [
+            todo.title,
+            todo.dateKey,
+            entry?.title ?? '',
+            entry?.body ?? '',
+            entry?.moodText ?? '',
+            entry?.tags.join(' ') ?? '',
+            entry?.mood.quadrant ?? '',
+          ]
+            .join(' ')
+            .toLowerCase()
+            .includes(keyword)
+        })
+      : todos
+
+    return [...items].sort((left, right) => {
+      if (left.done !== right.done) return Number(left.done) - Number(right.done)
+      if (!left.done && left.dateKey !== right.dateKey) return left.dateKey.localeCompare(right.dateKey)
+
+      return (right.completedAt ?? right.updatedAt).localeCompare(left.completedAt ?? left.updatedAt)
+    })
+  }, [entryByDate, journalSearch, todos])
   const pendingChangeCount = changes.filter((change) => change.syncState === 'pending').length
   const completionRate = getCompletionRate(allEntryTodos)
   const monthEntries = entries.filter((entry) => entry.dateKey.startsWith(visibleMonth))
@@ -687,12 +746,71 @@ function App() {
   const todayScore = selectedEntry?.mood.score ?? 50
   const canSave = Boolean(draft.body.trim() || draft.moodText.trim() || draft.title.trim() || pendingFiles.length > 0)
   const canGenerateSummary = Boolean(aiConfig.endpoint.trim() && aiConfig.apiKey.trim() && selectedWeekEntries.length > 0)
-  const dashboardGridClass =
-    viewPreferences.dashboardFocus === 'writing'
-      ? 'mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.6fr)]'
-      : viewPreferences.dashboardFocus === 'review'
-        ? 'mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.95fr)]'
-        : 'workspace-grid'
+  const dashboardCardMetrics = [
+    {
+      id: 'latestMood' as const,
+      label: '最近心象',
+      value: `${latestEntry?.mood.score ?? todayScore}`,
+      tone: latestEntry ? `score-${latestEntry.mood.level}` : undefined,
+    },
+    {
+      id: 'streak' as const,
+      label: '连续打卡',
+      value: `${currentStreak} 天`,
+    },
+    {
+      id: 'todoCompletion' as const,
+      label: '事项完成',
+      value: `${dayTodos.filter((todo) => todo.done).length}/${dayTodos.length}`,
+    },
+    {
+      id: 'monthCheckin' as const,
+      label: '本月打卡率',
+      value: `${monthCheckinRate}%`,
+    },
+    {
+      id: 'pendingSync' as const,
+      label: '待同步',
+      value: `${pendingChangeCount}`,
+    },
+    {
+      id: 'attachments' as const,
+      label: '图片',
+      value: `${selectedAttachments.length + pendingFiles.length}`,
+    },
+  ]
+  const visibleDashboardCards = dashboardCardMetrics.filter((card) =>
+    dashboardCards.find((item) => item.id === card.id)?.enabled,
+  )
+  const boardColumns = useMemo(
+    () => [
+      {
+        id: 'overdue',
+        label: '待推进',
+        note: '早于今天且尚未完成',
+        items: filteredBoardTodos.filter((todo) => !todo.done && todo.dateKey < todayKey),
+      },
+      {
+        id: 'today',
+        label: '今天',
+        note: '今天要收口的事项',
+        items: filteredBoardTodos.filter((todo) => !todo.done && todo.dateKey === todayKey),
+      },
+      {
+        id: 'upcoming',
+        label: '稍后',
+        note: '未来日期或预排事项',
+        items: filteredBoardTodos.filter((todo) => !todo.done && todo.dateKey > todayKey),
+      },
+      {
+        id: 'done',
+        label: '已完成',
+        note: '已经落地的推进',
+        items: filteredBoardTodos.filter((todo) => todo.done),
+      },
+    ],
+    [filteredBoardTodos, todayKey],
+  )
 
   const handleDraftChange =
     (key: keyof DraftState) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -780,10 +898,26 @@ function App() {
     }
   }
 
-  const handleSelectCalendarDay = (dateKey: string) => {
+  const navigateTo = (view: ActiveView) => {
+    setActiveView(view)
+    setIsNavOpen(false)
+  }
+
+  const openSettingsSection = (section: SettingsSection) => {
+    setSettingsSection(section)
+    navigateTo('settings')
+  }
+
+  const openJournalMode = (mode: JournalMode) => {
+    setJournalMode(mode)
+    navigateTo('journal')
+  }
+
+  const focusDate = (dateKey: string, nextView: ActiveView = activeView) => {
     setSelectedDate(dateKey)
     setSelectedWeek(getWeekKey(dateKey))
-    setActiveView('dashboard')
+    setVisibleMonth(dateKey.slice(0, 7))
+    navigateTo(nextView)
   }
 
   const handleAiConfigChange =
@@ -811,9 +945,15 @@ function App() {
     persistGameEngineSettings({ ...gameEngineSettings, snapshotDays })
   }
 
-  const persistViewPreferences = (next: ViewPreferences) => {
-    setViewPreferences(next)
-    window.localStorage.setItem(viewPreferencesStorageKey, JSON.stringify(next))
+  const persistDashboardCards = (next: DashboardCardConfig[]) => {
+    setDashboardCards(next)
+    window.localStorage.setItem(dashboardCardsStorageKey, JSON.stringify(next))
+  }
+
+  const toggleDashboardCard = (cardId: DashboardCardId) => {
+    persistDashboardCards(
+      dashboardCards.map((card) => (card.id === cardId ? { ...card, enabled: !card.enabled } : card)),
+    )
   }
 
   const handleGenerateSummary = async () => {
@@ -823,13 +963,14 @@ function App() {
     setSummaryError('')
 
     try {
-      const response = await fetch(aiConfig.endpoint.trim(), {
+      const response = await fetch('/api/ai/weekly-summary', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${aiConfig.apiKey.trim()}`,
         },
         body: JSON.stringify({
+          endpoint: aiConfig.endpoint.trim(),
+          apiKey: aiConfig.apiKey.trim(),
           model: aiConfig.model.trim(),
           messages: [
             {
@@ -844,11 +985,11 @@ function App() {
           temperature: 0.4,
         }),
       })
-      const payload = await response.json()
-      const content = extractAiContent(payload).trim()
+      const payload = (await response.json()) as { content?: string; error?: string }
+      const content = payload.content?.trim() ?? ''
 
       if (!response.ok) {
-        throw new Error(content || `请求失败：${response.status}`)
+        throw new Error(payload.error || `请求失败：${response.status}`)
       }
 
       if (!content) {
@@ -877,93 +1018,132 @@ function App() {
     setSummaryDraft(selectedWeekSummary?.content ?? '')
   }, [selectedWeekSummary])
 
+  const activeNavItem = navigationItems.find((item) => item.id === activeView)
+  const activeSettingsItem = settingsSections.find((item) => item.id === settingsSection)
+
   return (
-    <main className={`shell ${viewPreferences.density === 'compact' ? 'density-compact' : ''}`}>
+    <main className="shell">
+      <DynamicBackground />
       <div className="page">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">Xinxiangyi</p>
-          <h1 className="app-title">心象仪</h1>
-        </div>
-        <div className="status-pills" aria-label="本地状态">
-          <span className="pill">
-            <Database size={16} aria-hidden="true" />
-            SQLite
-          </span>
-          <span className="pill">
-            <Cloud size={16} aria-hidden="true" />
-            待同步 {pendingChangeCount}
-          </span>
-          <span className="pill border-xin-700 bg-xin-100 text-xin-800">
-            <CheckCircle2 size={16} aria-hidden="true" />
-            文件库
-          </span>
-          <button className="button-secondary min-h-9 px-3" type="button" onClick={() => void reload()}>
-            <RefreshCw size={16} aria-hidden="true" />
-            重新获取
-          </button>
-        </div>
-      </header>
+        <header className="topbar">
+          <div className="topbar-main">
+            <div className="topbar-brand">
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={isNavOpen ? '关闭菜单' : '打开菜单'}
+                aria-expanded={isNavOpen}
+                onClick={() => setIsNavOpen((current) => !current)}
+              >
+                {isNavOpen ? <X size={18} aria-hidden="true" /> : <Menu size={18} aria-hidden="true" />}
+              </button>
+              <div>
+                <p className="eyebrow">Xinxiangyi</p>
+                <h1 className="app-title">心象仪</h1>
+                <p className="view-summary">
+                  <strong>{activeNavItem?.label ?? '今日台'}</strong>
+                  <span>{activeNavItem?.note ?? '离线优先的心情记录与行动回顾。'}</span>
+                </p>
+              </div>
+            </div>
+            <div className="status-pills" aria-label="本地状态">
+              <span className="pill">
+                <Database size={16} aria-hidden="true" />
+                SQLite
+              </span>
+              <span className="pill">
+                <Cloud size={16} aria-hidden="true" />
+                待同步 {pendingChangeCount}
+              </span>
+              <span className="pill border-xin-700 bg-xin-100 text-xin-800">
+                <CheckCircle2 size={16} aria-hidden="true" />
+                文件库
+              </span>
+              <button className="button-secondary min-h-9 px-3" type="button" onClick={() => void reload()}>
+                <RefreshCw size={16} aria-hidden="true" />
+                重新获取
+              </button>
+            </div>
+          </div>
+        </header>
 
-      <nav className="tabs" aria-label="视图切换">
-        <button
-          className={`tab ${activeView === 'dashboard' ? 'tab-active' : ''}`}
-          type="button"
-          onClick={() => setActiveView('dashboard')}
-        >
-          <BarChart3 size={18} aria-hidden="true" />
-          Dashboard
-        </button>
-        <button
-          className={`tab ${activeView === 'journal' ? 'tab-active' : ''}`}
-          type="button"
-          onClick={() => setActiveView('journal')}
-        >
-          <BookOpen size={18} aria-hidden="true" />
-          日记浏览
-        </button>
-        <button
-          className={`tab ${activeView === 'summary' ? 'tab-active' : ''}`}
-          type="button"
-          onClick={() => setActiveView('summary')}
-        >
-          <TrendingUp size={18} aria-hidden="true" />
-          总结
-        </button>
-        <button
-          className={`tab ${activeView === 'overview' ? 'tab-active' : ''}`}
-          type="button"
-          onClick={() => setActiveView('overview')}
-        >
-          <Database size={18} aria-hidden="true" />
-          总览
-        </button>
-        <button
-          className={`tab ${activeView === 'settings' ? 'tab-active' : ''}`}
-          type="button"
-          onClick={() => setActiveView('settings')}
-        >
-          <SlidersHorizontal size={18} aria-hidden="true" />
-          设置
-        </button>
-      </nav>
+        {isNavOpen && <button className="nav-backdrop" type="button" aria-label="关闭菜单" onClick={() => setIsNavOpen(false)} />}
 
-      {activeView === 'dashboard' ? (
+        <aside className={`nav-drawer ${isNavOpen ? 'nav-drawer-open' : ''}`} aria-label="主菜单">
+          <div className="nav-drawer-head">
+            <p className="eyebrow">Navigation</p>
+            <strong className="text-lg font-black text-ink-950">切换工作区</strong>
+          </div>
+          <nav className="nav-list">
+            {navigationItems.map((item) => {
+              const icon =
+                item.id === 'dashboard' ? (
+                  <BarChart3 size={18} aria-hidden="true" />
+                ) : item.id === 'journal' ? (
+                  <BookOpen size={18} aria-hidden="true" />
+                ) : item.id === 'summary' ? (
+                  <TrendingUp size={18} aria-hidden="true" />
+                ) : (
+                  <Settings2 size={18} aria-hidden="true" />
+                )
+
+              return (
+                <button
+                  className={`nav-link ${activeView === item.id ? 'nav-link-active' : ''}`}
+                  type="button"
+                  key={item.id}
+                  onClick={() => navigateTo(item.id)}
+                >
+                  <span className="nav-link-icon">{icon}</span>
+                  <span className="min-w-0">
+                    <strong className="block truncate text-sm font-black text-ink-950">{item.label}</strong>
+                    <small className="block truncate text-xs font-bold text-ink-400">{item.note}</small>
+                  </span>
+                </button>
+              )
+            })}
+          </nav>
+          <div className="nav-shortcuts">
+            <p className="nav-shortcuts-title">常用捷径</p>
+            <button className="nav-sub-link" type="button" onClick={() => openJournalMode('board')}>
+              直接打开 Todo 看板
+            </button>
+            <button className="nav-sub-link" type="button" onClick={() => openSettingsSection('overview')}>
+              查看系统总览
+            </button>
+            <button className="nav-sub-link" type="button" onClick={() => openSettingsSection('ai')}>
+              配置周总结模型
+            </button>
+          </div>
+        </aside>
+
+        {activeView === 'dashboard' ? (
         <>
           <section className="toolbar" aria-label="日期选择">
             <label className="field-line">
               <CalendarDays size={18} aria-hidden="true" />
-              <input className="min-h-10 border-0 bg-transparent p-0 font-black text-ink-950 outline-none" type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+              <input
+                className="min-h-10 border-0 bg-transparent p-0 font-black text-ink-950 outline-none"
+                type="date"
+                value={selectedDate}
+                onChange={(event) => focusDate(event.target.value, 'dashboard')}
+              />
             </label>
-            <Metric label="心象分" value={`${todayScore}`} tone={`score-${selectedEntry?.mood.level ?? '平稳'}`} />
-            <Metric label="今日完成" value={`${dayTodos.filter((todo) => todo.done).length}/${dayTodos.length}`} />
-            <Metric label="图片" value={`${selectedAttachments.length + pendingFiles.length}`} />
-            <Metric label="读取时间" value={databaseStatus.lastLoadedAt || '-'} />
+            {visibleDashboardCards.length > 0 ? (
+              visibleDashboardCards.map((card) => (
+                <Metric label={card.label} value={card.value} tone={card.tone} key={card.id} />
+              ))
+            ) : (
+              <div className="metric-line md:col-span-4">
+                <span className="metric-label">统计卡片</span>
+                <strong className="metric-value !text-base">去设置里挑选要展示的指标</strong>
+              </div>
+            )}
           </section>
 
           {writeError && <p className="mt-4 rounded-lg border border-coral-500/30 bg-[#fff1ee] px-3 py-2 font-black text-coral-500">{writeError}</p>}
 
-          <div className={dashboardGridClass}>
+          <div className="workspace-grid">
             <section className="section" aria-labelledby="journal-title">
               <div className="section-head">
                 <div>
@@ -1166,7 +1346,7 @@ function App() {
                               className="grid min-h-16 grid-cols-[auto_auto] grid-rows-[auto_auto] gap-x-2 rounded-lg border border-field-200 bg-field-50 p-2 text-left transition-colors hover:bg-white"
                               type="button"
                               key={entry.id}
-                              onClick={() => setSelectedDate(entry.dateKey)}
+                              onClick={() => focusDate(entry.dateKey, 'dashboard')}
                             >
                               <span className="font-black text-ink-950">{entry.dateKey.slice(5)}</span>
                               <strong className="justify-self-end font-black text-ink-950">{entry.mood.score}</strong>
@@ -1190,63 +1370,176 @@ function App() {
             <div>
               <p className="eyebrow">Journal Browser</p>
               <h2 className="section-title" id="journal-browser-title">日记浏览</h2>
+              <p className="mt-1 text-sm font-bold text-ink-400">在记录流与 Todo 看板之间切换，快速回到任意一天。</p>
             </div>
-            <label className="flex min-h-11 w-full items-center gap-2 rounded-lg border border-field-200 bg-white px-3 md:w-[min(420px,100%)]">
-              <Search size={18} aria-hidden="true" />
-              <input
-                className="min-h-10 flex-1 border-0 bg-transparent p-0 outline-none"
-                value={journalSearch}
-                onChange={(event) => setJournalSearch(event.target.value)}
-                placeholder="搜索标题、正文、心情、标签"
-              />
-            </label>
+            <div className="flex w-full flex-col gap-3 md:w-auto md:items-end">
+              <div className="segmented-control" aria-label="日记浏览模式">
+                {journalModes.map((mode) => (
+                  <button
+                    className={`segment ${journalMode === mode.id ? 'segment-active' : ''}`}
+                    type="button"
+                    key={mode.id}
+                    onClick={() => setJournalMode(mode.id)}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              <label className="flex min-h-11 w-full items-center gap-2 rounded-lg border border-field-200 bg-white px-3 md:w-[min(420px,100%)]">
+                <Search size={18} aria-hidden="true" />
+                <input
+                  className="min-h-10 flex-1 border-0 bg-transparent p-0 outline-none"
+                  value={journalSearch}
+                  onChange={(event) => setJournalSearch(event.target.value)}
+                  placeholder={journalMode === 'entries' ? '搜索标题、正文、心情、标签' : '搜索 Todo、日期、关联日记'}
+                />
+              </label>
+            </div>
           </div>
 
           <div className="mb-5 grid gap-3 md:grid-cols-5">
-            <Metric label="日记总数" value={`${entries.length}`} />
-            <Metric label="搜索结果" value={`${filteredEntries.length}`} />
-            <Metric label="最近心象" value={`${latestEntry?.mood.score ?? 0}`} />
-            <Metric label="连续打卡" value={`${currentStreak} 天`} />
-            <Metric label="待同步" value={`${pendingChangeCount}`} />
+            {journalMode === 'entries' ? (
+              <>
+                <Metric label="日记总数" value={`${entries.length}`} />
+                <Metric label="搜索结果" value={`${filteredEntries.length}`} />
+                <Metric label="最近心象" value={`${latestEntry?.mood.score ?? 0}`} />
+                <Metric label="连续打卡" value={`${currentStreak} 天`} />
+                <Metric label="待同步" value={`${pendingChangeCount}`} />
+              </>
+            ) : (
+              <>
+                <Metric label="事项总数" value={`${todos.length}`} />
+                <Metric label="看板结果" value={`${filteredBoardTodos.length}`} />
+                <Metric label="待推进" value={`${boardColumns[0].items.length + boardColumns[1].items.length + boardColumns[2].items.length}`} />
+                <Metric label="今日收口" value={`${boardColumns[1].items.length}`} />
+                <Metric label="已完成" value={`${boardColumns[3].items.length}`} />
+              </>
+            )}
           </div>
 
-          <div className="divide-y divide-field-200 rounded-lg border border-field-200 bg-white">
-            {filteredEntries.map((entry) => {
-              const entryTodos = todos.filter((todo) => todo.dateKey === entry.dateKey)
-              const entryAttachments = attachments.filter((attachment) => attachment.entryId === entry.id)
+          {journalMode === 'entries' ? (
+            <>
+              <div className="divide-y divide-field-200 rounded-lg border border-field-200 bg-white">
+                {filteredEntries.map((entry) => {
+                  const entryTodos = todos.filter((todo) => todo.dateKey === entry.dateKey)
+                  const entryAttachments = attachments.filter((attachment) => attachment.entryId === entry.id)
 
-              return (
-                <button
-                  className="grid w-full gap-2 px-4 py-4 text-left transition-colors hover:bg-field-50 md:grid-cols-[160px_minmax(0,1fr)_auto] md:items-start"
-                  type="button"
-                  key={entry.id}
-                  onClick={() => {
-                    setSelectedDate(entry.dateKey)
-                    setActiveView('dashboard')
-                  }}
-                >
-                  <div className="flex items-center justify-between gap-3 md:block">
-                    <span className="text-sm font-black text-ink-400">{entry.dateKey}</span>
-                    <strong className={`block text-2xl font-black ${`score-${entry.mood.level}`}`}>{entry.mood.score}</strong>
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="m-0 truncate text-base font-black text-ink-950">{entry.title}</h3>
-                    <p className="mt-1 line-clamp-2 text-sm font-bold text-ink-600">{entry.moodText || entry.body || '没有正文'}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 md:max-w-80 md:justify-end">
-                    <span className="pill min-h-7 text-xs">{entry.mood.quadrant}</span>
-                    <span className="pill min-h-7 text-xs">{entryTodos.filter((todo) => todo.done).length}/{entryTodos.length} 事项</span>
-                    <span className="pill min-h-7 text-xs">{entryAttachments.length} 图</span>
-                    {entry.tags.map((tag) => (
-                      <span className="pill min-h-7 text-xs" key={tag}>#{tag}</span>
-                    ))}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
+                  return (
+                    <button
+                      className="grid w-full gap-2 px-4 py-4 text-left transition-colors hover:bg-field-50 md:grid-cols-[160px_minmax(0,1fr)_auto] md:items-start"
+                      type="button"
+                      key={entry.id}
+                      onClick={() => focusDate(entry.dateKey, 'dashboard')}
+                    >
+                      <div className="flex items-center justify-between gap-3 md:block">
+                        <span className="text-sm font-black text-ink-400">{entry.dateKey}</span>
+                        <strong className={`block text-2xl font-black ${`score-${entry.mood.level}`}`}>{entry.mood.score}</strong>
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="m-0 truncate text-base font-black text-ink-950">{entry.title}</h3>
+                        <p className="mt-1 line-clamp-2 text-sm font-bold text-ink-600">{entry.moodText || entry.body || '没有正文'}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 md:max-w-80 md:justify-end">
+                        <span className="pill min-h-7 text-xs">{entry.mood.quadrant}</span>
+                        <span className="pill min-h-7 text-xs">{entryTodos.filter((todo) => todo.done).length}/{entryTodos.length} 事项</span>
+                        <span className="pill min-h-7 text-xs">{entryAttachments.length} 图</span>
+                        {entry.tags.map((tag) => (
+                          <span className="pill min-h-7 text-xs" key={tag}>#{tag}</span>
+                        ))}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
 
-          {filteredEntries.length === 0 && <p className="empty-state">还没有匹配的日记。</p>}
+              {filteredEntries.length === 0 && <p className="empty-state">还没有匹配的日记。</p>}
+            </>
+          ) : (
+            <>
+              <section className="board-toolbar" aria-label="Todo 看板快捷录入">
+                <label className="field-line">
+                  <CalendarDays size={18} aria-hidden="true" />
+                  <input
+                    className="min-h-10 border-0 bg-transparent p-0 font-black text-ink-950 outline-none"
+                    type="date"
+                    value={selectedDate}
+                    onChange={(event) => focusDate(event.target.value, 'journal')}
+                  />
+                </label>
+                <form className="board-capture" onSubmit={handleAddTodo}>
+                  <input
+                    className="text-input"
+                    value={todoTitle}
+                    onChange={(event) => setTodoTitle(event.target.value)}
+                    placeholder="给这个日期快速记下一条 Todo"
+                  />
+                  <button className="button-primary" type="submit">
+                    <Plus size={18} aria-hidden="true" />
+                    添加
+                  </button>
+                </form>
+              </section>
+
+              <div className="board-grid">
+                {boardColumns.map((column) => (
+                  <section className="board-column" aria-labelledby={`board-${column.id}`} key={column.id}>
+                    <div className="board-column-head">
+                      <div>
+                        <h3 className="board-column-title" id={`board-${column.id}`}>{column.label}</h3>
+                        <p className="board-column-note">{column.note}</p>
+                      </div>
+                      <span className="pill min-h-8 text-xs">{column.items.length}</span>
+                    </div>
+
+                    <div className="board-column-body">
+                      {column.items.map((todo) => {
+                        const entry = entryByDate.get(todo.dateKey)
+                        const attachmentCount = entry ? (attachmentCountByEntryId.get(entry.id) ?? 0) : 0
+
+                        return (
+                          <article className="board-card" key={todo.id}>
+                            <div className="board-card-meta">
+                              <button
+                                className="board-date-link"
+                                type="button"
+                                onClick={() => focusDate(todo.dateKey, 'dashboard')}
+                              >
+                                {todo.dateKey}
+                              </button>
+                              <span className={`pill min-h-7 text-xs ${entry ? `score-${entry.mood.level}` : ''}`}>
+                                {entry ? `心象 ${entry.mood.score}` : '未打卡'}
+                              </span>
+                            </div>
+                            <h3 className={`m-0 text-base font-black text-ink-950 ${todo.done ? 'todo-done' : ''}`}>{todo.title}</h3>
+                            <p className="m-0 text-sm font-bold text-ink-600">
+                              {entry ? `${entry.title} · ${entry.mood.quadrant}` : '还没有关联到日记记录。'}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <span className="pill min-h-7 text-xs">{attachmentCount} 图</span>
+                              <span className="pill min-h-7 text-xs">{todo.syncState === 'pending' ? '待同步' : '已同步'}</span>
+                              {entry?.tags.slice(0, 3).map((tag) => (
+                                <span className="pill min-h-7 text-xs" key={`${todo.id}-${tag}`}>#{tag}</span>
+                              ))}
+                            </div>
+                            <div className="board-card-actions">
+                              <button className="button-secondary min-h-9 px-3" type="button" onClick={() => void handleToggleTodo(todo)}>
+                                {todo.done ? '撤回完成' : '标记完成'}
+                              </button>
+                              <button className="icon-button" type="button" aria-label={`删除 ${todo.title}`} onClick={() => void handleDeleteTodo(todo)}>
+                                <Trash2 size={16} aria-hidden="true" />
+                              </button>
+                            </div>
+                          </article>
+                        )
+                      })}
+
+                      {column.items.length === 0 && <p className="empty-state">这个列暂时没有事项。</p>}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </>
+          )}
         </section>
       ) : activeView === 'summary' ? (
         <section className="py-5" aria-labelledby="summary-title">
@@ -1299,7 +1592,7 @@ function App() {
                       className={`grid min-h-16 grid-rows-[auto_1fr_auto] rounded-lg border border-field-200 p-2 text-left text-ink-950 transition-colors hover:border-field-300 ${cell.inMonth ? '' : 'opacity-35'} heat-${getHeatLevel(cell.entry)} ${cell.dateKey === selectedDate ? 'ring-2 ring-xin-700 ring-offset-2' : ''}`}
                       type="button"
                       key={cell.dateKey}
-                      onClick={() => handleSelectCalendarDay(cell.dateKey)}
+                      onClick={() => focusDate(cell.dateKey, 'dashboard')}
                       aria-label={`${cell.dateKey}，${cell.entry ? `心象分 ${cell.entry.mood.score}` : '未打卡'}，完成率 ${completion}%`}
                     >
                       <span className="text-xs font-black">{dayNumber}</span>
@@ -1345,7 +1638,7 @@ function App() {
                   const dayItems = todos.filter((todo) => todo.dateKey === dateKey)
 
                   return (
-                    <button className="grid min-h-22 gap-1 rounded-lg border border-field-200 bg-field-50 p-2 text-left transition-colors hover:bg-white" type="button" key={dateKey} onClick={() => handleSelectCalendarDay(dateKey)}>
+                    <button className="grid min-h-22 gap-1 rounded-lg border border-field-200 bg-field-50 p-2 text-left transition-colors hover:bg-white" type="button" key={dateKey} onClick={() => focusDate(dateKey, 'dashboard')}>
                       <span className="text-xs font-black text-ink-950">{dateKey.slice(5)}</span>
                       <strong className="text-xl font-black leading-none text-ink-950">{entry?.mood.score ?? '-'}</strong>
                       <small className="truncate text-xs font-bold text-ink-400">{entry?.mood.quadrant ?? '未打卡'}</small>
@@ -1358,7 +1651,7 @@ function App() {
               <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-field-200 bg-field-50 p-3 text-sm font-bold text-ink-600">
                 <Settings2 size={17} aria-hidden="true" />
                 <span className="truncate">{aiConfig.apiKey ? `${aiConfig.model} 已配置` : '在设置页配置大模型 API 后可生成周总结'}</span>
-                <button className="button-secondary min-h-9 px-3" type="button" onClick={() => setActiveView('settings')}>
+                <button className="button-secondary min-h-9 px-3" type="button" onClick={() => openSettingsSection('ai')}>
                   设置
                 </button>
               </div>
@@ -1389,293 +1682,326 @@ function App() {
             </section>
           </div>
         </section>
-      ) : activeView === 'overview' ? (
-        <section className="py-5" aria-labelledby="overview-title">
-          <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="eyebrow">Local First</p>
-              <h2 className="section-title" id="overview-title">总览</h2>
-            </div>
-            <button className="button-secondary" type="button" onClick={() => void reload()}>
-              <RefreshCw size={17} aria-hidden="true" />
-              重新读取本地数据库
-            </button>
-          </div>
-
-          <div className="mb-5 grid gap-3 md:grid-cols-5">
-            <Metric label="数据库" value={localDatabaseName} />
-            <Metric label="日记" value={`${entries.length}`} />
-            <Metric label="事项" value={`${todos.length}`} />
-            <Metric label="附件" value={`${attachments.length}`} />
-            <Metric label="周总结" value={`${weeklySummaries.length}`} />
-          </div>
-
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(360px,1.1fr)]">
-            <section className="section" aria-labelledby="database-title">
-              <div className="section-head">
-                <div>
-                  <p className="eyebrow">Database</p>
-                  <h2 className="section-title" id="database-title">本地数据库</h2>
-                </div>
-                <span className="section-icon"><Database size={22} aria-hidden="true" /></span>
-              </div>
-              <div className="table-grid">
-                <span className="table-key">origin</span>
-                <strong className="table-value">{databaseStatus.origin}</strong>
-                <span className="table-key">driver</span>
-                <strong className="table-value">{databaseStatus.driver}</strong>
-                <span className="table-key">database</span>
-                <strong className="table-value">{databaseStatus.databaseName}</strong>
-                <span className="table-key">database path</span>
-                <strong className="table-value">{databaseStatus.databasePath || '等待本地 API 返回'}</strong>
-                <span className="table-key">api</span>
-                <strong className="table-value">{databaseStatus.apiBaseUrl || '/api'}</strong>
-                <span className="table-key">schema</span>
-                <strong className="table-value">v{databaseStatus.schemaVersion || '-'}</strong>
-                <span className="table-key">last loaded</span>
-                <strong className="table-value">{databaseStatus.lastLoadedAt || '-'}</strong>
-                <span className="table-key">entries</span>
-                <strong className="table-value">{entries.length}</strong>
-                <span className="table-key">todos</span>
-                <strong className="table-value">{todos.length}</strong>
-                <span className="table-key">attachments</span>
-                <strong className="table-value">{attachments.length}</strong>
-                <span className="table-key">changes</span>
-                <strong className="table-value">{changes.length}</strong>
-                <span className="table-key">pending changes</span>
-                <strong className="table-value">{pendingChangeCount}</strong>
-                <span className="table-key">weeklySummaries</span>
-                <strong className="table-value">{weeklySummaries.length}</strong>
-              </div>
-              <p className="note mt-3">
-                主数据已迁移为本地 SQLite 文件。浏览器、端口或前端 origin 改变时，只要本地 API 指向同一个数据库文件，数据仍会保留。
-              </p>
-            </section>
-
-            <section className="section" aria-labelledby="engine-overview-title">
-              <div className="section-head">
-                <div>
-                  <p className="eyebrow">Game Engine Adapter</p>
-                  <h2 className="section-title" id="engine-overview-title">引擎快照</h2>
-                </div>
-                <span className="section-icon"><Settings2 size={22} aria-hidden="true" /></span>
-              </div>
-              <div className="table-grid">
-                <span className="table-key">adapter</span>
-                <strong className="table-value">{gameEngineSnapshot.adapterVersion}</strong>
-                <span className="table-key">render mode</span>
-                <strong className="table-value">{gameEngineSnapshot.renderMode}</strong>
-                <span className="table-key">progress score</span>
-                <strong className="table-value">{gameEngineSnapshot.progress.progressScore}</strong>
-                <span className="table-key">phase index</span>
-                <strong className="table-value">{gameEngineSnapshot.progress.phaseIndex}</strong>
-                <span className="table-key">timeline samples</span>
-                <strong className="table-value">{gameEngineSnapshot.timeline.length}</strong>
-              </div>
-              <p className="note mt-3">
-                这里仅暴露给后续外部游戏引擎消费的数据快照，网页端不负责渲染场景。
-              </p>
-            </section>
-          </div>
-        </section>
       ) : (
         <section className="py-5" aria-labelledby="settings-title">
           <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="eyebrow">Preferences</p>
               <h2 className="section-title" id="settings-title">设置</h2>
+              <p className="mt-1 text-sm font-bold text-ink-400">{activeSettingsItem?.note}</p>
             </div>
-            <span className="pill">{gameEngineSnapshot.adapterVersion}</span>
+            <span className="pill">{activeSettingsItem?.label}</span>
           </div>
 
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
-            <section className="section lg:row-span-2" aria-labelledby="engine-settings-title">
-              <div className="section-head">
-                <div>
-                  <p className="eyebrow">Game Engine Adapter</p>
-                  <h2 className="section-title" id="engine-settings-title">游戏引擎接口</h2>
-                </div>
-                <span className="section-icon"><Settings2 size={22} aria-hidden="true" /></span>
-              </div>
+          <div className="settings-layout">
+            <aside className="settings-sidebar" aria-label="设置子菜单">
+              {settingsSections.map((item) => (
+                <button
+                  className={`settings-link ${settingsSection === item.id ? 'settings-link-active' : ''}`}
+                  type="button"
+                  key={item.id}
+                  onClick={() => setSettingsSection(item.id)}
+                >
+                  <strong className="block text-sm font-black text-ink-950">{item.label}</strong>
+                  <small className="block text-xs font-bold text-ink-400">{item.note}</small>
+                </button>
+              ))}
+            </aside>
 
-              <div className="rounded-lg border border-field-200 bg-field-50 p-3">
-                <strong>网页端不渲染游戏场景。</strong>
-                <p className="m-0 mt-1 text-sm font-bold text-ink-600">
-                  当前只维护一个稳定快照接口。后续接入 Phaser、Pixi、Three.js 或 WebAssembly/Godot 导出时，
-                  引擎层读取该快照并自行决定如何呈现成长关系。
-                </p>
-              </div>
-
-              <div className="mt-3 grid gap-3">
-                <label className="input-label">
-                  <span>Snapshot Days</span>
-                  <input
-                    className="text-input"
-                    min={7}
-                    max={365}
-                    type="number"
-                    value={gameEngineSettings.snapshotDays}
-                    onChange={handleSnapshotDaysChange}
-                  />
-                </label>
-              </div>
-
-              <div className="mt-3">
-                <div className="table-grid">
-                  <span className="table-key">adapterVersion</span>
-                  <strong className="table-value">{gameEngineSnapshot.adapterVersion}</strong>
-                  <span className="table-key">renderMode</span>
-                  <strong className="table-value">{gameEngineSnapshot.renderMode}</strong>
-                  <span className="table-key">mountPointId</span>
-                  <strong className="table-value">{gameEngineSnapshot.contract.mountPointId}</strong>
-                  <span className="table-key">entries</span>
-                  <strong className="table-value">{gameEngineSnapshot.metrics.entries}</strong>
-                  <span className="table-key">averageMoodScore</span>
-                  <strong className="table-value">{gameEngineSnapshot.metrics.averageMoodScore}</strong>
-                  <span className="table-key">progressScore</span>
-                  <strong className="table-value">{gameEngineSnapshot.progress.progressScore}</strong>
-                  <span className="table-key">phaseProgress</span>
-                  <strong className="table-value">{gameEngineSnapshot.progress.phaseProgress}%</strong>
-                  <span className="table-key">timeline</span>
-                  <strong className="table-value">{gameEngineSnapshot.timeline.length}</strong>
-                  <span className="table-key">assets</span>
-                  <strong className="table-value">{gameEngineSnapshot.assets.length}</strong>
-                </div>
-              </div>
-            </section>
-
-            <section className="section" aria-labelledby="view-settings-title">
-              <div className="section-head">
-                <div>
-                  <p className="eyebrow">Layout</p>
-                  <h2 className="section-title" id="view-settings-title">界面偏好</h2>
-                </div>
-                <span className="section-icon"><SlidersHorizontal size={22} aria-hidden="true" /></span>
-              </div>
-
-              <div className="grid gap-4">
-                <div className="input-label">
-                  <span>Dashboard 重心</span>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      ['balanced', '平衡'],
-                      ['writing', '写作'],
-                      ['review', '回顾'],
-                    ].map(([value, label]) => (
-                      <button
-                        className={`button-secondary min-h-10 px-2 ${viewPreferences.dashboardFocus === value ? 'border-xin-700 bg-xin-100 text-xin-800' : ''}`}
-                        type="button"
-                        key={value}
-                        onClick={() => persistViewPreferences({ ...viewPreferences, dashboardFocus: value as ViewPreferences['dashboardFocus'] })}
-                      >
-                        {label}
-                      </button>
-                    ))}
+            <div className="grid gap-5">
+              {settingsSection === 'overview' && (
+                <>
+                  <div className="grid gap-3 md:grid-cols-5">
+                    <Metric label="数据库" value={localDatabaseName} />
+                    <Metric label="日记" value={`${entries.length}`} />
+                    <Metric label="事项" value={`${todos.length}`} />
+                    <Metric label="附件" value={`${attachments.length}`} />
+                    <Metric label="周总结" value={`${weeklySummaries.length}`} />
                   </div>
-                </div>
-                <div className="input-label">
-                  <span>显示密度</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      ['comfortable', '舒适'],
-                      ['compact', '紧凑'],
-                    ].map(([value, label]) => (
-                      <button
-                        className={`button-secondary min-h-10 px-2 ${viewPreferences.density === value ? 'border-xin-700 bg-xin-100 text-xin-800' : ''}`}
-                        type="button"
-                        key={value}
-                        onClick={() => persistViewPreferences({ ...viewPreferences, density: value as ViewPreferences['density'] })}
-                      >
-                        {label}
+
+                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
+                    <section className="section" aria-labelledby="overview-db-title">
+                      <div className="section-head">
+                        <div>
+                          <p className="eyebrow">System Snapshot</p>
+                          <h2 className="section-title" id="overview-db-title">本地数据库概况</h2>
+                        </div>
+                        <span className="section-icon"><Database size={22} aria-hidden="true" /></span>
+                      </div>
+                      <div className="table-grid">
+                        <span className="table-key">driver</span>
+                        <strong className="table-value">{databaseStatus.driver}</strong>
+                        <span className="table-key">database</span>
+                        <strong className="table-value">{databaseStatus.databaseName}</strong>
+                        <span className="table-key">path</span>
+                        <strong className="table-value">{databaseStatus.databasePath || '等待本地 API 返回'}</strong>
+                        <span className="table-key">schema</span>
+                        <strong className="table-value">v{databaseStatus.schemaVersion || '-'}</strong>
+                        <span className="table-key">pending changes</span>
+                        <strong className="table-value">{pendingChangeCount}</strong>
+                      </div>
+                      <p className="note mt-3">
+                        主数据已经固定落在项目目录下的 SQLite 文件里。浏览器、端口和 PWA 安装状态改变时，只要本地 API 仍指向同一个文件，数据就不会跟着消失。
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button className="button-secondary min-h-9 px-3" type="button" onClick={() => setSettingsSection('database')}>
+                          看详细结构
+                        </button>
+                        <button className="button-secondary min-h-9 px-3" type="button" onClick={() => void reload()}>
+                          <RefreshCw size={16} aria-hidden="true" />
+                          重新读取
+                        </button>
+                      </div>
+                    </section>
+
+                    <section className="section" aria-labelledby="overview-engine-title">
+                      <div className="section-head">
+                        <div>
+                          <p className="eyebrow">Game Adapter</p>
+                          <h2 className="section-title" id="overview-engine-title">引擎快照</h2>
+                        </div>
+                        <span className="section-icon"><Settings2 size={22} aria-hidden="true" /></span>
+                      </div>
+                      <div className="table-grid">
+                        <span className="table-key">adapter</span>
+                        <strong className="table-value">{gameEngineSnapshot.adapterVersion}</strong>
+                        <span className="table-key">progress score</span>
+                        <strong className="table-value">{gameEngineSnapshot.progress.progressScore}</strong>
+                        <span className="table-key">phase index</span>
+                        <strong className="table-value">{gameEngineSnapshot.progress.phaseIndex}</strong>
+                        <span className="table-key">timeline samples</span>
+                        <strong className="table-value">{gameEngineSnapshot.timeline.length}</strong>
+                      </div>
+                      <p className="note mt-3">
+                        这里暴露的是给后续游戏引擎消费的稳定快照，网页本身不渲染世界场景，只负责把情绪与行动数据整理好。
+                      </p>
+                      <button className="button-secondary mt-3 min-h-9 px-3" type="button" onClick={() => setSettingsSection('engine')}>
+                        调整接口参数
                       </button>
-                    ))}
+                    </section>
                   </div>
-                </div>
-              </div>
-            </section>
+                </>
+              )}
 
-            <section className="section" aria-labelledby="storage-settings-title">
-              <div className="section-head">
-                <div>
-                  <p className="eyebrow">Local Database</p>
-                  <h2 className="section-title" id="storage-settings-title">本地数据库</h2>
-                </div>
-                <span className="section-icon"><Database size={22} aria-hidden="true" /></span>
-              </div>
+              {settingsSection === 'cards' && (
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+                  <section className="section" aria-labelledby="card-settings-title">
+                    <div className="section-head">
+                      <div>
+                        <p className="eyebrow">Cards</p>
+                        <h2 className="section-title" id="card-settings-title">今日台统计卡片</h2>
+                      </div>
+                      <span className="pill">{dashboardCards.filter((card) => card.enabled).length} 已显示</span>
+                    </div>
 
-              <div className="grid gap-3">
-                <div className="table-grid">
-                  <span className="table-key">driver</span>
-                  <strong className="table-value">{databaseStatus.driver}</strong>
-                  <span className="table-key">database</span>
-                  <strong className="table-value">{databaseStatus.databaseName}</strong>
-                  <span className="table-key">path</span>
-                  <strong className="table-value">{databaseStatus.databasePath || '等待本地 API 返回'}</strong>
-                  <span className="table-key">api</span>
-                  <strong className="table-value">{databaseStatus.apiBaseUrl || '/api'}</strong>
-                  <span className="table-key">schema</span>
-                  <strong className="table-value">v{databaseStatus.schemaVersion || '-'}</strong>
-                </div>
-                <p className="note">
-                  当前主库是项目目录下的 SQLite 文件，不再依赖浏览器 profile 或端口隔离。后续 WebDAV 同步会基于这个文件中的变更日志生成可恢复备份。
-                </p>
-              </div>
-            </section>
+                    <div className="grid gap-3">
+                      {dashboardCardMetrics.map((card) => {
+                        const enabled = dashboardCards.find((item) => item.id === card.id)?.enabled ?? false
 
-            <section className="section" aria-labelledby="ai-settings-title">
-              <div className="section-head">
-                <div>
-                  <p className="eyebrow">Weekly AI</p>
-                  <h2 className="section-title" id="ai-settings-title">大模型 API</h2>
-                </div>
-                <span className="section-icon"><Settings2 size={22} aria-hidden="true" /></span>
-              </div>
-              <div className="grid gap-3 rounded-lg border border-field-200 bg-field-50 p-3">
-                <label className="input-label">
-                  <span>Endpoint</span>
-                  <input className="text-input bg-white" value={aiConfig.endpoint} onChange={handleAiConfigChange('endpoint')} placeholder="https://api.openai.com/v1/chat/completions" />
-                </label>
-                <label className="input-label">
-                  <span>Model</span>
-                  <input className="text-input bg-white" value={aiConfig.model} onChange={handleAiConfigChange('model')} placeholder="gpt-4o-mini" />
-                </label>
-                <label className="input-label">
-                  <span>API Key</span>
-                  <input className="text-input bg-white" value={aiConfig.apiKey} onChange={handleAiConfigChange('apiKey')} placeholder="只保存在本机浏览器" type="password" />
-                </label>
-              </div>
-            </section>
+                        return (
+                          <div className="config-row" key={card.id}>
+                            <div>
+                              <strong className="block text-sm font-black text-ink-950">{card.label}</strong>
+                              <small className="block text-xs font-bold text-ink-400">当前值 {card.value}</small>
+                            </div>
+                            <button
+                              className={`button-secondary min-h-9 px-3 ${enabled ? 'border-xin-700 bg-xin-100 text-xin-800' : ''}`}
+                              type="button"
+                              onClick={() => toggleDashboardCard(card.id)}
+                            >
+                              {enabled ? '显示中' : '已隐藏'}
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
 
-            <section className="section" aria-labelledby="webdav-title">
-              <div className="section-head">
-                <div>
-                  <p className="eyebrow">WebDAV</p>
-                  <h2 className="section-title" id="webdav-title">坚果云同步准备</h2>
+                    <p className="note mt-3">
+                      这一步先把统计区改成数据驱动的卡片显隐，后面接拖拽排序、自定义公式或新的统计块时，不需要再推翻存储结构。
+                    </p>
+                  </section>
+
+                  <section className="section" aria-labelledby="card-preview-title">
+                    <div className="section-head">
+                      <div>
+                        <p className="eyebrow">Preview</p>
+                        <h2 className="section-title" id="card-preview-title">当前展示预览</h2>
+                      </div>
+                      <span className="section-icon"><BarChart3 size={22} aria-hidden="true" /></span>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {visibleDashboardCards.map((card) => (
+                        <Metric label={card.label} value={card.value} tone={card.tone} key={`preview-${card.id}`} />
+                      ))}
+                    </div>
+                    {visibleDashboardCards.length === 0 && <p className="empty-state mt-3">当前还没有开启的统计卡片。</p>}
+                  </section>
                 </div>
-                <span className="section-icon"><Cloud size={22} aria-hidden="true" /></span>
-              </div>
-              <div className="grid gap-3 rounded-lg border border-field-200 bg-field-50 p-3">
-                <label className="input-label">
-                  <span>Server URL</span>
-                  <input className="text-input bg-white" value={webDavConfig.url} onChange={handleWebDavConfigChange('url')} placeholder="https://dav.jianguoyun.com/dav/" />
-                </label>
-                <label className="input-label">
-                  <span>Username</span>
-                  <input className="text-input bg-white" value={webDavConfig.username} onChange={handleWebDavConfigChange('username')} placeholder="坚果云账号邮箱" />
-                </label>
-                <label className="input-label">
-                  <span>Password</span>
-                  <input className="text-input bg-white" value={webDavConfig.password} onChange={handleWebDavConfigChange('password')} placeholder="坚果云应用密码" type="password" />
-                </label>
-                <label className="input-label">
-                  <span>Remote Path</span>
-                  <input className="text-input bg-white" value={webDavConfig.remotePath} onChange={handleWebDavConfigChange('remotePath')} placeholder="/xinxiangyi" />
-                </label>
-              </div>
-              <p className="note mt-3">
-                当前版本只保存同步配置和本地变更日志。下一步会把 `changes` 打包成 JSON 增量文件，并把图片附件按 `attachments/` 上传到 WebDAV。
-              </p>
-            </section>
+              )}
+
+              {settingsSection === 'database' && (
+                <section className="section" aria-labelledby="storage-settings-title">
+                  <div className="section-head">
+                    <div>
+                      <p className="eyebrow">Local Database</p>
+                      <h2 className="section-title" id="storage-settings-title">本地数据库</h2>
+                    </div>
+                    <span className="section-icon"><Database size={22} aria-hidden="true" /></span>
+                  </div>
+
+                  <div className="grid gap-3">
+                    <div className="table-grid">
+                      <span className="table-key">origin</span>
+                      <strong className="table-value">{databaseStatus.origin}</strong>
+                      <span className="table-key">driver</span>
+                      <strong className="table-value">{databaseStatus.driver}</strong>
+                      <span className="table-key">database</span>
+                      <strong className="table-value">{databaseStatus.databaseName}</strong>
+                      <span className="table-key">path</span>
+                      <strong className="table-value">{databaseStatus.databasePath || '等待本地 API 返回'}</strong>
+                      <span className="table-key">api</span>
+                      <strong className="table-value">{databaseStatus.apiBaseUrl || '/api'}</strong>
+                      <span className="table-key">schema</span>
+                      <strong className="table-value">v{databaseStatus.schemaVersion || '-'}</strong>
+                      <span className="table-key">last loaded</span>
+                      <strong className="table-value">{databaseStatus.lastLoadedAt || '-'}</strong>
+                      <span className="table-key">entries</span>
+                      <strong className="table-value">{entries.length}</strong>
+                      <span className="table-key">todos</span>
+                      <strong className="table-value">{todos.length}</strong>
+                      <span className="table-key">attachments</span>
+                      <strong className="table-value">{attachments.length}</strong>
+                      <span className="table-key">changes</span>
+                      <strong className="table-value">{changes.length}</strong>
+                      <span className="table-key">weeklySummaries</span>
+                      <strong className="table-value">{weeklySummaries.length}</strong>
+                    </div>
+                    <p className="note">
+                      当前主库是项目目录下的 SQLite 文件，不再依赖浏览器 profile 或端口隔离。后续 WebDAV 同步会基于这个文件中的变更日志生成可恢复备份。
+                    </p>
+                  </div>
+                </section>
+              )}
+
+              {settingsSection === 'ai' && (
+                <section className="section" aria-labelledby="ai-settings-title">
+                  <div className="section-head">
+                    <div>
+                      <p className="eyebrow">Weekly AI</p>
+                      <h2 className="section-title" id="ai-settings-title">大模型 API</h2>
+                    </div>
+                    <span className="section-icon"><Settings2 size={22} aria-hidden="true" /></span>
+                  </div>
+                  <div className="grid gap-3 rounded-lg border border-field-200 bg-field-50 p-3">
+                    <label className="input-label">
+                      <span>Endpoint</span>
+                      <input className="text-input bg-white" value={aiConfig.endpoint} onChange={handleAiConfigChange('endpoint')} placeholder="https://api.openai.com/v1/chat/completions" />
+                    </label>
+                    <label className="input-label">
+                      <span>Model</span>
+                      <input className="text-input bg-white" value={aiConfig.model} onChange={handleAiConfigChange('model')} placeholder="gpt-4o-mini" />
+                    </label>
+                    <label className="input-label">
+                      <span>API Key</span>
+                      <input className="text-input bg-white" value={aiConfig.apiKey} onChange={handleAiConfigChange('apiKey')} placeholder="只保存在本机浏览器" type="password" />
+                    </label>
+                  </div>
+                  <p className="note mt-3">
+                    周总结请求会先发送到本地 SQLite API，再由本地代理转发到这里填写的 Chat Completions 兼容接口，用来避开浏览器直接跨域访问时常见的 `failed to fetch`。如果供应商给的是基础网关地址，比如 `https://www.heiyucode.com` 或 `https://api-slb.heiyucode.com`，这里也可以直接填写，系统会自动补成 `/v1/chat/completions`。
+                  </p>
+                </section>
+              )}
+
+              {settingsSection === 'webdav' && (
+                <section className="section" aria-labelledby="webdav-title">
+                  <div className="section-head">
+                    <div>
+                      <p className="eyebrow">WebDAV</p>
+                      <h2 className="section-title" id="webdav-title">坚果云同步准备</h2>
+                    </div>
+                    <span className="section-icon"><Cloud size={22} aria-hidden="true" /></span>
+                  </div>
+                  <div className="grid gap-3 rounded-lg border border-field-200 bg-field-50 p-3">
+                    <label className="input-label">
+                      <span>Server URL</span>
+                      <input className="text-input bg-white" value={webDavConfig.url} onChange={handleWebDavConfigChange('url')} placeholder="https://dav.jianguoyun.com/dav/" />
+                    </label>
+                    <label className="input-label">
+                      <span>Username</span>
+                      <input className="text-input bg-white" value={webDavConfig.username} onChange={handleWebDavConfigChange('username')} placeholder="坚果云账号邮箱" />
+                    </label>
+                    <label className="input-label">
+                      <span>Password</span>
+                      <input className="text-input bg-white" value={webDavConfig.password} onChange={handleWebDavConfigChange('password')} placeholder="坚果云应用密码" type="password" />
+                    </label>
+                    <label className="input-label">
+                      <span>Remote Path</span>
+                      <input className="text-input bg-white" value={webDavConfig.remotePath} onChange={handleWebDavConfigChange('remotePath')} placeholder="/xinxiangyi" />
+                    </label>
+                  </div>
+                  <p className="note mt-3">
+                    当前版本只保存同步配置和本地变更日志。下一步会把 `changes` 打包成 JSON 增量文件，并把图片附件按 `attachments/` 上传到 WebDAV。
+                  </p>
+                </section>
+              )}
+
+              {settingsSection === 'engine' && (
+                <section className="section" aria-labelledby="engine-settings-title">
+                  <div className="section-head">
+                    <div>
+                      <p className="eyebrow">Game Engine Adapter</p>
+                      <h2 className="section-title" id="engine-settings-title">游戏引擎接口</h2>
+                    </div>
+                    <span className="section-icon"><Settings2 size={22} aria-hidden="true" /></span>
+                  </div>
+
+                  <div className="rounded-lg border border-field-200 bg-field-50 p-3">
+                    <strong>网页端不渲染游戏场景。</strong>
+                    <p className="m-0 mt-1 text-sm font-bold text-ink-600">
+                      当前只维护一个稳定快照接口。后续接入 Phaser、Pixi、Three.js 或 WebAssembly/Godot 导出时，
+                      引擎层读取该快照并自行决定如何呈现成长关系。
+                    </p>
+                  </div>
+
+                  <div className="mt-3 grid gap-3">
+                    <label className="input-label">
+                      <span>Snapshot Days</span>
+                      <input
+                        className="text-input"
+                        min={7}
+                        max={365}
+                        type="number"
+                        value={gameEngineSettings.snapshotDays}
+                        onChange={handleSnapshotDaysChange}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-3">
+                    <div className="table-grid">
+                      <span className="table-key">adapterVersion</span>
+                      <strong className="table-value">{gameEngineSnapshot.adapterVersion}</strong>
+                      <span className="table-key">renderMode</span>
+                      <strong className="table-value">{gameEngineSnapshot.renderMode}</strong>
+                      <span className="table-key">mountPointId</span>
+                      <strong className="table-value">{gameEngineSnapshot.contract.mountPointId}</strong>
+                      <span className="table-key">entries</span>
+                      <strong className="table-value">{gameEngineSnapshot.metrics.entries}</strong>
+                      <span className="table-key">averageMoodScore</span>
+                      <strong className="table-value">{gameEngineSnapshot.metrics.averageMoodScore}</strong>
+                      <span className="table-key">progressScore</span>
+                      <strong className="table-value">{gameEngineSnapshot.progress.progressScore}</strong>
+                      <span className="table-key">phaseProgress</span>
+                      <strong className="table-value">{gameEngineSnapshot.progress.phaseProgress}%</strong>
+                      <span className="table-key">timeline</span>
+                      <strong className="table-value">{gameEngineSnapshot.timeline.length}</strong>
+                      <span className="table-key">assets</span>
+                      <strong className="table-value">{gameEngineSnapshot.assets.length}</strong>
+                    </div>
+                  </div>
+                </section>
+              )}
+            </div>
           </div>
         </section>
       )}

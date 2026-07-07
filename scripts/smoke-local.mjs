@@ -44,8 +44,9 @@ try {
   await page.getByPlaceholder('新增一个事项').fill(todo)
   await page.getByRole('button', { name: '新增事项' }).click()
   await page.getByText(todo).waitFor({ state: 'visible', timeout: 5000 })
-  await page.getByRole('button', { name: '标记完成' }).click()
-  await page.getByRole('button', { name: '标记未完成' }).waitFor({ state: 'visible', timeout: 5000 })
+  const todoRow = page.getByRole('listitem').filter({ hasText: todo })
+  await todoRow.getByRole('button', { name: '标记完成' }).click()
+  await todoRow.getByRole('button', { name: '标记未完成' }).waitFor({ state: 'visible', timeout: 5000 })
 
   const todoDone = await page.evaluate(async (expectedTodo) => {
     const state = await fetch('/api/state').then((response) => response.json())
