@@ -107,6 +107,8 @@ type ToastState = {
   id: number
   message: string
   tone: 'success' | 'error' | 'info'
+  actionLabel?: string
+  onAction?: () => void
 }
 
 const getErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback)
@@ -207,6 +209,7 @@ function App() {
   })
   const contentShellRef = useRef<HTMLDivElement | null>(null)
   const toastTimerRef = useRef<number | null>(null)
+  const pendingTodoDeleteTimersRef = useRef<Map<string, number>>(new Map())
   const pullStartYRef = useRef<number | null>(null)
   const pullDistanceRef = useRef(0)
   const [pullRefreshDistance, setPullRefreshDistance] = useState(0)
@@ -234,7 +237,11 @@ function App() {
     }
   }, [])
 
-  const showToast = useCallback((message: string, tone: ToastState['tone'] = 'info') => {
+  const showToast = useCallback((
+    message: string,
+    tone: ToastState['tone'] = 'info',
+    options: { actionLabel?: string; onAction?: () => void; durationMs?: number } = {},
+  ) => {
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current)
     }
@@ -243,18 +250,24 @@ function App() {
       id: Date.now(),
       message,
       tone,
+      actionLabel: options.actionLabel,
+      onAction: options.onAction,
     })
 
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null)
       toastTimerRef.current = null
-    }, 3600)
+    }, options.durationMs ?? 3600)
   }, [])
 
   useEffect(
     () => () => {
       if (toastTimerRef.current) {
         window.clearTimeout(toastTimerRef.current)
+      }
+
+      for (const timer of pendingTodoDeleteTimersRef.current.values()) {
+        window.clearTimeout(timer)
       }
     },
     [],
@@ -659,16 +672,44 @@ function App() {
 
   const handleDeleteTodo = async (todo: TodoItem) => {
     setWriteError('')
+    if (pendingTodoDeleteTimersRef.current.has(todo.id)) return
 
-    try {
-      await deleteTodo(todo)
-      await reload()
-      showToast('事项已删除', 'success')
-    } catch (error) {
-      const message = getErrorMessage(error, '删除事项失败。')
-      setWriteError(message)
-      showToast(message, 'error')
+    setTodos((current) => current.filter((item) => item.id !== todo.id))
+
+    const undoDelete = () => {
+      const timer = pendingTodoDeleteTimersRef.current.get(todo.id)
+      if (timer) window.clearTimeout(timer)
+      pendingTodoDeleteTimersRef.current.delete(todo.id)
+      setTodos((current) =>
+        current.some((item) => item.id === todo.id)
+          ? current
+          : [...current, todo].sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.createdAt.localeCompare(right.createdAt)),
+      )
+      showToast('已撤回删除', 'info')
     }
+
+    const timer = window.setTimeout(() => {
+      pendingTodoDeleteTimersRef.current.delete(todo.id)
+      void (async () => {
+        try {
+          await deleteTodo(todo)
+          await reload()
+          showToast('事项已删除', 'success')
+        } catch (error) {
+          const message = getErrorMessage(error, '删除事项失败。')
+          setWriteError(message)
+          setTodos((current) => (current.some((item) => item.id === todo.id) ? current : [...current, todo]))
+          showToast(message, 'error')
+        }
+      })()
+    }, 5200)
+
+    pendingTodoDeleteTimersRef.current.set(todo.id, timer)
+    showToast('事项已移除', 'info', {
+      actionLabel: '撤回',
+      onAction: undoDelete,
+      durationMs: 5200,
+    })
   }
 
   const handleDeleteAttachment = async (attachment: AttachmentRecord) => {
@@ -1187,7 +1228,6 @@ function App() {
             filteredBoardTodos={filteredBoardTodos}
             entryByDate={entryByDate}
             selectedDate={selectedDate}
-            todayKey={todayKey}
             todoTitle={todoTitle}
             onFocusDate={focusDate}
             onTodoTitleChange={setTodoTitle}
@@ -1286,6 +1326,11 @@ function App() {
             <button className="toast-close" type="button" aria-label="关闭提示" onClick={() => setToast(null)}>
               X
             </button>
+            {toast.actionLabel && toast.onAction && (
+              <button className="toast-action" type="button" onClick={toast.onAction}>
+                {toast.actionLabel}
+              </button>
+            )}
           </div>
         </div>
       )}
