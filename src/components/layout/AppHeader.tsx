@@ -1,4 +1,18 @@
-import { CalendarDays, Cloud, LocateFixed, MapPin, RefreshCw, Settings } from 'lucide-react'
+import {
+  CalendarDays,
+  Cloud,
+  CloudFog,
+  CloudLightning,
+  CloudRain,
+  CloudSnow,
+  CloudSun,
+  MapPin,
+  Moon,
+  RefreshCw,
+  Settings,
+  Sun,
+  type LucideIcon,
+} from 'lucide-react'
 
 type AppHeaderProps = {
   isDesktopNav: boolean
@@ -6,9 +20,23 @@ type AppHeaderProps = {
   activeViewLabel: string
   locationLabel: string
   weatherText: string
+  isWeatherLoading: boolean
   isWebDavSyncing: boolean
+  onRefreshWeather: () => void
   onSyncWebDav: () => void
   onOpenSettings: () => void
+}
+
+const getWeatherIcon = (weatherText: string): LucideIcon => {
+  if (/雷/.test(weatherText)) return CloudLightning
+  if (/雪|冰|冻/.test(weatherText)) return CloudSnow
+  if (/雨|毛毛|阵雨/.test(weatherText)) return CloudRain
+  if (/雾|霾/.test(weatherText)) return CloudFog
+  if (/阴|云/.test(weatherText)) return Cloud
+  if (/夜/.test(weatherText)) return Moon
+  if (/晴/.test(weatherText)) return Sun
+
+  return CloudSun
 }
 
 export function AppHeader({
@@ -17,10 +45,14 @@ export function AppHeader({
   activeViewLabel,
   locationLabel,
   weatherText,
+  isWeatherLoading,
   isWebDavSyncing,
+  onRefreshWeather,
   onSyncWebDav,
   onOpenSettings,
 }: AppHeaderProps) {
+  const WeatherIcon = getWeatherIcon(weatherText)
+
   return (
     <header className="topbar">
       <div className="topbar-main">
@@ -48,18 +80,38 @@ export function AppHeader({
                 <CalendarDays size={16} aria-hidden="true" />
                 {todayLabel}
               </span>
-              <span className="context-pill">
-                <MapPin size={16} aria-hidden="true" />
+              <button
+                className="context-pill context-action-pill"
+                type="button"
+                disabled={isWeatherLoading}
+                aria-label="刷新定位和天气"
+                title="刷新定位和天气"
+                onClick={onRefreshWeather}
+              >
+                {isWeatherLoading ? <RefreshCw className="animate-spin" size={16} aria-hidden="true" /> : <MapPin size={16} aria-hidden="true" />}
                 {locationLabel}
-              </span>
-              <span className="context-pill">
-                <LocateFixed size={16} aria-hidden="true" />
+              </button>
+              <button
+                className="context-pill context-action-pill"
+                type="button"
+                disabled={isWeatherLoading}
+                aria-label="刷新天气"
+                title="刷新天气"
+                onClick={onRefreshWeather}
+              >
+                {isWeatherLoading ? <RefreshCw className="animate-spin" size={16} aria-hidden="true" /> : <WeatherIcon size={16} aria-hidden="true" />}
                 {weatherText}
-              </span>
+              </button>
             </div>
-            <button className="button-secondary topbar-sync-button" type="button" disabled={isWebDavSyncing} onClick={onSyncWebDav}>
+            <button
+              className="icon-button topbar-sync-button"
+              type="button"
+              aria-label={isWebDavSyncing ? '正在同步' : '同步到云端'}
+              title={isWebDavSyncing ? '正在同步' : '同步到云端'}
+              disabled={isWebDavSyncing}
+              onClick={onSyncWebDav}
+            >
               {isWebDavSyncing ? <RefreshCw className="animate-spin" size={16} aria-hidden="true" /> : <Cloud size={16} aria-hidden="true" />}
-              同步
             </button>
           </div>
         )}

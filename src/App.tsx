@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type TouchEvent } from 'react'
+import { RefreshCw } from 'lucide-react'
 
 import './App.css'
 import { AppHeader } from './components/layout/AppHeader'
@@ -37,12 +38,14 @@ import {
   pullWebDavSnapshot,
   pushWebDavSnapshot,
   setTodoDone,
+  testWebDavConnection,
   upsertWeeklySummary,
   upsertJournalEntry,
   type AttachmentRecord,
   type ChangeLogRecord,
   type JournalEntry,
   type TodoItem,
+  type WebDavConnectionTestResult,
   type WeeklySummary,
 } from './lib/db'
 import { createGameEngineSnapshot, defaultGameEngineSettings, type GameEngineSettings } from './lib/gameEngine'
@@ -90,13 +93,15 @@ import { SummaryView } from './views/SummaryView'
 import type { TrendPoint } from './components/ui/data-viz'
 
 const navCollapseStorageKey = 'xinxiangyi-nav-collapsed-v1'
+const desktopNavMediaQuery = '(min-width: 1024px), (orientation: landscape) and (min-width: 900px) and (min-height: 560px)'
 const getSystemThemeMode = () => (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+const getDesktopNavMode = () => window.matchMedia(desktopNavMediaQuery).matches
 
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>('dashboard')
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [isNavCollapsed, setIsNavCollapsed] = useState(() => window.localStorage.getItem(navCollapseStorageKey) === '1')
-  const [isDesktopNav, setIsDesktopNav] = useState(() => window.matchMedia('(min-width: 1024px)').matches)
+  const [isDesktopNav, setIsDesktopNav] = useState(getDesktopNavMode)
   const [settingsMenuKey, setSettingsMenuKey] = useState(0)
   const [journalMode, setJournalMode] = useState<JournalMode>('entries')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('overview')
@@ -124,6 +129,8 @@ function App() {
   const [isSaving, setIsSaving] = useState(false)
   const [hasLoadedLocalState, setHasLoadedLocalState] = useState(false)
   const [isWebDavSyncing, setIsWebDavSyncing] = useState(false)
+  const [isTestingWebDav, setIsTestingWebDav] = useState(false)
+  const [webDavTestResult, setWebDavTestResult] = useState<WebDavConnectionTestResult | null>(null)
   const [weatherState, setWeatherState] = useState<WeatherState>({
     status: 'idle',
     locationLabel: '定位中',
@@ -138,6 +145,66 @@ function App() {
     schemaVersion: 0,
     lastLoadedAt: '',
   })
+  const contentShellRef = useRef<HTMLDivElement | null>(null)
+  const pullStartYRef = useRef<number | null>(null)
+  const pullDistanceRef = useRef(0)
+  const [pullRefreshDistance, setPullRefreshDistance] = useState(0)
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false)
+
+  useEffect(() => {
+    const updateViewportMetrics = () => {
+      const viewport = window.visualViewport
+      const width = Math.round(viewport?.width ?? window.innerWidth)
+      const height = Math.round(viewport?.height ?? window.innerHeight)
+
+      document.documentElement.style.setProperty('--app-viewport-width', `${width}px`)
+      document.documentElement.style.setProperty('--app-viewport-height', `${height}px`)
+    }
+
+    updateViewportMetrics()
+    window.addEventListener('resize', updateViewportMetrics)
+    window.addEventListener('orientationchange', updateViewportMetrics)
+    window.visualViewport?.addEventListener('resize', updateViewportMetrics)
+
+    return () => {
+      window.removeEventListener('resize', updateViewportMetrics)
+      window.removeEventListener('orientationchange', updateViewportMetrics)
+      window.visualViewport?.removeEventListener('resize', updateViewportMetrics)
+    }
+  }, [])
+
+  const refreshWeather = useCallback(async (force = false) => {
+    setWeatherState({
+      status: 'loading',
+      locationLabel: '定位中',
+      weatherText: '天气获取中',
+    })
+
+    try {
+      const context = await getCurrentWeatherContext(force)
+      const nextWeatherText = formatWeatherText(context)
+
+      setWeatherState({
+        status: 'ready',
+        locationLabel: context.locationLabel,
+        weatherText: nextWeatherText,
+      })
+
+      return {
+        weatherText: nextWeatherText,
+        locationText: context.locationLabel,
+      }
+    } catch (error) {
+      setWeatherState({
+        status: 'error',
+        locationLabel: '未定位',
+        weatherText: '天气不可用',
+        error: error instanceof Error ? error.message : '天气获取失败。',
+      })
+
+      throw error
+    }
+  }, [])
 
   const reload = useCallback(async () => {
     try {
@@ -166,6 +233,77 @@ function App() {
       setWriteError(error instanceof Error ? error.message : '读取本地 SQLite 数据库失败。')
     }
   }, [])
+
+  const handleRefreshWeather = useCallback(async () => {
+    setWriteError('')
+
+    try {
+      await refreshWeather(true)
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : '刷新定位和天气失败。')
+    }
+  }, [refreshWeather])
+
+  const getActiveScrollTop = useCallback(() => {
+    if (isDesktopNav) {
+      return contentShellRef.current?.scrollTop ?? 0
+    }
+
+    return window.scrollY
+  }, [isDesktopNav])
+
+  const handlePullRefreshStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1 || getActiveScrollTop() > 0) {
+      pullStartYRef.current = null
+      return
+    }
+
+    pullStartYRef.current = event.touches[0]?.clientY ?? null
+    pullDistanceRef.current = 0
+  }, [getActiveScrollTop])
+
+  const handlePullRefreshMove = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    const startY = pullStartYRef.current
+
+    if (startY == null || isPullRefreshing || getActiveScrollTop() > 0) return
+
+    const nextY = event.touches[0]?.clientY ?? startY
+    const delta = nextY - startY
+
+    if (delta <= 0) {
+      pullDistanceRef.current = 0
+      setPullRefreshDistance(0)
+      return
+    }
+
+    const distance = Math.min(96, delta * 0.45)
+    pullDistanceRef.current = distance
+    setPullRefreshDistance(distance)
+
+    if (distance > 8) {
+      event.preventDefault()
+    }
+  }, [getActiveScrollTop, isPullRefreshing])
+
+  const handlePullRefreshEnd = useCallback(() => {
+    const distance = pullDistanceRef.current
+
+    pullStartYRef.current = null
+    pullDistanceRef.current = 0
+
+    if (distance < 64 || isPullRefreshing) {
+      setPullRefreshDistance(0)
+      return
+    }
+
+    setIsPullRefreshing(true)
+    setPullRefreshDistance(72)
+
+    void Promise.all([reload(), refreshWeather(true).catch(() => undefined)]).finally(() => {
+      setIsPullRefreshing(false)
+      setPullRefreshDistance(0)
+    })
+  }, [isPullRefreshing, refreshWeather, reload])
 
   useEffect(() => {
     setAiConfig(readAiConfig())
@@ -202,7 +340,7 @@ function App() {
   }, [resolvedThemeMode, themeMode])
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia('(min-width: 1024px)')
+    const mediaQuery = window.matchMedia(desktopNavMediaQuery)
     const handleChange = (event: MediaQueryListEvent | MediaQueryList) => {
       const matches = 'matches' in event ? event.matches : mediaQuery.matches
       setIsDesktopNav(matches)
@@ -234,43 +372,8 @@ function App() {
   }, [activeView, isDesktopNav])
 
   useEffect(() => {
-    let isMounted = true
-
-    const loadWeather = async () => {
-      setWeatherState({
-        status: 'loading',
-        locationLabel: '定位中',
-        weatherText: '天气获取中',
-      })
-
-      try {
-        const context = await getCurrentWeatherContext()
-
-        if (!isMounted) return
-
-        setWeatherState({
-          status: 'ready',
-          locationLabel: context.locationLabel,
-          weatherText: formatWeatherText(context),
-        })
-      } catch (error) {
-        if (!isMounted) return
-
-        setWeatherState({
-          status: 'error',
-          locationLabel: '未定位',
-          weatherText: '天气不可用',
-          error: error instanceof Error ? error.message : '天气获取失败。',
-        })
-      }
-    }
-
-    void loadWeather()
-
-    return () => {
-      isMounted = false
-    }
-  }, [])
+    void refreshWeather(false).catch(() => undefined)
+  }, [refreshWeather])
 
   const selectedEntry = useMemo(
     () => entries.find((entry) => entry.dateKey === selectedDate),
@@ -495,19 +598,7 @@ function App() {
     }
 
     try {
-      const context = await getCurrentWeatherContext(weatherState.status === 'error')
-      const nextWeatherText = formatWeatherText(context)
-
-      setWeatherState({
-        status: 'ready',
-        locationLabel: context.locationLabel,
-        weatherText: nextWeatherText,
-      })
-
-      return {
-        weatherText: nextWeatherText,
-        locationText: context.locationLabel,
-      }
+      return await refreshWeather(weatherState.status === 'error')
     } catch {
       return {
         weatherText: selectedEntry?.weatherText,
@@ -653,6 +744,49 @@ function App() {
     const next = { ...webDavConfig, autoSyncDaily: event.target.checked }
     setWebDavConfig(next)
     window.localStorage.setItem(webDavConfigStorageKey, JSON.stringify(next))
+  }
+
+  const handleTestWebDavConnection = async () => {
+    if (isTestingWebDav) return
+
+    if (!isWebDavConfigured) {
+      setWebDavTestResult({
+        ok: false,
+        pathExists: false,
+        writable: false,
+        status: 0,
+        remotePath: webDavConfig.remotePath,
+        checkedAt: new Date().toISOString(),
+        message: '请先填写 WebDAV Server URL、用户名、应用密码和远端目录。',
+      })
+      return
+    }
+
+    setIsTestingWebDav(true)
+    setWebDavTestResult(null)
+
+    try {
+      const result = await testWebDavConnection(webDavConfig)
+      setWebDavTestResult(result)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'WebDAV 连接测试失败。'
+      const actionableMessage =
+        message === 'API route not found.'
+          ? '本地 SQLite API 还没有重启到支持 WebDAV 测试的新版本。请重启 npm run dev 后再测试。'
+          : message
+
+      setWebDavTestResult({
+        ok: false,
+        pathExists: false,
+        writable: false,
+        status: 0,
+        remotePath: webDavConfig.remotePath,
+        checkedAt: new Date().toISOString(),
+        message: actionableMessage,
+      })
+    } finally {
+      setIsTestingWebDav(false)
+    }
   }
 
   const handleThemeModeChange = (next: ThemeMode) => {
@@ -826,7 +960,7 @@ function App() {
     <main className="shell">
       <DynamicBackground mode={resolvedThemeMode} />
       <div
-        className={`app-shell ${isDesktopNav ? '' : 'app-shell-bottom-nav'}`}
+        className={`app-shell ${isDesktopNav ? 'app-shell-desktop-nav' : 'app-shell-bottom-nav'}`}
         style={{ ['--nav-width' as string]: isNavCollapsed ? '88px' : '296px' }}
       >
         {isDesktopNav && (
@@ -842,7 +976,22 @@ function App() {
           />
         )}
 
-        <div className="content-shell">
+        <div
+          className="content-shell"
+          ref={contentShellRef}
+          onTouchStart={handlePullRefreshStart}
+          onTouchMove={handlePullRefreshMove}
+          onTouchEnd={handlePullRefreshEnd}
+          onTouchCancel={handlePullRefreshEnd}
+        >
+          <div
+            className={`pull-refresh-indicator ${pullRefreshDistance > 0 || isPullRefreshing ? 'pull-refresh-indicator-visible' : ''}`}
+            style={{ transform: `translate(-50%, ${Math.round(pullRefreshDistance * 0.36)}px)` }}
+            aria-hidden={pullRefreshDistance === 0 && !isPullRefreshing}
+          >
+            <RefreshCw className={isPullRefreshing ? 'animate-spin' : ''} size={15} aria-hidden="true" />
+            <span>{isPullRefreshing ? '刷新中' : pullRefreshDistance >= 64 ? '松开刷新' : '下拉刷新'}</span>
+          </div>
           <div className="page">
             <AppHeader
               isDesktopNav={isDesktopNav}
@@ -850,7 +999,9 @@ function App() {
               activeViewLabel={activeNavItem?.label ?? '仪表盘'}
               locationLabel={weatherState.locationLabel}
               weatherText={weatherState.weatherText}
+              isWeatherLoading={weatherState.status === 'loading'}
               isWebDavSyncing={isWebDavSyncing}
+              onRefreshWeather={() => void handleRefreshWeather()}
               onSyncWebDav={() => void handleWebDavSync('manual')}
               onOpenSettings={openSettingsMenu}
             />
@@ -859,6 +1010,7 @@ function App() {
           <DashboardView
             selectedDate={selectedDate}
             selectedDateLabel={formatDateLabel(selectedDate)}
+            isToday={selectedDate === todayKey}
             visibleDashboardCards={visibleDashboardCards}
             writeError={writeError}
             selectedEntry={selectedEntry}
@@ -879,6 +1031,7 @@ function App() {
             trendEndLabel={trendDateKeys[trendDateKeys.length - 1]}
             moodWindowAverage={moodWindowAverage}
             onDateChange={(dateKey) => focusDate(dateKey, 'dashboard')}
+            onGoToday={() => focusDate(todayKey, 'dashboard')}
             onDraftChange={handleDraftChange}
             onFilesChange={handleFilesChange}
             onSave={handleSave}
@@ -973,6 +1126,8 @@ function App() {
             visibleDashboardCards={visibleDashboardCards}
             aiConfig={aiConfig}
             webDavConfig={webDavConfig}
+            isTestingWebDav={isTestingWebDav}
+            webDavTestResult={webDavTestResult}
             themeMode={themeMode}
             resolvedThemeMode={resolvedThemeMode}
             onSettingsSectionChange={setSettingsSection}
@@ -981,6 +1136,7 @@ function App() {
             onAiConfigChange={handleAiConfigChange}
             onWebDavConfigChange={handleWebDavConfigChange}
             onWebDavAutoSyncChange={handleWebDavAutoSyncChange}
+            onTestWebDavConnection={() => void handleTestWebDavConnection()}
             onThemeModeChange={handleThemeModeChange}
             onSnapshotDaysChange={handleSnapshotDaysChange}
           />

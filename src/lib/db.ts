@@ -1,4 +1,20 @@
+import { Capacitor } from '@capacitor/core'
+
 import { analyzeMood, type MoodAnalysis } from './mood'
+import {
+  addNativeTodo,
+  deleteNativeAttachment,
+  deleteNativeJournalEntries,
+  deleteNativeJournalEntry,
+  deleteNativeTodo,
+  getNativeLocalState,
+  pullNativeWebDavSnapshot,
+  pushNativeWebDavSnapshot,
+  setNativeTodoDone,
+  testNativeWebDavConnection,
+  upsertNativeJournalEntry,
+  upsertNativeWeeklySummary,
+} from './native-db'
 
 export const localDatabaseName = 'xinxiangyi.sqlite'
 export const localDatabaseDriver = 'SQLite'
@@ -94,6 +110,16 @@ export type WebDavSyncResult = {
   backupPath?: string
 }
 
+export type WebDavConnectionTestResult = {
+  ok: boolean
+  pathExists: boolean
+  writable: boolean
+  status: number
+  remotePath: string
+  checkedAt: string
+  message: string
+}
+
 export type LocalDatabaseMeta = {
   driver: string
   databaseName: string
@@ -127,6 +153,7 @@ type PendingFilePayload = {
 }
 
 const apiBaseUrl = import.meta.env.VITE_LOCAL_API_URL ?? ''
+const shouldUseNativeDatabase = () => Capacitor.isNativePlatform()
 
 const createId = (prefix: string) => {
   const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -156,6 +183,12 @@ const apiFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
       ...init?.headers,
     },
   })
+  const contentType = response.headers.get('content-type') ?? ''
+
+  if (!contentType.includes('application/json')) {
+    throw new Error('本地 SQLite API 没有响应。若正在 Android APK 中运行，当前版本还需要接入移动端本地数据库后才能直接读写数据。')
+  }
+
   const payload = (await response.json().catch(() => ({}))) as { error?: string }
 
   if (!response.ok) {
@@ -209,16 +242,38 @@ const mapAttachment = (attachment: AttachmentPayload): AttachmentRecord => ({
   blob: base64ToBlob(attachment.dataBase64, attachment.type),
 })
 
+const ensureArray = <T>(value: unknown): T[] => (Array.isArray(value) ? value : [])
+
+const normalizeLocalStatePayload = (payload: Partial<LocalStatePayload>): LocalState => ({
+  entries: ensureArray<JournalEntry>(payload.entries),
+  todos: ensureArray<TodoItem>(payload.todos),
+  attachments: ensureArray<AttachmentPayload>(payload.attachments).map(mapAttachment),
+  changes: ensureArray<ChangeLogRecord>(payload.changes),
+  weeklySummaries: ensureArray<WeeklySummary>(payload.weeklySummaries),
+  meta: {
+    driver: payload.meta?.driver ?? localDatabaseDriver,
+    databaseName: payload.meta?.databaseName ?? localDatabaseName,
+    databasePath: payload.meta?.databasePath ?? '',
+    apiBaseUrl: payload.meta?.apiBaseUrl ?? apiBaseUrl,
+    schemaVersion: payload.meta?.schemaVersion ?? 0,
+  },
+})
+
 export const getLocalState = async (): Promise<LocalState> => {
+  if (shouldUseNativeDatabase()) {
+    return getNativeLocalState()
+  }
+
   const payload = await apiFetch<LocalStatePayload>('/api/state')
 
-  return {
-    ...payload,
-    attachments: payload.attachments.map(mapAttachment),
-  }
+  return normalizeLocalStatePayload(payload)
 }
 
 export const upsertJournalEntry = async (draft: EntryDraft, files: File[]) => {
+  if (shouldUseNativeDatabase()) {
+    return upsertNativeJournalEntry(draft, files)
+  }
+
   const mood = analyzeMood(draft.moodText)
   const filePayloads = await Promise.all(files.map(fileToPayload))
   const { entry } = await apiFetch<{ entry: JournalEntry }>('/api/entries/upsert', {
@@ -234,12 +289,22 @@ export const upsertJournalEntry = async (draft: EntryDraft, files: File[]) => {
 }
 
 export const deleteJournalEntry = async (entry: JournalEntry) => {
+  if (shouldUseNativeDatabase()) {
+    await deleteNativeJournalEntry(entry)
+    return
+  }
+
   await apiFetch<{ ok: true }>(`/api/entries/${encodeURIComponent(entry.id)}`, {
     method: 'DELETE',
   })
 }
 
 export const deleteJournalEntries = async (entryIds: string[]) => {
+  if (shouldUseNativeDatabase()) {
+    await deleteNativeJournalEntries(entryIds)
+    return
+  }
+
   await apiFetch<{ ok: true; deletedCount: number }>('/api/entries/batch-delete', {
     method: 'POST',
     body: JSON.stringify({ ids: entryIds }),
@@ -247,6 +312,10 @@ export const deleteJournalEntries = async (entryIds: string[]) => {
 }
 
 export const addTodo = async (dateKey: string, title: string) => {
+  if (shouldUseNativeDatabase()) {
+    return addNativeTodo(dateKey, title)
+  }
+
   const { todo } = await apiFetch<{ todo: TodoItem }>('/api/todos', {
     method: 'POST',
     body: JSON.stringify({ dateKey, title }),
@@ -256,6 +325,10 @@ export const addTodo = async (dateKey: string, title: string) => {
 }
 
 export const setTodoDone = async (todo: TodoItem, done: boolean) => {
+  if (shouldUseNativeDatabase()) {
+    return setNativeTodoDone(todo, done)
+  }
+
   const { todo: next } = await apiFetch<{ todo: TodoItem }>(`/api/todos/${encodeURIComponent(todo.id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ done }),
@@ -265,28 +338,59 @@ export const setTodoDone = async (todo: TodoItem, done: boolean) => {
 }
 
 export const deleteTodo = async (todo: TodoItem) => {
+  if (shouldUseNativeDatabase()) {
+    await deleteNativeTodo(todo)
+    return
+  }
+
   await apiFetch<{ ok: true }>(`/api/todos/${encodeURIComponent(todo.id)}`, {
     method: 'DELETE',
   })
 }
 
 export const deleteAttachment = async (attachment: AttachmentRecord) => {
+  if (shouldUseNativeDatabase()) {
+    await deleteNativeAttachment(attachment)
+    return
+  }
+
   await apiFetch<{ ok: true }>(`/api/attachments/${encodeURIComponent(attachment.id)}`, {
     method: 'DELETE',
   })
 }
 
-export const pushWebDavSnapshot = async (config: WebDavSyncConfig) =>
-  apiFetch<WebDavSyncResult>('/api/webdav/push', {
-    method: 'POST',
-    body: JSON.stringify(config),
-  })
+export const pushWebDavSnapshot = async (config: WebDavSyncConfig) => {
+  if (shouldUseNativeDatabase()) {
+    return pushNativeWebDavSnapshot(config)
+  }
 
-export const pullWebDavSnapshot = async (config: WebDavSyncConfig) =>
-  apiFetch<WebDavSyncResult>('/api/webdav/pull', {
+  return apiFetch<WebDavSyncResult>('/api/webdav/push', {
     method: 'POST',
     body: JSON.stringify(config),
   })
+}
+
+export const pullWebDavSnapshot = async (config: WebDavSyncConfig) => {
+  if (shouldUseNativeDatabase()) {
+    return pullNativeWebDavSnapshot(config)
+  }
+
+  return apiFetch<WebDavSyncResult>('/api/webdav/pull', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  })
+}
+
+export const testWebDavConnection = async (config: WebDavSyncConfig) => {
+  if (shouldUseNativeDatabase()) {
+    return testNativeWebDavConnection(config)
+  }
+
+  return apiFetch<WebDavConnectionTestResult>('/api/webdav/test', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  })
+}
 
 export const upsertWeeklySummary = async (
   weekKey: string,
@@ -294,6 +398,10 @@ export const upsertWeeklySummary = async (
   model: string,
   provider = 'openai-compatible',
 ) => {
+  if (shouldUseNativeDatabase()) {
+    return upsertNativeWeeklySummary(weekKey, content, model, provider)
+  }
+
   const { summary } = await apiFetch<{ summary: WeeklySummary }>('/api/summaries/upsert', {
     method: 'POST',
     body: JSON.stringify({ weekKey, content, model, provider }),

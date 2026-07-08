@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Circle,
   ImagePlus,
+  LocateFixed,
   Plus,
   Save,
   Trash2,
@@ -34,6 +35,7 @@ type MoodBreakdownItem = {
 type DashboardViewProps = {
   selectedDate: string
   selectedDateLabel: string
+  isToday: boolean
   visibleDashboardCards: DashboardMetricCard[]
   writeError: string
   selectedEntry?: JournalEntry
@@ -54,6 +56,7 @@ type DashboardViewProps = {
   trendEndLabel: string
   moodWindowAverage: number
   onDateChange: (dateKey: string) => void
+  onGoToday: () => void
   onDraftChange: (key: keyof DraftState) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void
   onFilesChange: (event: ChangeEvent<HTMLInputElement>) => void
   onSave: (event: FormEvent<HTMLFormElement>) => void
@@ -69,6 +72,7 @@ type DashboardViewProps = {
 export function DashboardView({
   selectedDate,
   selectedDateLabel,
+  isToday,
   visibleDashboardCards,
   writeError,
   selectedEntry,
@@ -89,6 +93,7 @@ export function DashboardView({
   trendEndLabel,
   moodWindowAverage,
   onDateChange,
+  onGoToday,
   onDraftChange,
   onFilesChange,
   onSave,
@@ -180,14 +185,22 @@ export function DashboardView({
               <h2 className="section-title" id="journal-title">
                 今日记录
               </h2>
-              <DatePickerButton
-                className="mobile-date-picker"
-                label="日期"
-                value={selectedDate}
-                valueLabel={selectedDateLabel}
-                onChange={onDateChange}
-                compact
-              />
+              {!isToday && (
+                <button className="dashboard-inline-today-button" type="button" onClick={onGoToday}>
+                  <LocateFixed size={15} aria-hidden="true" />
+                  回到今天
+                </button>
+              )}
+              <div className="mobile-date-actions">
+                <DatePickerButton
+                  className="mobile-date-picker"
+                  label="日期"
+                  value={selectedDate}
+                  valueLabel={selectedDateLabel}
+                  onChange={onDateChange}
+                  compact
+                />
+              </div>
             </div>
             <span className={`pill score-${selectedEntry?.mood.level ?? '平稳'}`}>{selectedEntry?.mood.level ?? '未记录'}</span>
           </div>

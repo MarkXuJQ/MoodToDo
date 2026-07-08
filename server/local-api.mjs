@@ -275,9 +275,10 @@ const getWebDavConfig = (payload) => {
   }
 }
 
-const getWebDavHeaders = (config, contentType) => ({
+const getWebDavHeaders = (config, contentType, extraHeaders = {}) => ({
   Authorization: `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`,
   ...(contentType ? { 'Content-Type': contentType } : {}),
+  ...extraHeaders,
 })
 
 const getRemoteSegments = (...parts) =>
@@ -488,6 +489,108 @@ const pullWebDavSnapshot = async (request, response) => {
     sendJson(response, 502, { error: error instanceof Error ? error.message : 'WebDAV Pull 失败。' })
   } finally {
     rmSync(incomingPath, { force: true })
+  }
+}
+
+const testWebDavConnection = async (request, response) => {
+  let config
+
+  try {
+    config = getWebDavConfig(await readJson(request))
+  } catch (error) {
+    sendJson(response, 400, { error: error instanceof Error ? error.message : 'WebDAV 配置无效。' })
+    return
+  }
+
+  const checkedAt = nowIso()
+  const targetUrl = getWebDavUrl(config)
+
+  try {
+    const probeResponse = await fetch(targetUrl, {
+      method: 'PROPFIND',
+      headers: getWebDavHeaders(config, undefined, {
+        Accept: 'application/xml, text/xml, */*',
+        Depth: '0',
+      }),
+    })
+
+    if (probeResponse.status === 401 || probeResponse.status === 403) {
+      sendJson(response, 200, {
+        ok: false,
+        pathExists: false,
+        writable: false,
+        status: probeResponse.status,
+        remotePath: config.remotePath,
+        checkedAt,
+        message: 'WebDAV 已响应，但账号或应用密码没有通过验证。',
+      })
+      return
+    }
+
+    if (probeResponse.status === 404) {
+      sendJson(response, 200, {
+        ok: true,
+        pathExists: false,
+        writable: false,
+        status: probeResponse.status,
+        remotePath: config.remotePath,
+        checkedAt,
+        message: 'WebDAV 连接成功，但远端目录不存在。首次上传同步时会尝试自动创建该目录。',
+      })
+      return
+    }
+
+    if (![200, 207].includes(probeResponse.status)) {
+      const detail = await probeResponse.text().catch(() => '')
+      sendJson(response, 200, {
+        ok: false,
+        pathExists: false,
+        writable: false,
+        status: probeResponse.status,
+        remotePath: config.remotePath,
+        checkedAt,
+        message: `WebDAV 目录探测失败：${probeResponse.status}${detail ? ` ${detail.slice(0, 160)}` : ''}`,
+      })
+      return
+    }
+
+    const testFile = `.xinxiangyi-webdav-test-${Date.now()}.txt`
+    const writeResponse = await fetch(getWebDavUrl(config, testFile), {
+      method: 'PUT',
+      headers: getWebDavHeaders(config, 'text/plain; charset=utf-8'),
+      body: `xinxiangyi webdav test ${checkedAt}\n`,
+    })
+
+    if (!writeResponse.ok) {
+      const detail = await writeResponse.text().catch(() => '')
+      sendJson(response, 200, {
+        ok: false,
+        pathExists: true,
+        writable: false,
+        status: writeResponse.status,
+        remotePath: config.remotePath,
+        checkedAt,
+        message: `WebDAV 目录可访问，但测试写入失败：${writeResponse.status}${detail ? ` ${detail.slice(0, 160)}` : ''}`,
+      })
+      return
+    }
+
+    await fetch(getWebDavUrl(config, testFile), {
+      method: 'DELETE',
+      headers: getWebDavHeaders(config),
+    }).catch(() => undefined)
+
+    sendJson(response, 200, {
+      ok: true,
+      pathExists: true,
+      writable: true,
+      status: writeResponse.status,
+      remotePath: config.remotePath,
+      checkedAt,
+      message: 'WebDAV 连接成功，目录存在，并且测试写入通过。',
+    })
+  } catch (error) {
+    sendJson(response, 502, { error: error instanceof Error ? error.message : 'WebDAV 连接测试失败。' })
   }
 }
 
@@ -1206,6 +1309,11 @@ const route = async (request, response) => {
 
   if (request.method === 'POST' && pathname === '/api/webdav/pull') {
     await pullWebDavSnapshot(request, response)
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/api/webdav/test') {
+    await testWebDavConnection(request, response)
     return
   }
 

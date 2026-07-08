@@ -39,9 +39,7 @@ export function NavDrawer({
                 <p className="eyebrow">Navigation</p>
                 <strong className="text-lg font-black text-ink-950">切换工作区</strong>
               </>
-            ) : (
-              <strong className="text-sm font-black text-ink-400">导航</strong>
-            )}
+            ) : null}
           </div>
 
           {isDesktop && (

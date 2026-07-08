@@ -1,3 +1,6 @@
+import { Capacitor } from '@capacitor/core'
+import { Geolocation } from '@capacitor/geolocation'
+
 export type WeatherContext = {
   latitude: number
   longitude: number
@@ -67,8 +70,35 @@ const persistWeather = (context: WeatherContext) => {
   window.localStorage.setItem(weatherCacheKey, JSON.stringify(context))
 }
 
-const getCurrentPosition = () =>
-  new Promise<GeolocationPosition>((resolve, reject) => {
+type PositionLike = {
+  coords: {
+    latitude: number
+    longitude: number
+  }
+}
+
+const nativePermissionGranted = (value?: string) => value === 'granted'
+
+const getNativePosition = async (): Promise<PositionLike> => {
+  let permissions = await Geolocation.checkPermissions()
+
+  if (!nativePermissionGranted(permissions.coarseLocation) && !nativePermissionGranted(permissions.location)) {
+    permissions = await Geolocation.requestPermissions({ permissions: ['coarseLocation'] })
+  }
+
+  if (!nativePermissionGranted(permissions.coarseLocation) && !nativePermissionGranted(permissions.location)) {
+    throw new Error('定位权限未开启。')
+  }
+
+  return Geolocation.getCurrentPosition({
+    enableHighAccuracy: false,
+    timeout: 10000,
+    maximumAge: 30 * 60 * 1000,
+  })
+}
+
+const getBrowserPosition = () =>
+  new Promise<PositionLike>((resolve, reject) => {
     if (!navigator.geolocation) {
       reject(new Error('当前浏览器不支持定位。'))
       return
@@ -80,6 +110,14 @@ const getCurrentPosition = () =>
       maximumAge: 30 * 60 * 1000,
     })
   })
+
+const getCurrentPosition = async () => {
+  if (Capacitor.isNativePlatform()) {
+    return getNativePosition()
+  }
+
+  return getBrowserPosition()
+}
 
 const reverseGeocode = async (latitude: number, longitude: number) => {
   const url = new URL('https://nominatim.openstreetmap.org/reverse')

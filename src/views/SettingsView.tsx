@@ -3,6 +3,7 @@ import { ArrowLeft, BarChart3, ChevronDown, Cloud, Database, Monitor, Moon, Refr
 
 import { Metric } from '../components/ui/stat-primitives'
 import type { GameEngineSettings, GameEngineSnapshot } from '../lib/gameEngine'
+import type { WebDavConnectionTestResult } from '../lib/db'
 import type {
   AiConfig,
   DashboardCardConfig,
@@ -43,6 +44,8 @@ type SettingsViewProps = {
   visibleDashboardCards: DashboardMetricCard[]
   aiConfig: AiConfig
   webDavConfig: WebDavConfig
+  isTestingWebDav: boolean
+  webDavTestResult: WebDavConnectionTestResult | null
   themeMode: ThemeMode
   resolvedThemeMode: 'light' | 'dark'
   onSettingsSectionChange: (section: SettingsSection) => void
@@ -51,6 +54,7 @@ type SettingsViewProps = {
   onAiConfigChange: (key: keyof AiConfig) => (event: ChangeEvent<HTMLInputElement>) => void
   onWebDavConfigChange: (key: WebDavTextConfigKey) => (event: ChangeEvent<HTMLInputElement>) => void
   onWebDavAutoSyncChange: (event: ChangeEvent<HTMLInputElement>) => void
+  onTestWebDavConnection: () => void
   onThemeModeChange: (mode: ThemeMode) => void
   onSnapshotDaysChange: (event: ChangeEvent<HTMLInputElement>) => void
 }
@@ -75,6 +79,8 @@ export function SettingsView({
   visibleDashboardCards,
   aiConfig,
   webDavConfig,
+  isTestingWebDav,
+  webDavTestResult,
   themeMode,
   resolvedThemeMode,
   onSettingsSectionChange,
@@ -83,6 +89,7 @@ export function SettingsView({
   onAiConfigChange,
   onWebDavConfigChange,
   onWebDavAutoSyncChange,
+  onTestWebDavConnection,
   onThemeModeChange,
   onSnapshotDaysChange,
 }: SettingsViewProps) {
@@ -547,7 +554,7 @@ export function SettingsView({
                     className="text-input"
                     value={webDavConfig.remotePath}
                     onChange={onWebDavConfigChange('remotePath')}
-                    placeholder="/xinxiangyi"
+                    placeholder="/data"
                   />
                 </label>
                 <label className="config-row cursor-pointer">
@@ -562,10 +569,23 @@ export function SettingsView({
                     onChange={onWebDavAutoSyncChange}
                   />
                 </label>
+
+                <div className="webdav-test-row">
+                  <button className="button-secondary min-h-9 px-3" type="button" disabled={isTestingWebDav} onClick={onTestWebDavConnection}>
+                    {isTestingWebDav ? <RefreshCw className="animate-spin" size={16} aria-hidden="true" /> : <Cloud size={16} aria-hidden="true" />}
+                    {isTestingWebDav ? '测试中' : '测试连接'}
+                  </button>
+                  {webDavTestResult && (
+                    <p className={`webdav-test-result ${webDavTestResult.ok ? 'webdav-test-result-ok' : 'webdav-test-result-error'}`}>
+                      <strong>{webDavTestResult.ok ? '连接可用' : '需要检查'}</strong>
+                      <span>{webDavTestResult.message}</span>
+                    </p>
+                  )}
+                </div>
               </div>
 
               <p className="note mt-3">
-                当前版本会把本地 SQLite 数据库作为一个完整快照同步到 WebDAV 目录。首页的同步按钮会自动选择上传或拉取：本地有未同步内容时上传，本地没有未同步内容时尝试拉取远端快照。它适合单人多设备备份/恢复，还不是多端冲突合并。
+                当前版本会把本地 SQLite 数据库作为一个完整快照同步到 WebDAV 目录。坚果云的公开邀请链接不能作为 WebDAV Server URL；Server URL 通常填写 https://dav.jianguoyun.com/dav/，如果你同步的是 data 文件夹，Remote Path 可以先试 /data。首页的同步按钮会自动选择上传或拉取：本地有未同步内容时上传，本地没有未同步内容时尝试拉取远端快照。
               </p>
             </section>
           )}

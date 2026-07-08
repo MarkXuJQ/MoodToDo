@@ -93,16 +93,46 @@
     @apply relative min-h-svh lg:grid lg:h-svh lg:grid-cols-[var(--nav-width)_minmax(0,1fr)] lg:overflow-hidden;
   }
 
+  .app-shell-desktop-nav {
+    @apply fixed inset-0 grid grid-cols-[var(--nav-width)_minmax(0,1fr)] overflow-hidden;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    height: var(--app-viewport-height, 100dvh);
+    max-height: 100vh;
+    max-height: 100dvh;
+    max-height: var(--app-viewport-height, 100dvh);
+    min-height: 100vh;
+    min-height: 100dvh;
+    min-height: var(--app-viewport-height, 100dvh);
+  }
+
   .app-shell-bottom-nav .page {
     @apply pb-28;
   }
 
   .content-shell {
-    @apply min-w-0 lg:h-svh lg:overflow-y-auto;
+    @apply relative min-w-0 lg:h-svh lg:overflow-y-auto;
+  }
+
+  .app-shell-desktop-nav .content-shell {
+    @apply h-svh overflow-y-auto;
+    height: 100vh;
+    height: 100dvh;
+    height: var(--app-viewport-height, 100dvh);
+    max-height: 100vh;
+    max-height: 100dvh;
+    max-height: var(--app-viewport-height, 100dvh);
+    min-height: 0;
+    overscroll-behavior: contain;
   }
 
   .page {
     @apply relative z-10 mx-auto w-full max-w-[1320px] px-4 pb-10 sm:px-6 lg:px-8;
+  }
+
+  .app-shell-desktop-nav .page {
+    @apply px-5 lg:px-8;
   }
 
   .topbar {
@@ -117,18 +147,26 @@
     @apply hidden min-w-0 items-center justify-end gap-2 lg:flex;
   }
 
+  .app-shell-desktop-nav .topbar-context-group {
+    @apply flex;
+  }
+
   .mobile-topbar-actions {
     @apply flex shrink-0 items-center gap-2 lg:hidden;
   }
 
+  .app-shell-desktop-nav .mobile-topbar-actions {
+    @apply hidden;
+  }
+
   .mobile-cloud-button,
   .mobile-settings-button {
-    @apply size-11;
+    @apply size-10 sm:size-11;
     transition: none;
   }
 
   .topbar-sync-button {
-    @apply min-h-9 shrink-0 px-3 text-xs;
+    @apply size-10 shrink-0 rounded-full p-0;
   }
 
   .topbar-brand {
@@ -163,6 +201,10 @@
     @apply hidden flex-nowrap items-center gap-2 overflow-x-auto pb-1 lg:flex lg:flex-wrap lg:justify-end lg:overflow-visible lg:pb-0;
   }
 
+  .app-shell-desktop-nav .topbar-context {
+    @apply flex flex-wrap justify-end overflow-visible pb-0;
+  }
+
   .pill {
     @apply inline-flex min-h-9 items-center gap-2 rounded-full border border-white/70 bg-[rgba(255,255,255,0.72)] px-3 text-sm font-bold text-ink-600 backdrop-blur-md;
   }
@@ -175,6 +217,23 @@
     @apply size-4 shrink-0;
   }
 
+  .context-action-pill {
+    @apply cursor-pointer border-white/75 text-left transition-colors hover:border-field-300 hover:bg-white disabled:cursor-wait disabled:opacity-70;
+  }
+
+  .pull-refresh-indicator {
+    @apply pointer-events-none fixed top-2 z-50 inline-flex min-h-8 items-center gap-2 rounded-full border border-white/75 bg-[rgba(255,255,255,0.88)] px-3 text-xs font-black text-ink-600 opacity-0 shadow-[0_10px_28px_rgba(17,24,22,0.12)] backdrop-blur-md transition-opacity;
+    left: 50%;
+  }
+
+  .app-shell-desktop-nav .pull-refresh-indicator {
+    left: calc(var(--nav-width) + (100vw - var(--nav-width)) / 2);
+  }
+
+  .pull-refresh-indicator-visible {
+    @apply opacity-100;
+  }
+
   .nav-backdrop {
     @apply fixed inset-0 z-30 bg-ink-950/18 backdrop-blur-[2px] lg:hidden;
   }
@@ -183,12 +242,43 @@
     @apply fixed left-0 top-0 z-40 flex h-svh w-[min(320px,86vw)] -translate-x-full flex-col border-r border-white/70 bg-[rgba(252,253,252,0.9)] p-5 shadow-[0_24px_80px_rgba(17,24,22,0.12)] backdrop-blur-xl transition-transform duration-200 lg:sticky lg:z-10 lg:w-full lg:translate-x-0 lg:p-4 lg:shadow-none;
   }
 
+  .app-shell-desktop-nav .nav-drawer {
+    @apply relative z-10 w-full translate-x-0 p-4 shadow-none;
+    align-self: start;
+    height: 100vh;
+    height: 100dvh;
+    height: var(--app-viewport-height, 100dvh);
+    max-height: 100vh;
+    max-height: 100dvh;
+    max-height: var(--app-viewport-height, 100dvh);
+    min-height: 0;
+    overflow: hidden;
+    top: auto;
+    left: auto;
+  }
+
   .nav-drawer-open {
     @apply translate-x-0;
   }
 
   .nav-drawer-collapsed {
     @apply lg:px-3;
+  }
+
+  .app-shell-desktop-nav .nav-drawer-collapsed {
+    @apply px-3;
+  }
+
+  .nav-drawer-collapsed .nav-head-copy {
+    @apply hidden;
+  }
+
+  .nav-drawer-collapsed .nav-drawer-head {
+    @apply justify-end;
+  }
+
+  .nav-drawer-collapsed .nav-collapse-button {
+    @apply w-full rounded-lg;
   }
 
   .nav-drawer-head {
@@ -205,18 +295,40 @@
 
   .nav-list {
     @apply mt-4 grid gap-2;
+    align-content: start;
+    grid-auto-rows: max-content;
+  }
+
+  .app-shell-desktop-nav .nav-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+    align-content: start;
+    grid-auto-rows: max-content;
+  }
+
+  .app-shell-desktop-nav .nav-list {
+    justify-items: stretch;
   }
 
   .nav-link {
     @apply grid min-h-16 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-lg border border-transparent bg-[rgba(247,250,247,0.68)] px-3 text-left transition-colors hover:border-white/60 hover:bg-white/80;
+    min-height: 3.25rem;
   }
 
   .nav-link-compact {
     @apply grid-cols-1 justify-items-center px-0;
+    min-height: 3.1rem;
   }
 
   .nav-link-active {
     @apply border-xin-700 bg-xin-100;
+  }
+
+  .app-shell-desktop-nav .nav-link:not(.nav-link-compact) {
+    width: 100%;
   }
 
   .nav-link-icon {
@@ -237,6 +349,10 @@
 
   .nav-settings-button-compact {
     @apply justify-center px-0;
+  }
+
+  .app-shell-desktop-nav .nav-settings-button:not(.nav-settings-button-compact) {
+    width: 100%;
   }
 
   .bottom-nav {
@@ -272,6 +388,10 @@
   .dashboard-desktop-summary {
     @apply hidden lg:grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
+  .app-shell-desktop-nav .dashboard-desktop-summary {
+    @apply grid;
   }
 
   .field-line,
@@ -342,6 +462,26 @@
     @apply mt-2 w-fit max-w-full lg:hidden;
   }
 
+  .app-shell-desktop-nav .mobile-date-picker {
+    @apply hidden;
+  }
+
+  .mobile-date-actions {
+    @apply mt-2 flex flex-wrap items-center gap-2 lg:hidden;
+  }
+
+  .app-shell-desktop-nav .mobile-date-actions {
+    @apply hidden;
+  }
+
+  .mobile-date-actions .mobile-date-picker {
+    @apply mt-0;
+  }
+
+  .dashboard-inline-today-button {
+    @apply mt-2 inline-flex min-h-8 items-center gap-1.5 rounded-full border border-xin-700 bg-xin-700 px-3 text-xs font-black text-white transition-colors hover:bg-xin-800;
+  }
+
   .mobile-date-control {
     @apply mt-2 flex min-h-9 w-fit items-center gap-2 rounded-full border border-field-200 bg-field-50 px-3 text-xs font-black text-ink-400 lg:hidden;
   }
@@ -363,7 +503,11 @@
   }
 
   .workspace-grid {
-    @apply mt-3 grid gap-4 sm:mt-5 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.88fr)];
+    @apply mt-3 grid gap-4 sm:mt-5 sm:gap-5 lg:grid-cols-[minmax(0,1.14fr)_minmax(280px,0.86fr)];
+  }
+
+  .app-shell-desktop-nav .workspace-grid {
+    grid-template-columns: minmax(0, 1.12fr) minmax(250px, 0.88fr);
   }
 
   .dashboard-sync-strip {
@@ -407,12 +551,24 @@
     @apply hidden lg:block;
   }
 
+  .app-shell-desktop-nav .dashboard-side-insight {
+    @apply block;
+  }
+
   .dashboard-todo-panel {
     @apply hidden lg:block;
   }
 
+  .app-shell-desktop-nav .dashboard-todo-panel {
+    @apply block;
+  }
+
   .mobile-todo-panel {
     @apply mb-4 rounded-md border border-field-200 bg-[rgba(247,250,247,0.72)] p-3 lg:hidden;
+  }
+
+  .app-shell-desktop-nav .mobile-todo-panel {
+    @apply hidden;
   }
 
   .mobile-panel-head {
@@ -496,6 +652,11 @@
 
   .icon-button-solid {
     @apply inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-xin-700 bg-xin-700 text-white transition-colors hover:bg-xin-800;
+  }
+
+  .topbar-sync-button,
+  .mobile-cloud-button {
+    border-radius: 9999px;
   }
 
   .segmented-control {
@@ -616,7 +777,22 @@
   }
 
   .dashboard-visual-grid {
-    @apply mt-5 hidden gap-5 lg:grid xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)];
+    @apply mt-5 hidden gap-5 lg:grid lg:grid-cols-[minmax(0,1.06fr)_minmax(280px,0.94fr)];
+  }
+
+  .app-shell-desktop-nav .dashboard-visual-grid {
+    @apply grid;
+    grid-template-columns: minmax(0, 1.04fr) minmax(250px, 0.96fr);
+  }
+
+  @media (min-width: 900px) {
+    .app-shell-desktop-nav .workspace-grid {
+      grid-template-columns: minmax(0, 1.12fr) minmax(260px, 0.88fr);
+    }
+
+    .app-shell-desktop-nav .dashboard-visual-grid {
+      grid-template-columns: minmax(0, 1.04fr) minmax(260px, 0.96fr);
+    }
   }
 
   .secondary-metrics {
@@ -697,6 +873,18 @@
 
   .calendar-heat-cell {
     @apply grid min-h-16 grid-rows-[auto_1fr_auto] rounded-lg border border-field-200 p-2 text-left text-ink-950 transition-colors hover:border-field-300;
+    grid-template-rows: 0.9rem minmax(0, 1fr) 1.25rem;
+    min-height: clamp(3.2rem, 8vw, 4.35rem);
+  }
+
+  .calendar-heat-cell > span:first-child {
+    grid-row: 1;
+    align-self: start;
+  }
+
+  .calendar-heat-cell > strong {
+    grid-row: 2;
+    align-self: center;
   }
 
   .calendar-heat-cell-muted {
@@ -708,7 +896,9 @@
   }
 
   .calendar-todo-chip {
-    @apply justify-self-end rounded-full border border-white/60 bg-white/70 px-1.5 text-[11px] font-black text-ink-800;
+    @apply inline-flex h-5 min-w-8 items-center justify-center self-end justify-self-end rounded-full border border-white/60 bg-white/70 px-1.5 text-[11px] font-black leading-none text-ink-800;
+    grid-row: 3;
+    align-self: center;
   }
 
   .summary-week-picker {
@@ -913,8 +1103,16 @@
     @apply grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)];
   }
 
+  .app-shell-desktop-nav .settings-layout {
+    @apply grid-cols-[220px_minmax(0,1fr)];
+  }
+
   .settings-sidebar {
     @apply hidden gap-3 overflow-x-auto lg:flex lg:flex-col lg:overflow-visible lg:self-start xl:sticky xl:top-28;
+  }
+
+  .app-shell-desktop-nav .settings-sidebar {
+    @apply flex flex-col overflow-visible self-start;
   }
 
   .settings-group {
@@ -977,6 +1175,10 @@
     @apply grid gap-4 lg:hidden;
   }
 
+  .app-shell-desktop-nav .settings-mobile-menu {
+    @apply hidden;
+  }
+
   .settings-mobile-menu-group {
     @apply rounded-md border border-white/75 bg-[rgba(255,255,255,0.78)] p-3;
   }
@@ -1003,6 +1205,30 @@
 
   .theme-choice-grid {
     @apply grid gap-3 lg:grid-cols-3;
+  }
+
+  .webdav-test-row {
+    @apply grid gap-2 rounded-md border border-field-200 bg-[rgba(255,255,255,0.48)] p-3 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center;
+  }
+
+  .webdav-test-result {
+    @apply m-0 grid gap-0.5 text-sm font-bold text-ink-600;
+  }
+
+  .webdav-test-result strong {
+    @apply text-sm font-black text-ink-950;
+  }
+
+  .webdav-test-result span {
+    @apply text-xs font-bold text-ink-400;
+  }
+
+  .webdav-test-result-ok strong {
+    @apply text-xin-700;
+  }
+
+  .webdav-test-result-error strong {
+    @apply text-coral-500;
   }
 
   .theme-choice {
@@ -1038,7 +1264,7 @@
   }
 
   .year-heatmap-shell {
-    @apply grid grid-cols-[24px_minmax(0,1fr)] gap-2 overflow-x-auto pb-2;
+    @apply grid grid-cols-[24px_minmax(0,1fr)] gap-2 overflow-x-auto rounded-lg border border-field-200 bg-[rgba(247,250,247,0.58)] p-2;
   }
 
   .year-heatmap-weekdays {
@@ -1057,7 +1283,9 @@
   }
 
   .year-heatmap-cell {
-    @apply size-[13px] rounded-[3px] border border-white/70 p-0 transition-transform hover:scale-125 hover:ring-2 hover:ring-xin-700 hover:ring-offset-1;
+    @apply size-[13px] rounded-[3px] border p-0 transition-transform hover:scale-125 hover:ring-2 hover:ring-xin-700 hover:ring-offset-1;
+    border-color: rgba(86, 99, 95, 0.28);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38);
   }
 
   .year-heatmap-cell-muted {
@@ -1184,6 +1412,30 @@
     @apply bg-[#ded5ef];
   }
 
+  .year-heatmap-cell.heat-empty {
+    background-color: #e3ece7;
+  }
+
+  .year-heatmap-cell.heat-low {
+    background-color: #ebb8af;
+  }
+
+  .year-heatmap-cell.heat-stress {
+    background-color: #e9ca85;
+  }
+
+  .year-heatmap-cell.heat-steady {
+    background-color: #bad2ed;
+  }
+
+  .year-heatmap-cell.heat-good {
+    background-color: #9ed5ca;
+  }
+
+  .year-heatmap-cell.heat-bright {
+    background-color: #c5b2e5;
+  }
+
   .score-低谷 {
     @apply text-coral-500;
   }
@@ -1222,6 +1474,7 @@
   :root[data-theme='dark'] .settings-group,
   :root[data-theme='dark'] .settings-link,
   :root[data-theme='dark'] .config-row,
+  :root[data-theme='dark'] .webdav-test-row,
   :root[data-theme='dark'] .journal-entry-row,
   :root[data-theme='dark'] .board-column,
   :root[data-theme='dark'] .board-card,
@@ -1243,6 +1496,12 @@
   :root[data-theme='dark'] .board-date-link {
     border-color: rgba(126, 151, 142, 0.3);
     background-color: rgba(27, 40, 37, 0.9);
+  }
+
+  :root[data-theme='dark'] .pull-refresh-indicator {
+    border-color: rgba(126, 151, 142, 0.3);
+    background-color: rgba(27, 40, 37, 0.92);
+    color: var(--color-ink-800);
   }
 
   :root[data-theme='dark'] .nav-link,
@@ -1330,6 +1589,40 @@
 
   :root[data-theme='dark'] .heat-bright {
     background-color: rgba(77, 58, 126, 0.78);
+  }
+
+  :root[data-theme='dark'] .year-heatmap-shell {
+    border-color: rgba(126, 151, 142, 0.28);
+    background-color: rgba(12, 20, 18, 0.5);
+  }
+
+  :root[data-theme='dark'] .year-heatmap-cell {
+    border-color: rgba(170, 187, 180, 0.25);
+    box-shadow: inset 0 0 0 1px rgba(8, 12, 11, 0.24);
+  }
+
+  :root[data-theme='dark'] .year-heatmap-cell.heat-empty {
+    background-color: rgba(39, 54, 49, 0.92);
+  }
+
+  :root[data-theme='dark'] .year-heatmap-cell.heat-low {
+    background-color: rgba(142, 58, 49, 0.82);
+  }
+
+  :root[data-theme='dark'] .year-heatmap-cell.heat-stress {
+    background-color: rgba(148, 103, 35, 0.82);
+  }
+
+  :root[data-theme='dark'] .year-heatmap-cell.heat-steady {
+    background-color: rgba(50, 88, 143, 0.84);
+  }
+
+  :root[data-theme='dark'] .year-heatmap-cell.heat-good {
+    background-color: rgba(36, 112, 101, 0.86);
+  }
+
+  :root[data-theme='dark'] .year-heatmap-cell.heat-bright {
+    background-color: rgba(93, 70, 151, 0.86);
   }
 
   :root[data-theme='dark'] .calendar-heat-cell {
