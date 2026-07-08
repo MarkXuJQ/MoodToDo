@@ -27,7 +27,9 @@ import {
   webDavConfigStorageKey,
 } from './config/app-shell'
 import {
+  addBoardLane,
   addTodo,
+  deleteBoardLane,
   deleteAttachment,
   deleteJournalEntry,
   deleteTodo,
@@ -39,11 +41,14 @@ import {
   pushWebDavSnapshot,
   setTodoDone,
   testWebDavConnection,
+  updateTodoDetails,
   upsertWeeklySummary,
   upsertJournalEntry,
   type AttachmentRecord,
+  type BoardLaneRecord,
   type ChangeLogRecord,
   type JournalEntry,
+  type TodoDetailUpdate,
   type TodoItem,
   type WebDavConnectionTestResult,
   type WebDavSyncResult,
@@ -160,6 +165,14 @@ const formatDiagnosticDetails = (scope: string, error: unknown, extra: Record<st
   )
 }
 
+const completedTodoRetentionMs = 14 * 24 * 60 * 60 * 1000
+
+const getTodoCompletedAt = (todo: TodoItem) => {
+  const timestamp = new Date(todo.completedAt ?? todo.updatedAt).getTime()
+
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>('dashboard')
   const [isNavOpen, setIsNavOpen] = useState(false)
@@ -169,6 +182,7 @@ function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('overview')
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
+  const [boardLanes, setBoardLanes] = useState<BoardLaneRecord[]>([])
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([])
   const [changes, setChanges] = useState<ChangeLogRecord[]>([])
   const [weeklySummaries, setWeeklySummaries] = useState<WeeklySummary[]>([])
@@ -210,6 +224,7 @@ function App() {
   const contentShellRef = useRef<HTMLDivElement | null>(null)
   const toastTimerRef = useRef<number | null>(null)
   const pendingTodoDeleteTimersRef = useRef<Map<string, number>>(new Map())
+  const completedTodoCleanupRef = useRef<Set<string>>(new Set())
   const pullStartYRef = useRef<number | null>(null)
   const pullDistanceRef = useRef(0)
   const [pullRefreshDistance, setPullRefreshDistance] = useState(0)
@@ -279,6 +294,7 @@ function App() {
 
       setEntries(nextState.entries)
       setTodos(nextState.todos)
+      setBoardLanes(nextState.boardLanes)
       setAttachments(nextState.attachments)
       setChanges(nextState.changes)
       setWeeklySummaries(nextState.weeklySummaries)
@@ -304,6 +320,43 @@ function App() {
       showToast(message, 'error')
     }
   }, [showToast])
+
+  useEffect(() => {
+    if (!hasLoadedLocalState) return
+
+    const cutoff = Date.now() - completedTodoRetentionMs
+    const staleTodos = todos.filter((todo) => {
+      if (!todo.done || pendingTodoDeleteTimersRef.current.has(todo.id) || completedTodoCleanupRef.current.has(todo.id)) {
+        return false
+      }
+
+      const completedAt = getTodoCompletedAt(todo)
+
+      return completedAt != null && completedAt < cutoff
+    })
+
+    if (staleTodos.length === 0) return
+
+    for (const todo of staleTodos) {
+      completedTodoCleanupRef.current.add(todo.id)
+    }
+
+    void (async () => {
+      try {
+        await Promise.all(staleTodos.map((todo) => deleteTodo(todo)))
+        await reload()
+        showToast(`已自动清理 ${staleTodos.length} 个 14 天前完成的事项`, 'info')
+      } catch (error) {
+        for (const todo of staleTodos) {
+          completedTodoCleanupRef.current.delete(todo.id)
+        }
+
+        const message = getErrorMessage(error, '自动清理已完成事项失败。')
+        setWriteError(message)
+        showToast(message, 'error')
+      }
+    })()
+  }, [hasLoadedLocalState, reload, showToast, todos])
 
   const getActiveScrollTop = useCallback(() => {
     if (isDesktopNav) {
@@ -502,8 +555,8 @@ function App() {
 
   const pendingChangeCount = useMemo(
     () =>
-      [...entries, ...todos, ...attachments, ...changes].filter((item) => item.syncState === 'pending').length,
-    [attachments, changes, entries, todos],
+      [...entries, ...todos, ...boardLanes, ...attachments, ...changes].filter((item) => item.syncState === 'pending').length,
+    [attachments, boardLanes, changes, entries, todos],
   )
   const monthEntries = entries.filter((entry) => entry.dateKey.startsWith(visibleMonth))
   const monthTodos = todos.filter((todo) => todo.dateKey.startsWith(visibleMonth))
@@ -651,6 +704,68 @@ function App() {
       showToast('事项已添加', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '新增事项失败。')
+      setWriteError(message)
+      showToast(message, 'error')
+    }
+  }
+
+  const handleAddTodoWithDetails = async (dateKey: string, title: string, details: TodoDetailUpdate) => {
+    const nextTitle = title.trim()
+    if (!nextTitle) return
+
+    setWriteError('')
+
+    try {
+      await addTodo(dateKey, nextTitle, details)
+      setTodoTitle('')
+      await reload()
+      showToast('事项已添加', 'success')
+    } catch (error) {
+      const message = getErrorMessage(error, '新增事项失败。')
+      setWriteError(message)
+      showToast(message, 'error')
+    }
+  }
+
+  const handleUpdateTodoDetails = async (todo: TodoItem, details: TodoDetailUpdate) => {
+    setWriteError('')
+
+    try {
+      await updateTodoDetails(todo, details)
+      await reload()
+    } catch (error) {
+      const message = getErrorMessage(error, '更新事项详情失败。')
+      setWriteError(message)
+      showToast(message, 'error')
+    }
+  }
+
+  const handleAddBoardLane = async (label: string, colorId: string) => {
+    setWriteError('')
+
+    try {
+      await addBoardLane(label, colorId)
+      await reload()
+      showToast('栏目已添加', 'success')
+    } catch (error) {
+      const message = getErrorMessage(error, '新增栏目失败。')
+      setWriteError(message)
+      showToast(message, 'error')
+    }
+  }
+
+  const handleDeleteBoardLane = async (lane: BoardLaneRecord) => {
+    const confirmed = window.confirm(`确认删除栏目「${lane.label}」吗？该栏目下的待做事项会回到「待做」。`)
+    if (!confirmed) return
+
+    setWriteError('')
+
+    try {
+      await deleteBoardLane(lane)
+      await reload()
+      showToast('栏目已删除，相关事项已回到待做', 'success')
+    } catch (error) {
+      const message = getErrorMessage(error, '删除栏目失败。')
       setWriteError(message)
       showToast(message, 'error')
     }
@@ -1226,12 +1341,16 @@ function App() {
           <BoardView
             todos={todos}
             filteredBoardTodos={filteredBoardTodos}
+            boardLanes={boardLanes}
             entryByDate={entryByDate}
             selectedDate={selectedDate}
             todoTitle={todoTitle}
             onFocusDate={focusDate}
             onTodoTitleChange={setTodoTitle}
-            onAddTodo={handleAddTodo}
+            onAddTodoWithDetails={(dateKey, title, details) => void handleAddTodoWithDetails(dateKey, title, details)}
+            onUpdateTodoDetails={(todo, details) => void handleUpdateTodoDetails(todo, details)}
+            onAddBoardLane={(label, colorId) => void handleAddBoardLane(label, colorId)}
+            onDeleteBoardLane={(lane) => void handleDeleteBoardLane(lane)}
             onToggleTodo={(todo) => void handleToggleTodo(todo)}
             onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
           />

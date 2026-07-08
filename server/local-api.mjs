@@ -19,7 +19,7 @@ const syncBundleRootDir = process.env.XINXIANGYI_SYNC_BUNDLE_DIR
 const syncBundleDir = resolve(syncBundleRootDir, syncBundleName)
 const port = Number(process.env.XINXIANGYI_API_PORT ?? 8787)
 const host = process.env.XINXIANGYI_API_HOST ?? '127.0.0.1'
-const schemaVersion = 4
+const schemaVersion = 5
 const portableSnapshotFile = 'xinxiangyi-native-snapshot.json'
 const portableManifestFile = 'manifest-native.json'
 const syncBundleGuideFile = 'README.txt'
@@ -82,6 +82,9 @@ db.exec(`
     id TEXT PRIMARY KEY,
     date_key TEXT NOT NULL,
     title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    priority TEXT NOT NULL DEFAULT 'normal',
+    lane_id TEXT NOT NULL DEFAULT 'inbox',
     done INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -101,6 +104,15 @@ db.exec(`
     updated_at TEXT NOT NULL,
     sync_state TEXT NOT NULL,
     FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS board_lanes (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    color_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    sync_state TEXT NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS changes (
@@ -151,6 +163,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
   CREATE INDEX IF NOT EXISTS idx_attachments_entry_id ON attachments(entry_id);
   CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
+  CREATE INDEX IF NOT EXISTS idx_board_lanes_created_at ON board_lanes(created_at);
   CREATE INDEX IF NOT EXISTS idx_changes_changed_at ON changes(changed_at);
   CREATE INDEX IF NOT EXISTS idx_changes_sync_state ON changes(sync_state);
   CREATE INDEX IF NOT EXISTS idx_metric_records_metric_id ON metric_records(metric_id);
@@ -165,6 +178,9 @@ const ensureColumn = (table, column, definition) => {
 
 ensureColumn('entries', 'weather_text', `weather_text TEXT NOT NULL DEFAULT ''`)
 ensureColumn('entries', 'location_text', `location_text TEXT NOT NULL DEFAULT ''`)
+ensureColumn('todos', 'description', `description TEXT NOT NULL DEFAULT ''`)
+ensureColumn('todos', 'priority', `priority TEXT NOT NULL DEFAULT 'normal'`)
+ensureColumn('todos', 'lane_id', `lane_id TEXT NOT NULL DEFAULT 'inbox'`)
 
 db.exec(`PRAGMA user_version = ${schemaVersion}`)
 
@@ -201,6 +217,9 @@ const rowToTodo = (row) => ({
   id: row.id,
   dateKey: row.date_key,
   title: row.title,
+  description: row.description ?? '',
+  priority: row.priority ?? 'normal',
+  laneId: row.lane_id ?? 'inbox',
   done: Boolean(row.done),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -219,6 +238,15 @@ const rowToAttachment = (row) => ({
   updatedAt: row.updated_at,
   syncState: row.sync_state,
   dataBase64: Buffer.from(row.blob).toString('base64'),
+})
+
+const rowToBoardLane = (row) => ({
+  id: row.id,
+  label: row.label,
+  colorId: row.color_id,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  syncState: row.sync_state,
 })
 
 const rowToChange = (row) => ({
@@ -354,6 +382,7 @@ const markLocalContentSynced = () => {
   transaction(() => {
     db.prepare(`UPDATE entries SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
     db.prepare(`UPDATE todos SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
+    db.prepare(`UPDATE board_lanes SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
     db.prepare(`UPDATE attachments SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
     db.prepare(`UPDATE metric_definitions SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
     db.prepare(`UPDATE metric_records SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
@@ -489,6 +518,17 @@ const mergePortableSnapshots = (localSnapshot, remoteSnapshot) => {
     tombstones,
     getRowId,
   ).sort((left, right) => readString(right, 'created_at').localeCompare(readString(left, 'created_at')))
+  const boardLanes = mergeRowsByKey(
+    'boardLane',
+    [
+      normalizeSnapshotArray(remoteSnapshot, 'board_lanes'),
+      normalizeSnapshotArray(remoteSnapshot, 'boardLanes'),
+      normalizeSnapshotArray(localSnapshot, 'board_lanes'),
+      normalizeSnapshotArray(localSnapshot, 'boardLanes'),
+    ],
+    tombstones,
+    getRowId,
+  ).sort((left, right) => readString(left, 'created_at').localeCompare(readString(right, 'created_at')))
   const attachments = mergeRowsByKey(
     'attachment',
     [normalizeSnapshotArray(remoteSnapshot, 'attachments'), normalizeSnapshotArray(localSnapshot, 'attachments')],
@@ -533,6 +573,7 @@ const mergePortableSnapshots = (localSnapshot, remoteSnapshot) => {
     exportedAt: nowIso(),
     entries,
     todos,
+    board_lanes: boardLanes,
     attachments,
     changes,
     weeklySummaries,
@@ -551,6 +592,7 @@ const createPortableSnapshot = () => {
     exportedAt: nowIso(),
     entries: db.prepare(`SELECT * FROM entries ORDER BY date_key DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
     todos: db.prepare(`SELECT * FROM todos ORDER BY created_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
+    board_lanes: db.prepare(`SELECT * FROM board_lanes ORDER BY created_at ASC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
     attachments: attachmentRows.map((row) => {
       const { blob, ...rest } = row
 
@@ -708,6 +750,7 @@ const importPortableSnapshot = (snapshot) => {
     db.prepare('DELETE FROM attachments').run()
     db.prepare('DELETE FROM entries').run()
     db.prepare('DELETE FROM todos').run()
+    db.prepare('DELETE FROM board_lanes').run()
     db.prepare('DELETE FROM changes').run()
     db.prepare('DELETE FROM weekly_summaries').run()
     db.prepare('DELETE FROM metric_records').run()
@@ -737,18 +780,35 @@ const importPortableSnapshot = (snapshot) => {
     }
 
     const insertTodo = db.prepare(`
-      INSERT INTO todos (id, date_key, title, done, created_at, updated_at, completed_at, sync_state)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
+      INSERT INTO todos (id, date_key, title, description, priority, lane_id, done, created_at, updated_at, completed_at, sync_state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
     `)
     for (const row of snapshot.todos) {
       insertTodo.run(
         readString(row, 'id', createId('todo')),
         readString(row, 'date_key'),
         readString(row, 'title'),
+        readString(row, 'description', ''),
+        readString(row, 'priority', 'normal'),
+        readString(row, 'lane_id', 'inbox'),
         readNumber(row, 'done'),
         readString(row, 'created_at', timestamp),
         readString(row, 'updated_at', timestamp),
         readOptionalString(row, 'completed_at'),
+      )
+    }
+
+    const insertBoardLane = db.prepare(`
+      INSERT INTO board_lanes (id, label, color_id, created_at, updated_at, sync_state)
+      VALUES (?, ?, ?, ?, ?, 'synced')
+    `)
+    for (const row of snapshot.board_lanes ?? snapshot.boardLanes ?? []) {
+      insertBoardLane.run(
+        readString(row, 'id', createId('lane')),
+        readString(row, 'label'),
+        readString(row, 'color_id', readString(row, 'colorId', 'blue')),
+        readString(row, 'created_at', timestamp),
+        readString(row, 'updated_at', timestamp),
       )
     }
 
@@ -1396,6 +1456,7 @@ const notFound = (response) => sendJson(response, 404, { error: 'API route not f
 const getState = () => ({
   entries: db.prepare('SELECT * FROM entries ORDER BY date_key DESC').all().map(rowToEntry),
   todos: db.prepare('SELECT * FROM todos ORDER BY created_at DESC').all().map(rowToTodo),
+  boardLanes: db.prepare('SELECT * FROM board_lanes ORDER BY created_at ASC').all().map(rowToBoardLane),
   attachments: db.prepare('SELECT * FROM attachments ORDER BY created_at DESC').all().map(rowToAttachment),
   metricDefinitions: db
     .prepare('SELECT * FROM metric_definitions ORDER BY created_at ASC')
@@ -1598,6 +1659,9 @@ const addTodo = async (request, response) => {
     id: createId('todo'),
     dateKey: payload.dateKey,
     title: payload.title,
+    description: typeof payload.description === 'string' ? payload.description : '',
+    priority: typeof payload.priority === 'string' ? payload.priority : 'normal',
+    laneId: typeof payload.laneId === 'string' ? payload.laneId : 'inbox',
     done: false,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -1607,12 +1671,15 @@ const addTodo = async (request, response) => {
 
   transaction(() => {
     db.prepare(`
-      INSERT INTO todos (id, date_key, title, done, created_at, updated_at, sync_state)
-      VALUES ($id, $dateKey, $title, 0, $createdAt, $updatedAt, $syncState)
+      INSERT INTO todos (id, date_key, title, description, priority, lane_id, done, created_at, updated_at, sync_state)
+      VALUES ($id, $dateKey, $title, $description, $priority, $laneId, 0, $createdAt, $updatedAt, $syncState)
     `).run({
       $id: todo.id,
       $dateKey: todo.dateKey,
       $title: todo.title,
+      $description: todo.description,
+      $priority: todo.priority,
+      $laneId: todo.laneId,
       $createdAt: todo.createdAt,
       $updatedAt: todo.updatedAt,
       $syncState: todo.syncState,
@@ -1633,10 +1700,15 @@ const updateTodo = async (request, response, id) => {
   }
 
   const timestamp = nowIso()
+  const existingTodo = rowToTodo(existing)
+  const nextDone = Object.hasOwn(payload, 'done') ? Boolean(payload.done) : existingTodo.done
   const todo = {
-    ...rowToTodo(existing),
-    done: Boolean(payload.done),
-    completedAt: payload.done ? timestamp : undefined,
+    ...existingTodo,
+    description: typeof payload.description === 'string' ? payload.description : existingTodo.description,
+    priority: typeof payload.priority === 'string' ? payload.priority : existingTodo.priority,
+    laneId: typeof payload.laneId === 'string' ? payload.laneId : existingTodo.laneId,
+    done: nextDone,
+    completedAt: Object.hasOwn(payload, 'done') ? (nextDone ? timestamp : undefined) : existingTodo.completedAt,
     updatedAt: timestamp,
     syncState: 'pending',
   }
@@ -1645,10 +1717,14 @@ const updateTodo = async (request, response, id) => {
   transaction(() => {
     db.prepare(`
       UPDATE todos
-      SET done = $done, completed_at = $completedAt, updated_at = $updatedAt, sync_state = 'pending'
+      SET description = $description, priority = $priority, lane_id = $laneId,
+          done = $done, completed_at = $completedAt, updated_at = $updatedAt, sync_state = 'pending'
       WHERE id = $id
     `).run({
       $id: todo.id,
+      $description: todo.description,
+      $priority: todo.priority,
+      $laneId: todo.laneId,
       $done: todo.done ? 1 : 0,
       $completedAt: todo.completedAt ?? null,
       $updatedAt: todo.updatedAt,
@@ -1673,6 +1749,70 @@ const deleteTodo = async (request, response, id) => {
   transaction(() => {
     db.prepare('DELETE FROM todos WHERE id = ?').run(id)
     appendChange('todo', todo.id, 'delete', todo, deviceId)
+  })
+
+  sendJson(response, 200, { ok: true })
+}
+
+const addBoardLane = async (request, response) => {
+  const payload = await readJson(request)
+  const timestamp = nowIso()
+  const lane = {
+    id: createId('lane'),
+    label: payload.label,
+    colorId: payload.colorId ?? 'blue',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    syncState: 'pending',
+  }
+  const deviceId = getDeviceId(request)
+
+  transaction(() => {
+    db.prepare(`
+      INSERT INTO board_lanes (id, label, color_id, created_at, updated_at, sync_state)
+      VALUES ($id, $label, $colorId, $createdAt, $updatedAt, $syncState)
+    `).run({
+      $id: lane.id,
+      $label: lane.label,
+      $colorId: lane.colorId,
+      $createdAt: lane.createdAt,
+      $updatedAt: lane.updatedAt,
+      $syncState: lane.syncState,
+    })
+    appendChange('boardLane', lane.id, 'upsert', lane, deviceId)
+  })
+
+  sendJson(response, 200, { lane })
+}
+
+const deleteBoardLane = async (request, response, id) => {
+  const existing = db.prepare('SELECT * FROM board_lanes WHERE id = ?').get(id)
+
+  if (!existing) {
+    sendJson(response, 404, { error: 'Board lane not found.' })
+    return
+  }
+
+  const lane = rowToBoardLane(existing)
+  const deviceId = getDeviceId(request)
+  const timestamp = nowIso()
+  const movedTodos = db
+    .prepare('SELECT * FROM todos WHERE lane_id = ?')
+    .all(id)
+    .map((row) => ({
+      ...rowToTodo(row),
+      laneId: 'inbox',
+      updatedAt: timestamp,
+      syncState: 'pending',
+    }))
+
+  transaction(() => {
+    db.prepare(`UPDATE todos SET lane_id = 'inbox', updated_at = ?, sync_state = 'pending' WHERE lane_id = ?`).run(timestamp, id)
+    db.prepare('DELETE FROM board_lanes WHERE id = ?').run(id)
+    for (const todo of movedTodos) {
+      appendChange('todo', todo.id, 'upsert', todo, deviceId)
+    }
+    appendChange('boardLane', lane.id, 'delete', lane, deviceId)
   })
 
   sendJson(response, 200, { ok: true })
@@ -1954,6 +2094,17 @@ const route = async (request, response) => {
 
   if (todoMatch && request.method === 'DELETE') {
     await deleteTodo(request, response, decodeURIComponent(todoMatch[1]))
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/api/board-lanes') {
+    await addBoardLane(request, response)
+    return
+  }
+
+  const boardLaneMatch = pathname.match(/^\/api\/board-lanes\/([^/]+)$/)
+  if (boardLaneMatch && request.method === 'DELETE') {
+    await deleteBoardLane(request, response, decodeURIComponent(boardLaneMatch[1]))
     return
   }
 

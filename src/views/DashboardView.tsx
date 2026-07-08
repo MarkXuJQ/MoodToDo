@@ -131,16 +131,18 @@ export function DashboardView({
 }: DashboardViewProps) {
   const [previewImage, setPreviewImage] = useState<{ name: string; sourceUrl: string } | null>(null)
   const activeDateRef = useRef<HTMLButtonElement | null>(null)
-  const moodAverageColor =
-    lastSevenAverage >= 82
+  const heroMoodScore = selectedEntry?.mood.score ?? lastSevenAverage
+  const heroMoodColor =
+    heroMoodScore >= 82
       ? '#ffe119'
-      : lastSevenAverage >= 66
+      : heroMoodScore >= 66
         ? '#25e64f'
-        : lastSevenAverage >= 50
+        : heroMoodScore >= 50
           ? '#17d4c2'
-          : lastSevenAverage >= 35
+          : heroMoodScore >= 35
             ? '#ff8a00'
             : '#f01818'
+  const hasMoodData = Boolean(selectedEntry) || lastSevenEntryCount > 0
 
   useEffect(
     () => () => {
@@ -207,30 +209,6 @@ export function DashboardView({
 
       <div className="dashboard-layout-grid">
         <section className="section dashboard-mood-panel" aria-labelledby="stats-title">
-          <div className="dashboard-date-wheel" aria-label="附近日期">
-            <div className="dashboard-date-track">
-              {nearbyDateKeys.map((dateKey, index) => {
-                const isSelected = dateKey === selectedDate
-                const offset = index - 4
-
-                return (
-                  <button
-                    className={`dashboard-date-chip ${isSelected ? 'dashboard-date-chip-active' : ''}`}
-                    type="button"
-                    key={dateKey}
-                    aria-current={isSelected ? 'date' : undefined}
-                    data-offset={Math.max(-4, Math.min(4, offset))}
-                    ref={isSelected ? activeDateRef : undefined}
-                    onClick={() => onDateChange(dateKey)}
-                  >
-                    <span>{getWeekdayLabel(dateKey)}</span>
-                    <strong>{getDayLabel(dateKey)}</strong>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
           <div className="section-head">
             <div>
               <p className="eyebrow">Mood Space</p>
@@ -244,24 +222,66 @@ export function DashboardView({
             </button>
           </div>
 
+          {hasMoodData ? (
+            <div className="dashboard-mood-hero">
+              <div className="mood-ring-stack">
+                <ProgressRing
+                  value={heroMoodScore}
+                  max={100}
+                  color={heroMoodColor}
+                  valueText={`${heroMoodScore || 0}`}
+                  size={156}
+                />
+                <div className="mood-ring-caption">
+                  <span>{selectedEntry ? '当日心象' : '最近均分'}</span>
+                  <strong>{heroMoodScore >= 70 ? '状态舒展，适合推进重点事项。' : heroMoodScore >= 55 ? '状态平稳，可以保持节奏。' : '状态偏紧，适合降低负荷。'}</strong>
+                  <small>{selectedEntry ? selectedDateLabel : `来自最近 ${lastSevenEntryCount} 条心情记录`}</small>
+                </div>
+              </div>
+
+              <div className="dashboard-date-wheel" aria-label="附近日期">
+                <div className="dashboard-date-track">
+                  {nearbyDateKeys.map((dateKey, index) => {
+                    const isSelected = dateKey === selectedDate
+                    const offset = index - 4
+
+                    return (
+                      <button
+                        className={`dashboard-date-chip ${isSelected ? 'dashboard-date-chip-active' : ''}`}
+                        type="button"
+                        key={dateKey}
+                        aria-current={isSelected ? 'date' : undefined}
+                        data-offset={Math.max(-4, Math.min(4, offset))}
+                        ref={isSelected ? activeDateRef : undefined}
+                        onClick={() => onDateChange(dateKey)}
+                      >
+                        <span>{getWeekdayLabel(dateKey)}</span>
+                        <strong>{getDayLabel(dateKey)}</strong>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="empty-state">保存第一条日记后生成心象分。</p>
+          )}
+        </section>
+
+        <section className="section dashboard-mood-details" aria-labelledby="mood-details-title">
           {lastSevenEntryCount > 0 ? (
             <>
-              <div className="dashboard-mood-overview">
-                <div className="mood-ring-stack">
-                  <ProgressRing
-                    value={lastSevenAverage}
-                    max={100}
-                    color={moodAverageColor}
-                    valueText={`${lastSevenAverage}`}
-                    size={132}
-                  />
-                  <div className="mood-ring-caption">
-                    <span>最近均分</span>
-                    <strong>{lastSevenAverage >= 70 ? '状态舒展，适合推进重点事项。' : lastSevenAverage >= 55 ? '状态平稳，可以保持节奏。' : '状态偏紧，适合降低负荷。'}</strong>
-                    <small>来自最近 {lastSevenEntryCount} 条心情记录</small>
-                  </div>
+              <div className="section-head dashboard-details-head">
+                <div>
+                  <p className="eyebrow">Mood Analysis</p>
+                  <h2 className="section-title" id="mood-details-title">
+                    最近心象
+                  </h2>
                 </div>
+                <span className="pill">均分 {lastSevenAverage || 0}</span>
+              </div>
 
+              <div className="dashboard-mood-overview">
                 <div className="mood-breakdown-list" aria-label="心象维度拆解">
                   {moodBreakdownItems.map((item) => (
                     <div className="mood-breakdown-row" key={item.id}>
@@ -315,7 +335,7 @@ export function DashboardView({
               </div>
             </>
           ) : (
-            <p className="empty-state">保存第一条日记后生成心象分。</p>
+            <p className="empty-state">继续记录后，这里会展示最近心象分析和折线。</p>
           )}
         </section>
 

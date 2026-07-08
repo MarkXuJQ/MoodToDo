@@ -3,6 +3,8 @@ import { Capacitor } from '@capacitor/core'
 import { analyzeMood, type MoodAnalysis } from './mood'
 import {
   addNativeTodo,
+  addNativeBoardLane,
+  deleteNativeBoardLane,
   deleteNativeAttachment,
   deleteNativeJournalEntries,
   deleteNativeJournalEntry,
@@ -12,6 +14,7 @@ import {
   pushNativeWebDavSnapshot,
   setNativeTodoDone,
   testNativeWebDavConnection,
+  updateNativeTodoDetails,
   upsertNativeJournalEntry,
   upsertNativeWeeklySummary,
 } from './native-db'
@@ -40,11 +43,22 @@ export type TodoItem = {
   id: string
   dateKey: string
   title: string
+  description: string
+  priority: TodoPriority
+  laneId: string
   done: boolean
   createdAt: string
   updatedAt: string
   completedAt?: string
   syncState: SyncState
+}
+
+export type TodoPriority = 'normal' | 'important' | 'urgent'
+
+export type TodoDetailUpdate = {
+  description?: string
+  priority?: TodoPriority
+  laneId?: string
 }
 
 export type AttachmentRecord = {
@@ -60,7 +74,16 @@ export type AttachmentRecord = {
   syncState: SyncState
 }
 
-export type ChangeEntity = 'entry' | 'todo' | 'attachment' | 'metricDefinition' | 'metricRecord'
+export type BoardLaneRecord = {
+  id: string
+  label: string
+  colorId: string
+  createdAt: string
+  updatedAt: string
+  syncState: SyncState
+}
+
+export type ChangeEntity = 'entry' | 'todo' | 'attachment' | 'boardLane' | 'metricDefinition' | 'metricRecord'
 export type ChangeOperation = 'upsert' | 'delete'
 
 export type ChangeLogRecord = {
@@ -151,6 +174,7 @@ export type LocalState = {
   entries: JournalEntry[]
   todos: TodoItem[]
   attachments: AttachmentRecord[]
+  boardLanes: BoardLaneRecord[]
   changes: ChangeLogRecord[]
   weeklySummaries: WeeklySummary[]
   meta: LocalDatabaseMeta
@@ -267,6 +291,7 @@ const normalizeLocalStatePayload = (payload: Partial<LocalStatePayload>): LocalS
   entries: ensureArray<JournalEntry>(payload.entries),
   todos: ensureArray<TodoItem>(payload.todos),
   attachments: ensureArray<AttachmentPayload>(payload.attachments).map(mapAttachment),
+  boardLanes: ensureArray<BoardLaneRecord>(payload.boardLanes),
   changes: ensureArray<ChangeLogRecord>(payload.changes),
   weeklySummaries: ensureArray<WeeklySummary>(payload.weeklySummaries),
   meta: {
@@ -332,17 +357,41 @@ export const deleteJournalEntries = async (entryIds: string[]) => {
   })
 }
 
-export const addTodo = async (dateKey: string, title: string) => {
+export const addTodo = async (dateKey: string, title: string, details: TodoDetailUpdate = {}) => {
   if (shouldUseNativeDatabase()) {
-    return addNativeTodo(dateKey, title)
+    return addNativeTodo(dateKey, title, details)
   }
 
   const { todo } = await apiFetch<{ todo: TodoItem }>('/api/todos', {
     method: 'POST',
-    body: JSON.stringify({ dateKey, title }),
+    body: JSON.stringify({ dateKey, title, ...details }),
   })
 
   return todo
+}
+
+export const addBoardLane = async (label: string, colorId: string) => {
+  if (shouldUseNativeDatabase()) {
+    return addNativeBoardLane(label, colorId)
+  }
+
+  const { lane } = await apiFetch<{ lane: BoardLaneRecord }>('/api/board-lanes', {
+    method: 'POST',
+    body: JSON.stringify({ label, colorId }),
+  })
+
+  return lane
+}
+
+export const deleteBoardLane = async (lane: BoardLaneRecord) => {
+  if (shouldUseNativeDatabase()) {
+    await deleteNativeBoardLane(lane)
+    return
+  }
+
+  await apiFetch<{ ok: true }>(`/api/board-lanes/${encodeURIComponent(lane.id)}`, {
+    method: 'DELETE',
+  })
 }
 
 export const setTodoDone = async (todo: TodoItem, done: boolean) => {
@@ -353,6 +402,19 @@ export const setTodoDone = async (todo: TodoItem, done: boolean) => {
   const { todo: next } = await apiFetch<{ todo: TodoItem }>(`/api/todos/${encodeURIComponent(todo.id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ done }),
+  })
+
+  return next
+}
+
+export const updateTodoDetails = async (todo: TodoItem, details: TodoDetailUpdate) => {
+  if (shouldUseNativeDatabase()) {
+    return updateNativeTodoDetails(todo, details)
+  }
+
+  const { todo: next } = await apiFetch<{ todo: TodoItem }>(`/api/todos/${encodeURIComponent(todo.id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(details),
   })
 
   return next

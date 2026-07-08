@@ -556,7 +556,11 @@
   }
 
   .dashboard-mood-panel {
-    @apply order-2;
+    @apply order-1;
+  }
+
+  .dashboard-mood-details {
+    @apply order-3;
   }
 
   .dashboard-date-wheel {
@@ -637,17 +641,40 @@
   }
 
   .dashboard-right-column {
-    @apply order-1 grid gap-4 sm:gap-5;
+    @apply order-2 grid gap-4 sm:gap-5;
   }
 
   .app-shell-desktop-nav .dashboard-layout-grid {
     grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
     align-items: start;
+    column-gap: 1.25rem;
+    row-gap: 0;
   }
 
-  .app-shell-desktop-nav .dashboard-mood-panel,
-  .app-shell-desktop-nav .dashboard-right-column {
+  .app-shell-desktop-nav .dashboard-mood-panel {
+    grid-column: 1;
+    grid-row: 1;
+    border-bottom-color: transparent;
+    border-radius: 0.375rem 0.375rem 0 0;
     order: 0;
+  }
+
+  .app-shell-desktop-nav .dashboard-mood-details {
+    grid-column: 1;
+    grid-row: 2;
+    border-top-color: rgba(255, 255, 255, 0.38);
+    border-radius: 0 0 0.375rem 0.375rem;
+    order: 0;
+  }
+
+  .app-shell-desktop-nav .dashboard-right-column {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    order: 0;
+  }
+
+  .dashboard-mood-hero {
+    @apply grid gap-4;
   }
 
   .dashboard-mood-overview {
@@ -655,8 +682,7 @@
   }
 
   .app-shell-desktop-nav .dashboard-mood-overview {
-    grid-template-columns: minmax(132px, 0.52fr) minmax(300px, 1.48fr);
-    align-items: start;
+    @apply grid-cols-1;
   }
 
   .dashboard-mood-overview .mood-breakdown-list {
@@ -722,6 +748,77 @@
 
   .mobile-todo-list {
     @apply m-0 max-h-36 list-none overflow-y-auto p-0;
+  }
+
+  @media (max-width: 767px) {
+    .dashboard-desktop-summary {
+      @apply hidden;
+    }
+
+    .dashboard-layout-grid {
+      @apply mt-0 grid gap-4;
+    }
+
+    .dashboard-mood-panel {
+      @apply relative z-auto block min-h-0 overflow-visible;
+    }
+
+    .dashboard-mood-panel .section-head {
+      @apply mb-4;
+    }
+
+    .dashboard-mood-hero {
+      @apply grid gap-5;
+    }
+
+    .dashboard-mood-hero .mood-ring-stack {
+      @apply gap-5;
+    }
+
+    .dashboard-mood-hero .ring-shell {
+      transform: scale(1.08);
+    }
+
+    .dashboard-mood-hero .mood-ring-caption {
+      @apply max-w-[17rem];
+    }
+
+    .dashboard-mood-hero .mood-ring-caption strong {
+      @apply text-base;
+    }
+
+    .dashboard-mood-hero .dashboard-date-wheel {
+      @apply mb-0;
+    }
+
+    .dashboard-right-column {
+      @apply relative z-auto mx-0 mt-0 gap-4 rounded-none border-0 bg-transparent p-0 shadow-none;
+      backdrop-filter: none;
+    }
+
+    .dashboard-mood-details {
+      @apply relative z-auto mt-0 rounded-md;
+    }
+
+    .dashboard-mood-details .dashboard-mood-trend {
+      @apply mt-4;
+    }
+
+    .dashboard-mood-details .mini-metrics {
+      @apply grid-cols-3 gap-1.5;
+    }
+
+    .dashboard-mood-details .metric-line {
+      @apply min-h-14 px-2;
+    }
+
+    .dashboard-mood-details .metric-label {
+      @apply text-[10px];
+    }
+
+    .dashboard-mood-details .metric-value {
+      @apply text-base;
+    }
   }
 
   .section {
@@ -1439,10 +1536,6 @@
 
   .board-card-controls {
     @apply flex min-w-0 items-center gap-2;
-  }
-
-  .board-move-select {
-    @apply min-h-9 min-w-0 rounded-md border border-white/75 bg-white/86 px-2 text-xs font-black text-ink-600 outline-none transition-colors hover:border-xin-700;
   }
 
   .board-detail-select {

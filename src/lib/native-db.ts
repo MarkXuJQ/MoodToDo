@@ -4,6 +4,7 @@ import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@cap
 import { analyzeMood, type MoodAnalysis } from './mood'
 import type {
   AttachmentRecord,
+  BoardLaneRecord,
   ChangeEntity,
   ChangeLogRecord,
   ChangeOperation,
@@ -11,6 +12,7 @@ import type {
   JournalEntry,
   LocalState,
   TodoItem,
+  TodoDetailUpdate,
   WebDavConnectionTestResult,
   WebDavSyncConfig,
   WebDavSyncResult,
@@ -34,6 +36,8 @@ type NativeSnapshot = {
   exportedAt: string
   entries: DbRow[]
   todos: DbRow[]
+  board_lanes?: DbRow[]
+  boardLanes?: DbRow[]
   attachments: DbRow[]
   changes: DbRow[]
   weeklySummaries: DbRow[]
@@ -41,7 +45,7 @@ type NativeSnapshot = {
   metricRecords?: DbRow[]
 }
 
-const schemaVersion = 4
+const schemaVersion = 5
 const nativeDatabaseId = 'xinxiangyi'
 const nativeDatabaseName = 'xinxiangyi.sqlite'
 const nativeSnapshotFile = 'xinxiangyi-native-snapshot.json'
@@ -220,11 +224,23 @@ const rowToTodo = (row: DbRow): TodoItem => ({
   id: readString(row, 'id'),
   dateKey: readString(row, 'date_key'),
   title: readString(row, 'title'),
+  description: readString(row, 'description', ''),
+  priority: readString(row, 'priority', 'normal') as TodoItem['priority'],
+  laneId: readString(row, 'lane_id', 'inbox'),
   done: Boolean(readNumber(row, 'done')),
   createdAt: readString(row, 'created_at'),
   updatedAt: readString(row, 'updated_at'),
   completedAt: readOptionalString(row, 'completed_at'),
   syncState: readString(row, 'sync_state', 'pending') as TodoItem['syncState'],
+})
+
+const rowToBoardLane = (row: DbRow): BoardLaneRecord => ({
+  id: readString(row, 'id'),
+  label: readString(row, 'label'),
+  colorId: readString(row, 'color_id', 'blue'),
+  createdAt: readString(row, 'created_at'),
+  updatedAt: readString(row, 'updated_at'),
+  syncState: readString(row, 'sync_state', 'pending') as BoardLaneRecord['syncState'],
 })
 
 const rowToAttachment = (row: DbRow): AttachmentRecord => ({
@@ -354,6 +370,17 @@ const mergeNativeSnapshots = (localSnapshot: NativeSnapshot, remoteSnapshot: Nat
     tombstones,
     getRowId,
   ).sort((left, right) => readString(right, 'created_at').localeCompare(readString(left, 'created_at')))
+  const boardLanes = mergeRowsByKey(
+    'boardLane',
+    [
+      snapshotArray(remoteSnapshot, 'board_lanes'),
+      snapshotArray(remoteSnapshot, 'boardLanes'),
+      snapshotArray(localSnapshot, 'board_lanes'),
+      snapshotArray(localSnapshot, 'boardLanes'),
+    ],
+    tombstones,
+    getRowId,
+  ).sort((left, right) => readString(left, 'created_at').localeCompare(readString(right, 'created_at')))
   const attachments = mergeRowsByKey(
     'attachment',
     [snapshotArray(remoteSnapshot, 'attachments'), snapshotArray(localSnapshot, 'attachments')],
@@ -395,6 +422,7 @@ const mergeNativeSnapshots = (localSnapshot: NativeSnapshot, remoteSnapshot: Nat
     exportedAt: nowIso(),
     entries,
     todos,
+    board_lanes: boardLanes,
     attachments,
     changes,
     weeklySummaries,
@@ -439,6 +467,9 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
       id TEXT PRIMARY KEY,
       date_key TEXT NOT NULL,
       title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      priority TEXT NOT NULL DEFAULT 'normal',
+      lane_id TEXT NOT NULL DEFAULT 'inbox',
       done INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -458,6 +489,15 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
       updated_at TEXT NOT NULL,
       sync_state TEXT NOT NULL,
       FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS board_lanes (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      color_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      sync_state TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS changes (
@@ -508,6 +548,7 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
     CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
     CREATE INDEX IF NOT EXISTS idx_attachments_entry_id ON attachments(entry_id);
     CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
+    CREATE INDEX IF NOT EXISTS idx_board_lanes_created_at ON board_lanes(created_at);
     CREATE INDEX IF NOT EXISTS idx_changes_changed_at ON changes(changed_at);
     CREATE INDEX IF NOT EXISTS idx_changes_sync_state ON changes(sync_state);
     CREATE INDEX IF NOT EXISTS idx_metric_records_metric_id ON metric_records(metric_id);
@@ -518,6 +559,9 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
 
   await ensureColumn(db, 'entries', 'weather_text', `weather_text TEXT NOT NULL DEFAULT ''`)
   await ensureColumn(db, 'entries', 'location_text', `location_text TEXT NOT NULL DEFAULT ''`)
+  await ensureColumn(db, 'todos', 'description', `description TEXT NOT NULL DEFAULT ''`)
+  await ensureColumn(db, 'todos', 'priority', `priority TEXT NOT NULL DEFAULT 'normal'`)
+  await ensureColumn(db, 'todos', 'lane_id', `lane_id TEXT NOT NULL DEFAULT 'inbox'`)
   await ensureColumn(db, 'attachments', 'data_base64', `data_base64 TEXT NOT NULL DEFAULT ''`)
   await runStatement(db, `PRAGMA user_version = ${schemaVersion}`)
 }
@@ -575,9 +619,10 @@ const getNativeMeta = async (db: SQLiteDBConnection) => {
 
 export const getNativeLocalState = async (): Promise<LocalState> => {
   const db = await getDatabase()
-  const [entries, todos, attachments, changes, weeklySummaries, meta] = await Promise.all([
+  const [entries, todos, boardLanes, attachments, changes, weeklySummaries, meta] = await Promise.all([
     queryRows(db, 'SELECT * FROM entries ORDER BY date_key DESC').then((rows) => rows.map(rowToEntry)),
     queryRows(db, 'SELECT * FROM todos ORDER BY created_at DESC').then((rows) => rows.map(rowToTodo)),
+    queryRows(db, 'SELECT * FROM board_lanes ORDER BY created_at ASC').then((rows) => rows.map(rowToBoardLane)),
     queryRows(db, 'SELECT * FROM attachments ORDER BY created_at DESC').then((rows) => rows.map(rowToAttachment)),
     queryRows(db, 'SELECT * FROM changes ORDER BY changed_at DESC').then((rows) => rows.map(rowToChange)),
     queryRows(db, 'SELECT * FROM weekly_summaries ORDER BY updated_at DESC').then((rows) =>
@@ -589,6 +634,7 @@ export const getNativeLocalState = async (): Promise<LocalState> => {
   return {
     entries,
     todos,
+    boardLanes,
     attachments,
     changes,
     weeklySummaries,
@@ -772,13 +818,16 @@ export const deleteNativeJournalEntries = async (entryIds: string[]) => {
   await withTransaction(db, () => deleteNativeEntryRows(db, entryRows, getDeviceId()))
 }
 
-export const addNativeTodo = async (dateKey: string, title: string) => {
+export const addNativeTodo = async (dateKey: string, title: string, details: TodoDetailUpdate = {}) => {
   const db = await getDatabase()
   const timestamp = nowIso()
   const todo: TodoItem = {
     id: createId('todo'),
     dateKey,
     title,
+    description: details.description ?? '',
+    priority: details.priority ?? 'normal',
+    laneId: details.laneId ?? 'inbox',
     done: false,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -790,16 +839,110 @@ export const addNativeTodo = async (dateKey: string, title: string) => {
     await runStatement(
       db,
       `
-        INSERT INTO todos (id, date_key, title, done, created_at, updated_at, sync_state)
-        VALUES (?, ?, ?, 0, ?, ?, ?)
+        INSERT INTO todos (id, date_key, title, description, priority, lane_id, done, created_at, updated_at, sync_state)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
       `,
-      [todo.id, todo.dateKey, todo.title, todo.createdAt, todo.updatedAt, todo.syncState],
+      [todo.id, todo.dateKey, todo.title, todo.description, todo.priority, todo.laneId, todo.createdAt, todo.updatedAt, todo.syncState],
       false,
     )
     await appendChange(db, 'todo', todo.id, 'upsert', todo, deviceId, false)
   })
 
   return todo
+}
+
+export const updateNativeTodoDetails = async (todo: TodoItem, details: TodoDetailUpdate) => {
+  const db = await getDatabase()
+  const existing = await queryFirst(db, 'SELECT * FROM todos WHERE id = ?', [todo.id])
+
+  if (!existing) {
+    throw new Error('Todo not found.')
+  }
+
+  const timestamp = nowIso()
+  const existingTodo = rowToTodo(existing)
+  const next: TodoItem = {
+    ...existingTodo,
+    description: details.description ?? existingTodo.description,
+    priority: details.priority ?? existingTodo.priority,
+    laneId: details.laneId ?? existingTodo.laneId,
+    updatedAt: timestamp,
+    syncState: 'pending',
+  }
+  const deviceId = getDeviceId()
+
+  await withTransaction(db, async () => {
+    await runStatement(
+      db,
+      `
+        UPDATE todos
+        SET description = ?, priority = ?, lane_id = ?, updated_at = ?, sync_state = 'pending'
+        WHERE id = ?
+      `,
+      [next.description, next.priority, next.laneId, next.updatedAt, next.id],
+      false,
+    )
+    await appendChange(db, 'todo', next.id, 'upsert', next, deviceId, false)
+  })
+
+  return next
+}
+
+export const addNativeBoardLane = async (label: string, colorId: string) => {
+  const db = await getDatabase()
+  const timestamp = nowIso()
+  const lane: BoardLaneRecord = {
+    id: createId('lane'),
+    label,
+    colorId,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    syncState: 'pending',
+  }
+  const deviceId = getDeviceId()
+
+  await withTransaction(db, async () => {
+    await runStatement(
+      db,
+      `
+        INSERT INTO board_lanes (id, label, color_id, created_at, updated_at, sync_state)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      [lane.id, lane.label, lane.colorId, lane.createdAt, lane.updatedAt, lane.syncState],
+      false,
+    )
+    await appendChange(db, 'boardLane', lane.id, 'upsert', lane, deviceId, false)
+  })
+
+  return lane
+}
+
+export const deleteNativeBoardLane = async (lane: BoardLaneRecord) => {
+  const db = await getDatabase()
+  const existing = await queryFirst(db, 'SELECT * FROM board_lanes WHERE id = ?', [lane.id])
+
+  if (!existing) {
+    throw new Error('Board lane not found.')
+  }
+
+  const existingLane = rowToBoardLane(existing)
+  const deviceId = getDeviceId()
+  const timestamp = nowIso()
+  const movedTodos = (await queryRows(db, 'SELECT * FROM todos WHERE lane_id = ?', [lane.id])).map((row) => ({
+    ...rowToTodo(row),
+    laneId: 'inbox',
+    updatedAt: timestamp,
+    syncState: 'pending' as const,
+  }))
+
+  await withTransaction(db, async () => {
+    await runStatement(db, `UPDATE todos SET lane_id = 'inbox', updated_at = ?, sync_state = 'pending' WHERE lane_id = ?`, [timestamp, lane.id], false)
+    await runStatement(db, 'DELETE FROM board_lanes WHERE id = ?', [lane.id], false)
+    for (const todo of movedTodos) {
+      await appendChange(db, 'todo', todo.id, 'upsert', todo, deviceId, false)
+    }
+    await appendChange(db, 'boardLane', existingLane.id, 'delete', existingLane, deviceId, false)
+  })
 }
 
 export const setNativeTodoDone = async (todo: TodoItem, done: boolean) => {
@@ -1106,9 +1249,10 @@ const syncedRow = (row: DbRow): DbRow => ('sync_state' in row ? { ...row, sync_s
 
 const createNativeSnapshot = async (): Promise<NativeSnapshot> => {
   const db = await getDatabase()
-  const [entries, todos, attachments, changes, weeklySummaries, metricDefinitions, metricRecords] = await Promise.all([
+  const [entries, todos, boardLanes, attachments, changes, weeklySummaries, metricDefinitions, metricRecords] = await Promise.all([
     queryRows(db, 'SELECT * FROM entries ORDER BY date_key DESC'),
     queryRows(db, 'SELECT * FROM todos ORDER BY created_at DESC'),
+    queryRows(db, 'SELECT * FROM board_lanes ORDER BY created_at ASC'),
     queryRows(db, 'SELECT * FROM attachments ORDER BY created_at DESC'),
     queryRows(db, 'SELECT * FROM changes ORDER BY changed_at DESC'),
     queryRows(db, 'SELECT * FROM weekly_summaries ORDER BY updated_at DESC'),
@@ -1123,6 +1267,7 @@ const createNativeSnapshot = async (): Promise<NativeSnapshot> => {
     exportedAt: nowIso(),
     entries: entries.map(syncedRow),
     todos: todos.map(syncedRow),
+    board_lanes: boardLanes.map(syncedRow),
     attachments: attachments.map(syncedRow),
     changes: compactChangeRows(changes).map(syncedRow),
     weeklySummaries,
@@ -1137,6 +1282,7 @@ const markNativeContentSynced = async () => {
   await withTransaction(db, async () => {
     await runStatement(db, `UPDATE entries SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
     await runStatement(db, `UPDATE todos SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
+    await runStatement(db, `UPDATE board_lanes SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
     await runStatement(db, `UPDATE attachments SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
     await runStatement(db, `UPDATE metric_definitions SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
     await runStatement(db, `UPDATE metric_records SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
@@ -1305,6 +1451,7 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
     await runStatement(db, 'DELETE FROM attachments', [], false)
     await runStatement(db, 'DELETE FROM entries', [], false)
     await runStatement(db, 'DELETE FROM todos', [], false)
+    await runStatement(db, 'DELETE FROM board_lanes', [], false)
     await runStatement(db, 'DELETE FROM changes', [], false)
     await runStatement(db, 'DELETE FROM weekly_summaries', [], false)
     await runStatement(db, 'DELETE FROM metric_records', [], false)
@@ -1341,17 +1488,38 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
       await runStatement(
         db,
         `
-          INSERT INTO todos (id, date_key, title, done, created_at, updated_at, completed_at, sync_state)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
+          INSERT INTO todos (id, date_key, title, description, priority, lane_id, done, created_at, updated_at, completed_at, sync_state)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
         `,
         [
           readString(row, 'id', createId('todo')),
           readString(row, 'date_key'),
           readString(row, 'title'),
+          readString(row, 'description', ''),
+          readString(row, 'priority', 'normal'),
+          readString(row, 'lane_id', 'inbox'),
           readNumber(row, 'done'),
           readString(row, 'created_at', timestamp),
           readString(row, 'updated_at', timestamp),
           readOptionalString(row, 'completed_at') ?? null,
+        ],
+        false,
+      )
+    }
+
+    for (const row of snapshot.boardLanes ?? snapshot.board_lanes ?? []) {
+      await runStatement(
+        db,
+        `
+          INSERT INTO board_lanes (id, label, color_id, created_at, updated_at, sync_state)
+          VALUES (?, ?, ?, ?, ?, 'synced')
+        `,
+        [
+          readString(row, 'id', createId('lane')),
+          readString(row, 'label'),
+          readString(row, 'color_id', readString(row, 'colorId', 'blue')),
+          readString(row, 'created_at', timestamp),
+          readString(row, 'updated_at', timestamp),
         ],
         false,
       )

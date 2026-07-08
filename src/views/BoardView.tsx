@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from
 import { Check, Plus, Search, Trash2, X } from 'lucide-react'
 
 import { DatePickerButton } from '../components/ui/date-picker-button'
-import type { JournalEntry, TodoItem } from '../lib/db'
+import type { BoardLaneRecord, JournalEntry, TodoDetailUpdate, TodoItem, TodoPriority } from '../lib/db'
 import type { ActiveView } from '../types/app'
 
 type LaneColor = {
@@ -22,41 +22,25 @@ type BoardLane = {
   items: TodoItem[]
   custom?: boolean
   done?: boolean
-}
-
-type CustomBoardLane = {
-  id: string
-  label: string
-  colorId: string
-}
-
-type BoardAssignmentMap = Record<string, string>
-type TodoPriority = 'normal' | 'important' | 'urgent'
-
-type PendingPriorityDraft = {
-  title: string
-  dateKey: string
-  priority: TodoPriority
-  description: string
+  record?: BoardLaneRecord
 }
 
 type BoardViewProps = {
   todos: TodoItem[]
   filteredBoardTodos: TodoItem[]
+  boardLanes: BoardLaneRecord[]
   entryByDate: Map<string, JournalEntry>
   selectedDate: string
   todoTitle: string
   onFocusDate: (dateKey: string, nextView: ActiveView) => void
   onTodoTitleChange: (value: string) => void
-  onAddTodo: (event: FormEvent<HTMLFormElement>) => void
+  onAddTodoWithDetails: (dateKey: string, title: string, details: TodoDetailUpdate) => void
+  onUpdateTodoDetails: (todo: TodoItem, details: TodoDetailUpdate) => void
+  onAddBoardLane: (label: string, colorId: string) => void
+  onDeleteBoardLane: (lane: BoardLaneRecord) => void
   onToggleTodo: (todo: TodoItem) => void
   onDeleteTodo: (todo: TodoItem) => void
 }
-
-const boardLaneStorageKey = 'xinxiangyi-board-lanes-v1'
-const boardAssignmentStorageKey = 'xinxiangyi-board-assignments-v1'
-const boardPriorityStorageKey = 'xinxiangyi-board-priorities-v1'
-const boardDescriptionStorageKey = 'xinxiangyi-board-descriptions-v1'
 
 const laneColors: LaneColor[] = [
   { id: 'blue', label: '海蓝', color: '#376fe0', soft: '#edf4ff', darkSoft: 'rgba(22, 47, 82, 0.92)', ring: 'rgba(55, 111, 224, 0.18)', labelText: '#ffffff' },
@@ -98,58 +82,6 @@ const getLaneStyle = (color: LaneColor) =>
     '--lane-label-text': color.labelText,
   }) as CSSProperties
 
-const readStoredLanes = (): CustomBoardLane[] => {
-  try {
-    const raw = window.localStorage.getItem(boardLaneStorageKey)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as Partial<CustomBoardLane>[]
-
-    return parsed
-      .filter((lane): lane is CustomBoardLane => Boolean(lane.id && lane.label))
-      .map((lane) => ({ id: lane.id, label: lane.label, colorId: lane.colorId ?? laneColors[0].id }))
-  } catch {
-    return []
-  }
-}
-
-const readStoredAssignments = (): BoardAssignmentMap => {
-  try {
-    const raw = window.localStorage.getItem(boardAssignmentStorageKey)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as BoardAssignmentMap
-
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-const readStoredPriorities = (): Record<string, TodoPriority> => {
-  try {
-    const raw = window.localStorage.getItem(boardPriorityStorageKey)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as Record<string, TodoPriority>
-
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-const readStoredDescriptions = (): Record<string, string> => {
-  try {
-    const raw = window.localStorage.getItem(boardDescriptionStorageKey)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as Record<string, string>
-
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-const createLaneId = () => `lane-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
-
 const sortByDate = (items: TodoItem[]) =>
   [...items].sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.createdAt.localeCompare(right.createdAt))
 
@@ -165,25 +97,24 @@ const formatTodoDateLabel = (dateKey: string) => `${Number(dateKey.slice(5, 7))}
 export function BoardView({
   todos,
   filteredBoardTodos,
+  boardLanes: customLanes,
   entryByDate,
   selectedDate,
   todoTitle,
   onFocusDate,
   onTodoTitleChange,
-  onAddTodo,
+  onAddTodoWithDetails,
+  onUpdateTodoDetails,
+  onAddBoardLane,
+  onDeleteBoardLane,
   onToggleTodo,
   onDeleteTodo,
 }: BoardViewProps) {
   const [isTodoDialogOpen, setIsTodoDialogOpen] = useState(false)
   const [isLaneDialogOpen, setIsLaneDialogOpen] = useState(false)
   const [dialogTodoDate, setDialogTodoDate] = useState(selectedDate)
-  const [customLanes, setCustomLanes] = useState<CustomBoardLane[]>(readStoredLanes)
-  const [assignmentByTodoId, setAssignmentByTodoId] = useState<BoardAssignmentMap>(readStoredAssignments)
-  const [priorityByTodoId, setPriorityByTodoId] = useState<Record<string, TodoPriority>>(readStoredPriorities)
-  const [descriptionByTodoId, setDescriptionByTodoId] = useState<Record<string, string>>(readStoredDescriptions)
   const [todoDraftPriority, setTodoDraftPriority] = useState<TodoPriority>('normal')
   const [todoDraftDescription, setTodoDraftDescription] = useState('')
-  const [pendingPriorityDraft, setPendingPriorityDraft] = useState<PendingPriorityDraft | null>(null)
   const [laneDraftTitle, setLaneDraftTitle] = useState('')
   const [laneDraftColorId, setLaneDraftColorId] = useState(laneColors[0].id)
   const [focusedLaneId, setFocusedLaneId] = useState('inbox')
@@ -203,36 +134,6 @@ export function BoardView({
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  useEffect(() => {
-    window.localStorage.setItem(boardLaneStorageKey, JSON.stringify(customLanes))
-  }, [customLanes])
-
-  useEffect(() => {
-    window.localStorage.setItem(boardAssignmentStorageKey, JSON.stringify(assignmentByTodoId))
-  }, [assignmentByTodoId])
-
-  useEffect(() => {
-    window.localStorage.setItem(boardPriorityStorageKey, JSON.stringify(priorityByTodoId))
-  }, [priorityByTodoId])
-
-  useEffect(() => {
-    window.localStorage.setItem(boardDescriptionStorageKey, JSON.stringify(descriptionByTodoId))
-  }, [descriptionByTodoId])
-
-  useEffect(() => {
-    if (!pendingPriorityDraft) return
-
-    const matchedTodo = [...filteredBoardTodos]
-      .filter((todo) => todo.dateKey === pendingPriorityDraft.dateKey && todo.title === pendingPriorityDraft.title)
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
-
-    if (!matchedTodo) return
-
-    setPriorityByTodoId((current) => ({ ...current, [matchedTodo.id]: pendingPriorityDraft.priority }))
-    setDescriptionByTodoId((current) => ({ ...current, [matchedTodo.id]: pendingPriorityDraft.description }))
-    setPendingPriorityDraft(null)
-  }, [filteredBoardTodos, pendingPriorityDraft])
-
   const laneLabelById = useMemo(() => {
     const labels = new Map<string, string>([['inbox', '待做']])
     for (const lane of customLanes) {
@@ -249,11 +150,11 @@ export function BoardView({
 
     return filteredBoardTodos.filter((todo) => {
       const entry = entryByDate.get(todo.dateKey)
-      const assignedLaneId = assignmentByTodoId[todo.id] ?? 'inbox'
+      const assignedLaneId = todo.laneId || 'inbox'
       const haystack = [
         todo.title,
         todo.dateKey,
-        descriptionByTodoId[todo.id] ?? '',
+        todo.description,
         entry?.title ?? '',
         entry?.body ?? '',
         entry?.moodText ?? '',
@@ -264,18 +165,20 @@ export function BoardView({
 
       return haystack.includes(keyword)
     })
-  }, [assignmentByTodoId, descriptionByTodoId, entryByDate, filteredBoardTodos, laneLabelById, searchKeyword])
+  }, [entryByDate, filteredBoardTodos, laneLabelById, searchKeyword])
 
   const boardLanes = useMemo<BoardLane[]>(() => {
     const activeTodos = sortByDate(visibleBoardTodos.filter((todo) => !todo.done))
     const doneTodos = sortByDate(visibleBoardTodos.filter((todo) => todo.done))
     const customLaneIds = new Set(customLanes.map((lane) => lane.id))
-    const inboxItems = activeTodos.filter((todo) => !customLaneIds.has(assignmentByTodoId[todo.id]))
+    const inboxItems = activeTodos.filter((todo) => !customLaneIds.has(todo.laneId))
     const customLaneItems = customLanes.map((lane) => ({
-      ...lane,
+      id: lane.id,
+      label: lane.label,
       color: getLaneColor(lane.colorId),
       custom: true,
-      items: activeTodos.filter((todo) => assignmentByTodoId[todo.id] === lane.id),
+      record: lane,
+      items: activeTodos.filter((todo) => todo.laneId === lane.id),
     }))
 
     return [
@@ -283,7 +186,7 @@ export function BoardView({
       ...customLaneItems,
       { id: 'done', label: '已完成', color: defaultDoneColor, items: doneTodos, done: true },
     ]
-  }, [assignmentByTodoId, customLanes, visibleBoardTodos])
+  }, [customLanes, visibleBoardTodos])
 
   const expandedLaneIds = useMemo(() => {
     const laneIds = boardLanes.map((lane) => lane.id)
@@ -300,17 +203,7 @@ export function BoardView({
 
   const assignTodoToLane = (todo: TodoItem, laneId: string) => {
     if (todo.done || laneId === 'done') return
-
-    setAssignmentByTodoId((current) => {
-      const next = { ...current }
-      if (laneId === 'inbox') {
-        delete next[todo.id]
-      } else {
-        next[todo.id] = laneId
-      }
-
-      return next
-    })
+    onUpdateTodoDetails(todo, { laneId })
     setFocusedLaneId(laneId)
   }
 
@@ -324,33 +217,22 @@ export function BoardView({
     event.preventDefault()
     const title = laneDraftTitle.trim()
     if (!title) return
-
-    const nextLane = { id: createLaneId(), label: title, colorId: laneDraftColorId }
-    setCustomLanes((current) => [...current, nextLane])
-    setFocusedLaneId(nextLane.id)
+    onAddBoardLane(title, laneDraftColorId)
     closeLaneDialog()
   }
 
   const handleDeleteLane = (lane: BoardLane) => {
     if (!lane.custom) return
 
-    setCustomLanes((current) => current.filter((item) => item.id !== lane.id))
-    setAssignmentByTodoId((current) => {
-      const next = { ...current }
-      for (const [todoId, laneId] of Object.entries(next)) {
-        if (laneId === lane.id) delete next[todoId]
-      }
-
-      return next
-    })
+    if (lane.record) onDeleteBoardLane(lane.record)
     setFocusedLaneId('inbox')
   }
 
   const openTodoDetail = (todo: TodoItem) => {
     setEditingTodo(todo)
-    setDetailDescription(descriptionByTodoId[todo.id] ?? '')
-    setDetailPriority(priorityByTodoId[todo.id] ?? 'normal')
-    setDetailLaneId(assignmentByTodoId[todo.id] ?? 'inbox')
+    setDetailDescription(todo.description)
+    setDetailPriority(todo.priority)
+    setDetailLaneId(todo.laneId || 'inbox')
   }
 
   const closeTodoDetail = () => {
@@ -361,19 +243,11 @@ export function BoardView({
     event.preventDefault()
     if (!editingTodo) return
 
-    const description = detailDescription.trim()
-    setDescriptionByTodoId((current) => {
-      const next = { ...current }
-      if (description) {
-        next[editingTodo.id] = description
-      } else {
-        delete next[editingTodo.id]
-      }
-
-      return next
+    onUpdateTodoDetails(editingTodo, {
+      description: detailDescription.trim(),
+      priority: detailPriority,
+      laneId: detailLaneId,
     })
-    setPriorityByTodoId((current) => ({ ...current, [editingTodo.id]: detailPriority }))
-    assignTodoToLane(editingTodo, detailLaneId)
     closeTodoDetail()
   }
 
@@ -410,17 +284,15 @@ export function BoardView({
   }
 
   const handleDialogTodoSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
     const title = todoTitle.trim()
     if (title) {
-      setPendingPriorityDraft({
-        title,
-        dateKey: dialogTodoDate,
-        priority: todoDraftPriority,
+      onAddTodoWithDetails(dialogTodoDate, title, {
         description: todoDraftDescription.trim(),
+        priority: todoDraftPriority,
+        laneId: 'inbox',
       })
     }
-
-    onAddTodo(event)
     if (title) {
       closeTodoDialog()
     }
@@ -494,9 +366,9 @@ export function BoardView({
               <div className="board-column-body">
                 {lane.items.map((todo) => {
                   const entry = entryByDate.get(todo.dateKey)
-                  const priority = priorityByTodoId[todo.id] ?? 'normal'
+                  const priority = todo.priority
                   const priorityOption = priorityOptions.find((option) => option.id === priority) ?? priorityOptions[0]
-                  const description = descriptionByTodoId[todo.id] ?? ''
+                  const description = todo.description
 
                   return (
                     <article
