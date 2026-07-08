@@ -1,8 +1,6 @@
 import type { JournalEntry, TodoItem } from '../lib/db'
 
-export type ActiveView = 'dashboard' | 'journal' | 'summary' | 'settings'
-
-export type JournalMode = 'entries' | 'board'
+export type ActiveView = 'dashboard' | 'journal' | 'board' | 'summary' | 'settings'
 
 export type SettingsSection = 'overview' | 'cards' | 'appearance' | 'database' | 'ai' | 'webdav' | 'engine'
 
@@ -12,11 +10,6 @@ export type NavItem = {
   id: ActiveView
   label: string
   note: string
-}
-
-export type JournalModeOption = {
-  id: JournalMode
-  label: string
 }
 
 export type SettingsSectionOption = {
@@ -78,11 +71,4 @@ export type DashboardCardId = 'streak' | 'monthCheckin' | 'todoCompletion' | 'pe
 export type DashboardCardConfig = {
   id: DashboardCardId
   enabled: boolean
-}
-
-export type WeatherState = {
-  status: 'idle' | 'loading' | 'ready' | 'error'
-  locationLabel: string
-  weatherText: string
-  error?: string
 }

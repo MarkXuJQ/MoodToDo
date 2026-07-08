@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
 
 export type TrendPoint = {
   label: string
@@ -79,6 +79,7 @@ export const TrendChart = ({
   valueSuffix = '',
 }: TrendChartProps) => {
   const gradientId = useId()
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
   const width = compact ? 240 : 720
   const chartHeight = compact ? 72 : height
   const innerWidth = width - pad * 2
@@ -97,7 +98,7 @@ export const TrendChart = ({
       point.value == null ? 0 : (point.value - domainMin) / Math.max(1, domainMax - domainMin)
     const y = baseline - normalized * innerHeight
 
-    return { ...point, x, y }
+    return { ...point, x, y, sourceIndex: index }
   })
 
   const segments = buildSegments(chartPoints)
@@ -105,6 +106,18 @@ export const TrendChart = ({
     typeof emphasisIndex === 'number' && emphasisIndex >= 0 && emphasisIndex < chartPoints.length
       ? chartPoints[emphasisIndex]
       : null
+  const hoveredPoint =
+    typeof hoveredIndex === 'number' && chartPoints[hoveredIndex]?.value != null
+      ? chartPoints[hoveredIndex]
+      : null
+  const activePoint = hoveredPoint ?? emphasisPoint
+  const tooltipPoint = hoveredPoint
+  const tooltipWidth = compact ? 92 : 122
+  const tooltipHeight = compact ? 36 : 44
+  const tooltipX = tooltipPoint
+    ? Math.min(width - pad - tooltipWidth, Math.max(pad, tooltipPoint.x - tooltipWidth / 2))
+    : pad
+  const tooltipY = tooltipPoint ? Math.max(6, tooltipPoint.y - tooltipHeight - 14) : pad
 
   if (validValues.length === 0 && compact) {
     return <div className="trend-empty-inline">还没有足够的数据生成折线。</div>
@@ -143,22 +156,46 @@ export const TrendChart = ({
 
       {chartPoints
         .filter((point) => point.value != null)
-        .map((point, index) => (
-          <g key={`${point.label}-${index}`}>
+        .map((point) => (
+          <g key={`${point.label}-${point.sourceIndex}`}>
             <circle
-              className={emphasisPoint?.label === point.label ? 'trend-dot trend-dot-active' : 'trend-dot'}
+              className={activePoint?.sourceIndex === point.sourceIndex ? 'trend-dot trend-dot-active' : 'trend-dot'}
               cx={point.x}
               cy={point.y}
-              r={compact ? 2.8 : emphasisPoint?.label === point.label ? 5 : 4}
+              r={compact ? 2.8 : activePoint?.sourceIndex === point.sourceIndex ? 5 : 4}
               fill={stroke}
             />
-            {!compact && emphasisPoint?.label === point.label && point.value != null && (
+            <circle
+              className="trend-hit"
+              cx={point.x}
+              cy={point.y}
+              r={compact ? 12 : 16}
+              tabIndex={0}
+              aria-label={`${point.label}，心情数值 ${point.value}${valueSuffix}`}
+              onPointerEnter={() => setHoveredIndex(point.sourceIndex)}
+              onPointerLeave={() => setHoveredIndex(null)}
+              onFocus={() => setHoveredIndex(point.sourceIndex)}
+              onBlur={() => setHoveredIndex(null)}
+            />
+            {!compact && activePoint?.sourceIndex === point.sourceIndex && !hoveredPoint && point.value != null && (
               <text className="trend-value" x={point.x} y={point.y - 12} textAnchor="middle">
                 {`${point.value}${valueSuffix}`}
               </text>
             )}
           </g>
         ))}
+
+      {tooltipPoint && tooltipPoint.value != null && (
+        <g className="trend-tooltip" pointerEvents="none">
+          <rect x={tooltipX} y={tooltipY} width={tooltipWidth} height={tooltipHeight} rx="8" />
+          <text className="trend-tooltip-label" x={tooltipX + 12} y={tooltipY + 17}>
+            {tooltipPoint.label}
+          </text>
+          <text className="trend-tooltip-value" x={tooltipX + 12} y={tooltipY + (compact ? 30 : 34)}>
+            {`心情 ${tooltipPoint.value}${valueSuffix}`}
+          </text>
+        </g>
+      )}
 
       {!compact && (
         <>

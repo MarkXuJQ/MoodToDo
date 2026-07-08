@@ -37,6 +37,8 @@ type NativeSnapshot = {
   attachments: DbRow[]
   changes: DbRow[]
   weeklySummaries: DbRow[]
+  metricDefinitions?: DbRow[]
+  metricRecords?: DbRow[]
 }
 
 const schemaVersion = 4
@@ -257,6 +259,149 @@ const rowToWeeklySummary = (row: DbRow): WeeklySummary => ({
   createdAt: readString(row, 'created_at'),
   updatedAt: readString(row, 'updated_at'),
 })
+
+const getRowId = (row: DbRow) => readString(row, 'id')
+const getRowUpdatedAt = (row: DbRow) => readString(row, 'updated_at') || readString(row, 'created_at')
+const getChangeKey = (row: DbRow) => {
+  const entity = readString(row, 'entity')
+  const entityId = readString(row, 'entity_id')
+
+  return entity && entityId ? `${entity}:${entityId}` : ''
+}
+
+const compactChangeRows = (rows: DbRow[]) => {
+  const byEntity = new Map<string, DbRow>()
+
+  for (const row of rows) {
+    const key = getChangeKey(row)
+    if (!key) continue
+
+    const existing = byEntity.get(key)
+    if (!existing || readString(row, 'changed_at').localeCompare(readString(existing, 'changed_at')) >= 0) {
+      byEntity.set(key, row)
+    }
+  }
+
+  return [...byEntity.values()].sort((left, right) =>
+    readString(right, 'changed_at').localeCompare(readString(left, 'changed_at')),
+  )
+}
+
+const buildTombstones = (changes: DbRow[]) => {
+  const tombstones = new Map<string, string>()
+
+  for (const change of compactChangeRows(changes)) {
+    if (readString(change, 'operation') !== 'delete') continue
+
+    const key = getChangeKey(change)
+    if (!key) continue
+
+    tombstones.set(key, readString(change, 'changed_at'))
+  }
+
+  return tombstones
+}
+
+const mergeRowsByKey = (
+  entity: ChangeEntity | 'weeklySummary',
+  rowGroups: DbRow[][],
+  tombstones: Map<string, string>,
+  keyGetter: (row: DbRow) => string,
+  timestampGetter: (row: DbRow) => string = getRowUpdatedAt,
+) => {
+  const byKey = new Map<string, DbRow>()
+
+  for (const row of rowGroups.flat()) {
+    const id = getRowId(row)
+    const key = keyGetter(row)
+    if (!key) continue
+
+    const deletedAt = id ? tombstones.get(`${entity}:${id}`) : undefined
+    const updatedAt = timestampGetter(row)
+    if (deletedAt && (!updatedAt || deletedAt.localeCompare(updatedAt) >= 0)) continue
+
+    const existing = byKey.get(key)
+    if (!existing || updatedAt.localeCompare(timestampGetter(existing)) >= 0) {
+      byKey.set(key, row)
+    }
+  }
+
+  return [...byKey.values()]
+}
+
+const snapshotArray = (snapshot: NativeSnapshot, key: keyof NativeSnapshot) => {
+  const value = snapshot[key]
+
+  return Array.isArray(value) ? value : []
+}
+
+const mergeNativeSnapshots = (localSnapshot: NativeSnapshot, remoteSnapshot: NativeSnapshot): NativeSnapshot => {
+  const changes = compactChangeRows([
+    ...snapshotArray(remoteSnapshot, 'changes'),
+    ...snapshotArray(localSnapshot, 'changes'),
+  ])
+  const tombstones = buildTombstones(changes)
+  const entries = mergeRowsByKey(
+    'entry',
+    [snapshotArray(remoteSnapshot, 'entries'), snapshotArray(localSnapshot, 'entries')],
+    tombstones,
+    (row) => readString(row, 'date_key') || getRowId(row),
+  ).sort((left, right) => readString(right, 'date_key').localeCompare(readString(left, 'date_key')))
+  const entryIds = new Set(entries.map(getRowId).filter(Boolean))
+  const todos = mergeRowsByKey(
+    'todo',
+    [snapshotArray(remoteSnapshot, 'todos'), snapshotArray(localSnapshot, 'todos')],
+    tombstones,
+    getRowId,
+  ).sort((left, right) => readString(right, 'created_at').localeCompare(readString(left, 'created_at')))
+  const attachments = mergeRowsByKey(
+    'attachment',
+    [snapshotArray(remoteSnapshot, 'attachments'), snapshotArray(localSnapshot, 'attachments')],
+    tombstones,
+    getRowId,
+  )
+    .filter((row) => entryIds.has(readString(row, 'entry_id')))
+    .sort((left, right) => readString(right, 'created_at').localeCompare(readString(left, 'created_at')))
+  const weeklySummaries = mergeRowsByKey(
+    'weeklySummary',
+    [snapshotArray(remoteSnapshot, 'weeklySummaries'), snapshotArray(localSnapshot, 'weeklySummaries')],
+    tombstones,
+    (row) => readString(row, 'week_key'),
+    (row) => readString(row, 'updated_at') || readString(row, 'created_at'),
+  ).sort((left, right) => readString(right, 'updated_at').localeCompare(readString(left, 'updated_at')))
+  const metricDefinitions = mergeRowsByKey(
+    'metricDefinition',
+    [snapshotArray(remoteSnapshot, 'metricDefinitions'), snapshotArray(localSnapshot, 'metricDefinitions')],
+    tombstones,
+    getRowId,
+  ).sort((left, right) => readString(right, 'created_at').localeCompare(readString(left, 'created_at')))
+  const metricDefinitionIds = new Set(metricDefinitions.map(getRowId).filter(Boolean))
+  const metricRecords = mergeRowsByKey(
+    'metricRecord',
+    [snapshotArray(remoteSnapshot, 'metricRecords'), snapshotArray(localSnapshot, 'metricRecords')],
+    tombstones,
+    (row) => `${readString(row, 'metric_id')}:${readString(row, 'date_key')}`,
+  )
+    .filter((row) => metricDefinitionIds.has(readString(row, 'metric_id')))
+    .sort((left, right) =>
+      readString(right, 'date_key').localeCompare(readString(left, 'date_key')) ||
+      readString(right, 'updated_at').localeCompare(readString(left, 'updated_at')),
+    )
+
+  return {
+    app: 'xinxiangyi',
+    format: 'xinxiangyi-native-json',
+    schemaVersion,
+    exportedAt: nowIso(),
+    entries,
+    todos,
+    attachments,
+    changes,
+    weeklySummaries,
+    metricDefinitions,
+    metricRecords,
+  }
+}
 
 const ensureColumn = async (db: SQLiteDBConnection, table: string, column: string, definition: string) => {
   const columns = await queryRows<{ name?: string }>(db, `PRAGMA table_info(${table})`)
@@ -961,12 +1106,14 @@ const syncedRow = (row: DbRow): DbRow => ('sync_state' in row ? { ...row, sync_s
 
 const createNativeSnapshot = async (): Promise<NativeSnapshot> => {
   const db = await getDatabase()
-  const [entries, todos, attachments, changes, weeklySummaries] = await Promise.all([
+  const [entries, todos, attachments, changes, weeklySummaries, metricDefinitions, metricRecords] = await Promise.all([
     queryRows(db, 'SELECT * FROM entries ORDER BY date_key DESC'),
     queryRows(db, 'SELECT * FROM todos ORDER BY created_at DESC'),
     queryRows(db, 'SELECT * FROM attachments ORDER BY created_at DESC'),
     queryRows(db, 'SELECT * FROM changes ORDER BY changed_at DESC'),
     queryRows(db, 'SELECT * FROM weekly_summaries ORDER BY updated_at DESC'),
+    queryRows(db, 'SELECT * FROM metric_definitions ORDER BY created_at DESC'),
+    queryRows(db, 'SELECT * FROM metric_records ORDER BY date_key DESC, updated_at DESC'),
   ])
 
   return {
@@ -977,8 +1124,10 @@ const createNativeSnapshot = async (): Promise<NativeSnapshot> => {
     entries: entries.map(syncedRow),
     todos: todos.map(syncedRow),
     attachments: attachments.map(syncedRow),
-    changes: changes.map(syncedRow),
+    changes: compactChangeRows(changes).map(syncedRow),
     weeklySummaries,
+    metricDefinitions: metricDefinitions.map(syncedRow),
+    metricRecords: metricRecords.map(syncedRow),
   }
 }
 
@@ -989,7 +1138,37 @@ const markNativeContentSynced = async () => {
     await runStatement(db, `UPDATE entries SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
     await runStatement(db, `UPDATE todos SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
     await runStatement(db, `UPDATE attachments SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
+    await runStatement(db, `UPDATE metric_definitions SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
+    await runStatement(db, `UPDATE metric_records SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
     await runStatement(db, `UPDATE changes SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
+  })
+}
+
+const compactNativeChangeLog = async () => {
+  const db = await getDatabase()
+  const changes = compactChangeRows(await queryRows(db, 'SELECT * FROM changes ORDER BY changed_at DESC')).map(syncedRow)
+
+  await withTransaction(db, async () => {
+    await runStatement(db, 'DELETE FROM changes', [], false)
+
+    for (const row of changes) {
+      await runStatement(
+        db,
+        `
+          INSERT INTO changes (entity, entity_id, operation, changed_at, device_id, sync_state, payload_json)
+          VALUES (?, ?, ?, ?, ?, 'synced', ?)
+        `,
+        [
+          readString(row, 'entity'),
+          readString(row, 'entity_id'),
+          readString(row, 'operation'),
+          readString(row, 'changed_at', nowIso()),
+          readString(row, 'device_id', 'native'),
+          readString(row, 'payload_json', 'null'),
+        ],
+        false,
+      )
+    }
   })
 }
 
@@ -1095,6 +1274,29 @@ const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
   return snapshot as NativeSnapshot
 }
 
+const readRemoteNativeSnapshot = async (config: WebDavSyncConfig): Promise<NativeSnapshot | null> => {
+  try {
+    const raw = await getWebDavText(config, nativeSnapshotFile)
+    let parsed: unknown
+
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      throw new Error('远端同步快照不是合法 JSON 文件。')
+    }
+
+    return validateNativeSnapshot(parsed)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+
+    if (/404|409|不存在|not found|AncestorsNotFound/i.test(message)) {
+      return null
+    }
+
+    throw error
+  }
+}
+
 const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
   const db = await getDatabase()
   const timestamp = nowIso()
@@ -1105,6 +1307,8 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
     await runStatement(db, 'DELETE FROM todos', [], false)
     await runStatement(db, 'DELETE FROM changes', [], false)
     await runStatement(db, 'DELETE FROM weekly_summaries', [], false)
+    await runStatement(db, 'DELETE FROM metric_records', [], false)
+    await runStatement(db, 'DELETE FROM metric_definitions', [], false)
 
     for (const row of snapshot.entries) {
       await runStatement(
@@ -1214,6 +1418,45 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
         false,
       )
     }
+
+    for (const row of snapshot.metricDefinitions ?? []) {
+      await runStatement(
+        db,
+        `
+          INSERT INTO metric_definitions (id, name, unit, color, target_value, created_at, updated_at, sync_state)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
+        `,
+        [
+          readString(row, 'id', createId('metric')),
+          readString(row, 'name'),
+          readString(row, 'unit'),
+          readString(row, 'color', '#176f66'),
+          row.target_value == null ? null : readNumber(row, 'target_value'),
+          readString(row, 'created_at', timestamp),
+          readString(row, 'updated_at', timestamp),
+        ],
+        false,
+      )
+    }
+
+    for (const row of snapshot.metricRecords ?? []) {
+      await runStatement(
+        db,
+        `
+          INSERT INTO metric_records (id, metric_id, date_key, value, created_at, updated_at, sync_state)
+          VALUES (?, ?, ?, ?, ?, ?, 'synced')
+        `,
+        [
+          readString(row, 'id', createId('metric_record')),
+          readString(row, 'metric_id'),
+          readString(row, 'date_key'),
+          readNumber(row, 'value'),
+          readString(row, 'created_at', timestamp),
+          readString(row, 'updated_at', timestamp),
+        ],
+        false,
+      )
+    }
   })
 }
 
@@ -1290,7 +1533,9 @@ export const testNativeWebDavConnection = async (
 
 export const pushNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promise<WebDavSyncResult> => {
   const config = getWebDavConfig(payload)
-  const snapshot = await createNativeSnapshot()
+  const localSnapshot = await createNativeSnapshot()
+  const remoteSnapshot = await readRemoteNativeSnapshot(config)
+  const snapshot = remoteSnapshot ? mergeNativeSnapshots(localSnapshot, remoteSnapshot) : localSnapshot
   const snapshotBody = JSON.stringify(snapshot, null, 2)
   const syncedAt = nowIso()
   const manifest = {
@@ -1304,7 +1549,12 @@ export const pushNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promi
 
   await putWebDavText(config, nativeSnapshotFile, snapshotBody, 'application/json; charset=utf-8')
   await putWebDavText(config, nativeManifestFile, JSON.stringify(manifest, null, 2), 'application/json; charset=utf-8')
-  await markNativeContentSynced()
+  if (remoteSnapshot) {
+    await importNativeSnapshot(snapshot)
+  } else {
+    await markNativeContentSynced()
+    await compactNativeChangeLog()
+  }
 
   return {
     ok: true,

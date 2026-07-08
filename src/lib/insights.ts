@@ -125,7 +125,6 @@ export const buildWeeklyPrompt = (weekKey: string, entries: JournalEntry[], todo
     return [
       `${dateKey}: ${entry.title}`,
       `心象分 ${entry.mood.score}，象限 ${entry.mood.quadrant ?? '未知'}`,
-      `天气：${entry.locationText || '未知位置'} ${entry.weatherText || '天气未记录'}`,
       `心情：${entry.moodText || '未填写'}`,
       `记录：${entry.body || '未填写'}`,
       `事项：${todoText}`,

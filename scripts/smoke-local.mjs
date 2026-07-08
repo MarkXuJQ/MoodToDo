@@ -63,7 +63,6 @@ try {
   await page.getByPlaceholder('今天的主线').fill(title)
   await page.getByPlaceholder('比如：上午焦虑但有推进，下午散步后恢复专注').fill('今天状态平稳，完成了本地数据库写入验证。')
   await page.getByPlaceholder('完成了什么，卡在哪里，下一步是什么').fill('测试保存日记、新增 todo、完成 todo。')
-  await page.getByPlaceholder('工作 健康 学习').fill('测试 本地')
   await page.locator('input[type="file"]').setInputFiles('public/favicon.svg')
   await page.locator('.attachment-thumb').first().waitFor({ state: 'visible', timeout: 5000 })
   await page.locator('.attachment-media').first().click()

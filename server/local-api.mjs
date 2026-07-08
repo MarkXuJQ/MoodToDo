@@ -361,6 +361,33 @@ const markLocalContentSynced = () => {
   })
 }
 
+const compactLocalChangeLog = () => {
+  const changes = compactChangeRows(db.prepare(`SELECT * FROM changes ORDER BY changed_at DESC`).all()).map((row) => ({
+    ...row,
+    sync_state: 'synced',
+  }))
+  const insertChange = db.prepare(`
+    INSERT INTO changes (entity, entity_id, operation, changed_at, device_id, sync_state, payload_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  transaction(() => {
+    db.prepare('DELETE FROM changes').run()
+
+    for (const row of changes) {
+      insertChange.run(
+        readString(row, 'entity'),
+        readString(row, 'entity_id'),
+        readString(row, 'operation'),
+        readString(row, 'changed_at', nowIso()),
+        readString(row, 'device_id', 'local'),
+        readString(row, 'sync_state', 'synced'),
+        readString(row, 'payload_json', 'null'),
+      )
+    }
+  })
+}
+
 const readString = (row, key, fallback = '') => {
   const value = row?.[key]
   if (value == null) return fallback
@@ -376,6 +403,142 @@ const readOptionalString = (row, key) => {
 const readNumber = (row, key, fallback = 0) => {
   const value = Number(row?.[key])
   return Number.isFinite(value) ? value : fallback
+}
+
+const getRowId = (row) => readString(row, 'id')
+const getRowUpdatedAt = (row) => readString(row, 'updated_at') || readString(row, 'created_at')
+const getChangeKey = (row) => {
+  const entity = readString(row, 'entity')
+  const entityId = readString(row, 'entity_id')
+
+  return entity && entityId ? `${entity}:${entityId}` : ''
+}
+
+const compactChangeRows = (rows) => {
+  const byEntity = new Map()
+
+  for (const row of rows ?? []) {
+    const key = getChangeKey(row)
+    if (!key) continue
+
+    const existing = byEntity.get(key)
+    if (!existing || readString(row, 'changed_at').localeCompare(readString(existing, 'changed_at')) >= 0) {
+      byEntity.set(key, row)
+    }
+  }
+
+  return [...byEntity.values()].sort((left, right) =>
+    readString(right, 'changed_at').localeCompare(readString(left, 'changed_at')),
+  )
+}
+
+const buildTombstones = (...changeGroups) => {
+  const tombstones = new Map()
+
+  for (const change of compactChangeRows(changeGroups.flat())) {
+    if (readString(change, 'operation') !== 'delete') continue
+
+    const key = getChangeKey(change)
+    if (!key) continue
+
+    tombstones.set(key, readString(change, 'changed_at'))
+  }
+
+  return tombstones
+}
+
+const mergeRowsByKey = (entity, rowGroups, tombstones, keyGetter, timestampGetter = getRowUpdatedAt) => {
+  const byKey = new Map()
+
+  for (const row of rowGroups.flat()) {
+    const id = getRowId(row)
+    const key = keyGetter(row)
+    if (!key) continue
+
+    const deletedAt = id ? tombstones.get(`${entity}:${id}`) : undefined
+    const updatedAt = timestampGetter(row)
+    if (deletedAt && (!updatedAt || deletedAt.localeCompare(updatedAt) >= 0)) continue
+
+    const existing = byKey.get(key)
+    if (!existing || updatedAt.localeCompare(timestampGetter(existing)) >= 0) {
+      byKey.set(key, row)
+    }
+  }
+
+  return [...byKey.values()]
+}
+
+const normalizeSnapshotArray = (snapshot, key) => (Array.isArray(snapshot?.[key]) ? snapshot[key] : [])
+
+const mergePortableSnapshots = (localSnapshot, remoteSnapshot) => {
+  const changes = compactChangeRows([
+    ...normalizeSnapshotArray(remoteSnapshot, 'changes'),
+    ...normalizeSnapshotArray(localSnapshot, 'changes'),
+  ])
+  const tombstones = buildTombstones(changes)
+  const entries = mergeRowsByKey(
+    'entry',
+    [normalizeSnapshotArray(remoteSnapshot, 'entries'), normalizeSnapshotArray(localSnapshot, 'entries')],
+    tombstones,
+    (row) => readString(row, 'date_key') || getRowId(row),
+  ).sort((left, right) => readString(right, 'date_key').localeCompare(readString(left, 'date_key')))
+  const entryIds = new Set(entries.map(getRowId).filter(Boolean))
+  const todos = mergeRowsByKey(
+    'todo',
+    [normalizeSnapshotArray(remoteSnapshot, 'todos'), normalizeSnapshotArray(localSnapshot, 'todos')],
+    tombstones,
+    getRowId,
+  ).sort((left, right) => readString(right, 'created_at').localeCompare(readString(left, 'created_at')))
+  const attachments = mergeRowsByKey(
+    'attachment',
+    [normalizeSnapshotArray(remoteSnapshot, 'attachments'), normalizeSnapshotArray(localSnapshot, 'attachments')],
+    tombstones,
+    getRowId,
+  )
+    .filter((row) => entryIds.has(readString(row, 'entry_id')))
+    .sort((left, right) => readString(right, 'created_at').localeCompare(readString(left, 'created_at')))
+  const weeklySummaries = mergeRowsByKey(
+    'weeklySummary',
+    [normalizeSnapshotArray(remoteSnapshot, 'weeklySummaries'), normalizeSnapshotArray(localSnapshot, 'weeklySummaries')],
+    tombstones,
+    (row) => readString(row, 'week_key'),
+    (row) => readString(row, 'updated_at') || readString(row, 'created_at'),
+  ).sort((left, right) => readString(right, 'updated_at').localeCompare(readString(left, 'updated_at')))
+  const metricDefinitions = mergeRowsByKey(
+    'metricDefinition',
+    [
+      normalizeSnapshotArray(remoteSnapshot, 'metricDefinitions'),
+      normalizeSnapshotArray(localSnapshot, 'metricDefinitions'),
+    ],
+    tombstones,
+    getRowId,
+  ).sort((left, right) => readString(right, 'created_at').localeCompare(readString(left, 'created_at')))
+  const metricDefinitionIds = new Set(metricDefinitions.map(getRowId).filter(Boolean))
+  const metricRecords = mergeRowsByKey(
+    'metricRecord',
+    [normalizeSnapshotArray(remoteSnapshot, 'metricRecords'), normalizeSnapshotArray(localSnapshot, 'metricRecords')],
+    tombstones,
+    (row) => `${readString(row, 'metric_id')}:${readString(row, 'date_key')}`,
+  )
+    .filter((row) => metricDefinitionIds.has(readString(row, 'metric_id')))
+    .sort((left, right) =>
+      readString(right, 'date_key').localeCompare(readString(left, 'date_key')) ||
+      readString(right, 'updated_at').localeCompare(readString(left, 'updated_at')),
+    )
+
+  return {
+    app: 'xinxiangyi',
+    format: 'xinxiangyi-native-json',
+    schemaVersion,
+    exportedAt: nowIso(),
+    entries,
+    todos,
+    attachments,
+    changes,
+    weeklySummaries,
+    metricDefinitions,
+    metricRecords,
+  }
 }
 
 const createPortableSnapshot = () => {
@@ -397,7 +560,10 @@ const createPortableSnapshot = () => {
         sync_state: 'synced',
       }
     }),
-    changes: db.prepare(`SELECT * FROM changes ORDER BY changed_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
+    changes: compactChangeRows(db.prepare(`SELECT * FROM changes ORDER BY changed_at DESC`).all()).map((row) => ({
+      ...row,
+      sync_state: 'synced',
+    })),
     weeklySummaries: db.prepare(`SELECT * FROM weekly_summaries ORDER BY updated_at DESC`).all(),
     metricDefinitions: db.prepare(`SELECT * FROM metric_definitions ORDER BY created_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
     metricRecords: db.prepare(`SELECT * FROM metric_records ORDER BY created_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
@@ -439,7 +605,7 @@ ${manifest.recommendedRemotePath}
 当前推荐使用方式：
 1. 在当前设备编辑后，点击应用里的同步按钮上传快照。
 2. 换到另一台设备后，先点击同步按钮拉取快照，再开始编辑。
-3. 当前版本暂不做复杂冲突合并；如果多台设备同时离线编辑，最后上传的快照会成为云端版本。
+3. 如果本机有待同步改动，当前版本会先读取远端快照，按记录更新时间和删除标记合并后再上传。极端同一条记录同时编辑时，较新的更新时间会优先。
 
 当前同步协议：
 ${manifest.format}
@@ -493,8 +659,7 @@ const createPortableManifest = (snapshotBody, extra = {}) => {
   }
 }
 
-const createLocalSyncBundle = (extra = {}) => {
-  const snapshot = createPortableSnapshot()
+const createLocalSyncBundle = (extra = {}, snapshot = createPortableSnapshot()) => {
   const snapshotBody = JSON.stringify(snapshot, null, 2)
   const manifest = createPortableManifest(snapshotBody, extra)
   const manifestBody = writeSyncBundleFiles(snapshotBody, manifest)
@@ -504,6 +669,36 @@ const createLocalSyncBundle = (extra = {}) => {
     manifest,
     manifestBody,
   }
+}
+
+const readRemotePortableSnapshot = async (config) => {
+  const snapshotResponse = await fetch(getWebDavUrl(config, portableSnapshotFile), {
+    method: 'GET',
+    headers: getWebDavHeaders(config),
+  })
+
+  if (snapshotResponse.ok) {
+    const raw = await snapshotResponse.text()
+    let parsed
+
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      throw new Error('远端跨端同步快照不是合法 JSON 文件。')
+    }
+
+    return {
+      raw,
+      snapshot: validatePortableSnapshot(parsed),
+    }
+  }
+
+  if (isMissingWebDavResource(snapshotResponse.status)) {
+    return null
+  }
+
+  const detail = await snapshotResponse.text().catch(() => '')
+  throw new Error(`下载跨端同步快照失败：${snapshotResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
 }
 
 const importPortableSnapshot = (snapshot) => {
@@ -644,11 +839,11 @@ const importPortableSnapshot = (snapshot) => {
   })
 }
 
-const uploadPortableSnapshot = async (config) => {
+const uploadPortableSnapshot = async (config, snapshot = createPortableSnapshot()) => {
   const { snapshotBody, manifest, manifestBody } = createLocalSyncBundle({
     remotePath: config.remotePath,
     source: 'webdav-push',
-  })
+  }, snapshot)
   const uploadResponse = await fetch(getWebDavUrl(config, portableSnapshotFile), {
     method: 'PUT',
     headers: getWebDavHeaders(config, 'application/json; charset=utf-8'),
@@ -709,8 +904,17 @@ const pushWebDavSnapshot = async (request, response) => {
 
   try {
     await ensureWebDavCollection(config)
-    const manifest = await uploadPortableSnapshot(config)
-    markLocalContentSynced()
+    const localSnapshot = createPortableSnapshot()
+    const remote = await readRemotePortableSnapshot(config)
+    const snapshot = remote ? mergePortableSnapshots(localSnapshot, remote.snapshot) : localSnapshot
+    const manifest = await uploadPortableSnapshot(config, snapshot)
+
+    if (remote) {
+      importPortableSnapshot(snapshot)
+    } else {
+      markLocalContentSynced()
+      compactLocalChangeLog()
+    }
 
     sendJson(response, 200, {
       ok: true,

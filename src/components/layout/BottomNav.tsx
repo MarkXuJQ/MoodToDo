@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, TrendingUp } from 'lucide-react'
+import { BarChart3, BookOpen, ListTodo, TrendingUp } from 'lucide-react'
 
 import type { ActiveView, NavItem } from '../../types/app'
 
@@ -20,6 +20,8 @@ export function BottomNav({ activeView, navigationItems, onNavigate }: BottomNav
             <BarChart3 size={20} aria-hidden="true" />
           ) : item.id === 'journal' ? (
             <BookOpen size={20} aria-hidden="true" />
+          ) : item.id === 'board' ? (
+            <ListTodo size={20} aria-hidden="true" />
           ) : (
             <TrendingUp size={20} aria-hidden="true" />
           )

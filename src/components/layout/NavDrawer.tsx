@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, PanelLeftClose, PanelLeftOpen, Settings, TrendingUp } from 'lucide-react'
+import { BarChart3, BookOpen, ListTodo, PanelLeftClose, PanelLeftOpen, Settings, TrendingUp } from 'lucide-react'
 
 import type { ActiveView, NavItem } from '../../types/app'
 
@@ -62,6 +62,8 @@ export function NavDrawer({
                 <BarChart3 size={18} aria-hidden="true" />
               ) : item.id === 'journal' ? (
                 <BookOpen size={18} aria-hidden="true" />
+              ) : item.id === 'board' ? (
+                <ListTodo size={18} aria-hidden="true" />
               ) : item.id === 'summary' ? (
                 <TrendingUp size={18} aria-hidden="true" />
               ) : (

@@ -3,7 +3,6 @@ import type {
   AiConfig,
   DashboardCardConfig,
   DraftState,
-  JournalModeOption,
   NavItem,
   SettingsSectionGroup,
   SettingsSectionOption,
@@ -48,15 +47,11 @@ export const defaultDashboardCards: DashboardCardConfig[] = [
 ]
 
 export const navigationItems: NavItem[] = [
-  { id: 'dashboard', label: '今日', note: '打卡、心情与 Todo' },
-  { id: 'journal', label: '记录', note: '历史日记与 Todo 看板' },
+  { id: 'dashboard', label: '仪表盘', note: '今日记录、心象与事项' },
+  { id: 'board', label: 'Todo', note: '事项看板与推进状态' },
+  { id: 'journal', label: '记录', note: '历史日记与年度热力图' },
   { id: 'summary', label: '回顾', note: '热力图、周回顾与 AI 总结' },
   { id: 'settings', label: '设置', note: '系统总览、同步与接口配置' },
-]
-
-export const journalModes: JournalModeOption[] = [
-  { id: 'entries', label: '记录' },
-  { id: 'board', label: 'Todo 看板' },
 ]
 
 export const settingsSections: SettingsSectionOption[] = [

@@ -14,7 +14,6 @@ import {
   defaultWebDavConfig,
   emptyDraft,
   gameEngineSettingsStorageKey,
-  journalModes,
   navigationItems,
   readAiConfig,
   readDashboardCards,
@@ -51,7 +50,6 @@ import {
   type WeeklySummary,
 } from './lib/db'
 import { createGameEngineSnapshot, defaultGameEngineSettings, type GameEngineSettings } from './lib/gameEngine'
-import { formatWeatherText, getCurrentWeatherContext } from './lib/weather'
 import {
   formatDateLabel,
   formatMonthLabel,
@@ -81,13 +79,12 @@ import type {
   DashboardCardId,
   DatabaseStatus,
   DraftState,
-  JournalMode,
   SettingsSection,
   ThemeMode,
-  WeatherState,
   WebDavConfig,
   WebDavTextConfigKey,
 } from './types/app'
+import { BoardView } from './views/BoardView'
 import { DashboardView } from './views/DashboardView'
 import { JournalView } from './views/JournalView'
 import { SettingsView } from './views/SettingsView'
@@ -167,7 +164,6 @@ function App() {
   const [isNavCollapsed, setIsNavCollapsed] = useState(() => window.localStorage.getItem(navCollapseStorageKey) === '1')
   const [isDesktopNav, setIsDesktopNav] = useState(getDesktopNavMode)
   const [settingsMenuKey, setSettingsMenuKey] = useState(0)
-  const [journalMode, setJournalMode] = useState<JournalMode>('entries')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('overview')
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
@@ -189,7 +185,7 @@ function App() {
   const [summaryDraft, setSummaryDraft] = useState('')
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
   const [summaryError, setSummaryError] = useState('')
-  const [writeError, setWriteError] = useState('')
+  const [, setWriteError] = useState('')
   const [toast, setToast] = useState<ToastState | null>(null)
   const [diagnosticDialog, setDiagnosticDialog] = useState<DiagnosticDialogState | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -198,11 +194,6 @@ function App() {
   const [isTestingWebDav, setIsTestingWebDav] = useState(false)
   const [isExportingSyncBundle, setIsExportingSyncBundle] = useState(false)
   const [webDavTestResult, setWebDavTestResult] = useState<WebDavConnectionTestResult | null>(null)
-  const [weatherState, setWeatherState] = useState<WeatherState>({
-    status: 'idle',
-    locationLabel: '定位中',
-    weatherText: '天气获取中',
-  })
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus>({
     origin: window.location.origin,
     driver: localDatabaseDriver,
@@ -269,39 +260,6 @@ function App() {
     [],
   )
 
-  const refreshWeather = useCallback(async (force = false) => {
-    setWeatherState({
-      status: 'loading',
-      locationLabel: '定位中',
-      weatherText: '天气获取中',
-    })
-
-    try {
-      const context = await getCurrentWeatherContext(force)
-      const nextWeatherText = formatWeatherText(context)
-
-      setWeatherState({
-        status: 'ready',
-        locationLabel: context.locationLabel,
-        weatherText: nextWeatherText,
-      })
-
-      return {
-        weatherText: nextWeatherText,
-        locationText: context.locationLabel,
-      }
-    } catch (error) {
-      setWeatherState({
-        status: 'error',
-        locationLabel: '未定位',
-        weatherText: '天气不可用',
-        error: error instanceof Error ? error.message : '天气获取失败。',
-      })
-
-      throw error
-    }
-  }, [])
-
   const reload = useCallback(async () => {
     try {
       const nextState = await getLocalState()
@@ -328,30 +286,11 @@ function App() {
       })
       setHasLoadedLocalState(true)
     } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '读取本地 SQLite 数据库失败。')
-    }
-  }, [])
-
-  const handleRefreshWeather = useCallback(async () => {
-    setWriteError('')
-
-    try {
-      await refreshWeather(true)
-    } catch (error) {
-      const message = getErrorMessage(error, '刷新定位和天气失败。')
-
+      const message = getErrorMessage(error, '读取本地 SQLite 数据库失败。')
       setWriteError(message)
       showToast(message, 'error')
-      setDiagnosticDialog({
-        title: '定位与天气诊断',
-        message,
-        details: formatDiagnosticDetails('weather.refresh', error, {
-          weatherState,
-          geolocationAvailable: Boolean(navigator.geolocation),
-        }),
-      })
     }
-  }, [refreshWeather, showToast, weatherState])
+  }, [showToast])
 
   const getActiveScrollTop = useCallback(() => {
     if (isDesktopNav) {
@@ -408,11 +347,11 @@ function App() {
     setIsPullRefreshing(true)
     setPullRefreshDistance(72)
 
-    void Promise.all([reload(), refreshWeather(true).catch(() => undefined)]).finally(() => {
+    void reload().finally(() => {
       setIsPullRefreshing(false)
       setPullRefreshDistance(0)
     })
-  }, [isPullRefreshing, refreshWeather, reload])
+  }, [isPullRefreshing, reload])
 
   useEffect(() => {
     setAiConfig(readAiConfig())
@@ -473,16 +412,6 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(navCollapseStorageKey, isNavCollapsed ? '1' : '0')
   }, [isNavCollapsed])
-
-  useEffect(() => {
-    if (isDesktopNav || activeView !== 'journal') return
-
-    setJournalMode('entries')
-  }, [activeView, isDesktopNav])
-
-  useEffect(() => {
-    void refreshWeather(false).catch(() => undefined)
-  }, [refreshWeather])
 
   const selectedEntry = useMemo(
     () => entries.find((entry) => entry.dateKey === selectedDate),
@@ -558,7 +487,11 @@ function App() {
     })
   }, [todos])
 
-  const pendingChangeCount = [...entries, ...todos, ...attachments].filter((item) => item.syncState === 'pending').length
+  const pendingChangeCount = useMemo(
+    () =>
+      [...entries, ...todos, ...attachments, ...changes].filter((item) => item.syncState === 'pending').length,
+    [attachments, changes, entries, todos],
+  )
   const monthEntries = entries.filter((entry) => entry.dateKey.startsWith(visibleMonth))
   const monthTodos = todos.filter((todo) => todo.dateKey.startsWith(visibleMonth))
   const monthScore = average(monthEntries.map((entry) => entry.mood.score))
@@ -615,36 +548,6 @@ function App() {
     dashboardCards.find((item) => item.id === card.id)?.enabled,
   )
 
-  const boardColumns = useMemo(
-    () => [
-      {
-        id: 'overdue',
-        label: '过去',
-        note: '早于今天且尚未完成',
-        items: filteredBoardTodos.filter((todo) => !todo.done && todo.dateKey < todayKey),
-      },
-      {
-        id: 'today',
-        label: '今天',
-        note: '今天记录的事项',
-        items: filteredBoardTodos.filter((todo) => !todo.done && todo.dateKey === todayKey),
-      },
-      {
-        id: 'upcoming',
-        label: '以后',
-        note: '未来日期记录的事项',
-        items: filteredBoardTodos.filter((todo) => !todo.done && todo.dateKey > todayKey),
-      },
-      {
-        id: 'done',
-        label: '已完成',
-        note: '已经落地的推进',
-        items: filteredBoardTodos.filter((todo) => todo.done),
-      },
-    ],
-    [filteredBoardTodos, todayKey],
-  )
-
   const trendDateKeys = useMemo(() => getDateWindow(selectedDate, 14), [selectedDate])
   const moodTrendPoints = useMemo<TrendPoint[]>(
     () =>
@@ -691,31 +594,6 @@ function App() {
     setPendingFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))
   }
 
-  const resolveWeatherForSave = async () => {
-    if (selectedDate !== todayKey) {
-      return {
-        weatherText: selectedEntry?.weatherText,
-        locationText: selectedEntry?.locationText,
-      }
-    }
-
-    if (weatherState.status === 'ready') {
-      return {
-        weatherText: weatherState.weatherText,
-        locationText: weatherState.locationLabel,
-      }
-    }
-
-    try {
-      return await refreshWeather(weatherState.status === 'error')
-    } catch {
-      return {
-        weatherText: selectedEntry?.weatherText,
-        locationText: selectedEntry?.locationText,
-      }
-    }
-  }
-
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!canSave || isSaving) return
@@ -724,16 +602,12 @@ function App() {
     setWriteError('')
 
     try {
-      const weatherContext = await resolveWeatherForSave()
-
       await upsertJournalEntry(
         {
           dateKey: selectedDate,
           title: draft.title.trim() || formatDateLabel(selectedDate),
           body: draft.body.trim(),
           moodText: draft.moodText.trim(),
-          weatherText: weatherContext.weatherText,
-          locationText: weatherContext.locationText,
           tags: parseTags(draft.tags),
         },
         pendingFiles,
@@ -877,6 +751,7 @@ function App() {
     if (isTestingWebDav) return
 
     if (!isWebDavConfigured) {
+      const message = '请先填写 WebDAV Server URL、用户名、应用密码和远端目录。'
       setWebDavTestResult({
         ok: false,
         pathExists: false,
@@ -884,8 +759,9 @@ function App() {
         status: 0,
         remotePath: webDavConfig.remotePath,
         checkedAt: new Date().toISOString(),
-        message: '请先填写 WebDAV Server URL、用户名、应用密码和远端目录。',
+        message,
       })
+      showToast(message, 'error')
       return
     }
 
@@ -895,6 +771,7 @@ function App() {
     try {
       const result = await testWebDavConnection(webDavConfig)
       setWebDavTestResult(result)
+      showToast(result.message, result.ok ? 'success' : 'error')
     } catch (error) {
       const message = getErrorMessage(error, 'WebDAV 连接测试失败。')
       const actionableMessage =
@@ -911,6 +788,7 @@ function App() {
         checkedAt: new Date().toISOString(),
         message: actionableMessage,
       })
+      showToast(actionableMessage, 'error')
       setDiagnosticDialog({
         title: 'WebDAV 测试诊断',
         message: actionableMessage,
@@ -1167,8 +1045,11 @@ function App() {
       const summary = await upsertWeeklySummary(selectedWeek, content, aiConfig.model.trim())
       setSummaryDraft(summary.content)
       await reload()
+      showToast('周总结已生成', 'success')
     } catch (error) {
-      setSummaryError(error instanceof Error ? error.message : '生成周总结失败。')
+      const message = getErrorMessage(error, '生成周总结失败。')
+      setSummaryError(message)
+      showToast(message, 'error')
     } finally {
       setIsGeneratingSummary(false)
     }
@@ -1183,8 +1064,11 @@ function App() {
     try {
       await upsertWeeklySummary(selectedWeek, content, 'manual', 'local')
       await reload()
+      showToast('周总结已保存', 'success')
     } catch (error) {
-      setSummaryError(error instanceof Error ? error.message : '保存周总结失败。')
+      const message = getErrorMessage(error, '保存周总结失败。')
+      setSummaryError(message)
+      showToast(message, 'error')
     }
   }
 
@@ -1205,13 +1089,6 @@ function App() {
 
   const activeNavItem = navigationItems.find((item) => item.id === activeView)
   const todayHeaderLabel = formatDateLabel(todayKey)
-  const topbarWeatherText = `${weatherState.locationLabel} · ${weatherState.weatherText}`
-  const selectedEntryContextText =
-    selectedEntry?.weatherText || selectedEntry?.locationText
-      ? `${selectedEntry.locationText || '位置未记录'} · ${selectedEntry.weatherText || '天气未记录'}`
-      : selectedDate === todayKey
-        ? topbarWeatherText
-        : '这一天还没有记录天气与定位'
 
   return (
     <main className="shell">
@@ -1254,11 +1131,7 @@ function App() {
               isDesktopNav={isDesktopNav}
               todayLabel={todayHeaderLabel}
               activeViewLabel={activeNavItem?.label ?? '仪表盘'}
-              locationLabel={weatherState.locationLabel}
-              weatherText={weatherState.weatherText}
-              isWeatherLoading={weatherState.status === 'loading'}
               isWebDavSyncing={isWebDavSyncing}
-              onRefreshWeather={() => void handleRefreshWeather()}
               onSyncWebDav={() => void handleWebDavSync('manual')}
               onOpenSettings={openSettingsMenu}
             />
@@ -1269,9 +1142,7 @@ function App() {
             selectedDateLabel={formatDateLabel(selectedDate)}
             isToday={selectedDate === todayKey}
             visibleDashboardCards={visibleDashboardCards}
-            writeError={writeError}
             selectedEntry={selectedEntry}
-            selectedEntryContextText={selectedEntryContextText}
             draft={draft}
             pendingFiles={pendingFiles}
             selectedAttachments={selectedAttachments}
@@ -1302,21 +1173,23 @@ function App() {
           />
             ) : activeView === 'journal' ? (
           <JournalView
-            journalMode={journalMode}
-            journalModes={journalModes}
             entries={entries}
             todos={todos}
-            filteredBoardTodos={filteredBoardTodos}
             currentStreak={currentStreak}
             pendingChangeCount={pendingChangeCount}
-            boardColumns={boardColumns}
-            entryByDate={entryByDate}
             attachmentCountByEntryId={attachmentCountByEntryId}
-            selectedDate={selectedDate}
-            todoTitle={todoTitle}
-            onJournalModeChange={setJournalMode}
             onFocusDate={focusDate}
             onDeleteEntry={(entry) => void handleDeleteJournalEntry(entry)}
+          />
+            ) : activeView === 'board' ? (
+          <BoardView
+            todos={todos}
+            filteredBoardTodos={filteredBoardTodos}
+            entryByDate={entryByDate}
+            selectedDate={selectedDate}
+            todayKey={todayKey}
+            todoTitle={todoTitle}
+            onFocusDate={focusDate}
             onTodoTitleChange={setTodoTitle}
             onAddTodo={handleAddTodo}
             onToggleTodo={(todo) => void handleToggleTodo(todo)}
@@ -1405,6 +1278,17 @@ function App() {
           </div>
         </div>
       </div>
+      {toast && (
+        <div className="toast-region" role="status" aria-live="polite">
+          <div className={`app-toast app-toast-${toast.tone}`} key={toast.id}>
+            <span className="toast-dot" aria-hidden="true" />
+            <p>{toast.message}</p>
+            <button className="toast-close" type="button" aria-label="关闭提示" onClick={() => setToast(null)}>
+              X
+            </button>
+          </div>
+        </div>
+      )}
       {diagnosticDialog && (
         <div className="diagnostic-backdrop" role="presentation">
           <section className="diagnostic-dialog" role="dialog" aria-modal="true" aria-labelledby="diagnostic-title">
