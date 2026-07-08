@@ -32,6 +32,7 @@ import {
   deleteAttachment,
   deleteJournalEntry,
   deleteTodo,
+  exportSyncBundle,
   getLocalState,
   localDatabaseDriver,
   localDatabaseName,
@@ -46,6 +47,7 @@ import {
   type JournalEntry,
   type TodoItem,
   type WebDavConnectionTestResult,
+  type WebDavSyncResult,
   type WeeklySummary,
 } from './lib/db'
 import { createGameEngineSnapshot, defaultGameEngineSettings, type GameEngineSettings } from './lib/gameEngine'
@@ -97,6 +99,68 @@ const desktopNavMediaQuery = '(min-width: 1024px), (orientation: landscape) and 
 const getSystemThemeMode = () => (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
 const getDesktopNavMode = () => window.matchMedia(desktopNavMediaQuery).matches
 
+type DiagnosticDialogState = {
+  title: string
+  message: string
+  details: string
+  copied?: boolean
+}
+
+type ToastState = {
+  id: number
+  message: string
+  tone: 'success' | 'error' | 'info'
+}
+
+const getErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback)
+
+const formatBytes = (size: number) => {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`
+  return `${Math.round(size / 1024 / 102.4) / 10} MB`
+}
+
+const formatWebDavSyncMessage = (result: WebDavSyncResult) => {
+  const action = result.direction === 'pull' ? '已从云端拉取' : '已上传本机快照'
+  const migration = result.migratedFile ? `；旧库已迁移为 ${result.migratedFile}` : ''
+
+  return `${action} ${result.file} · ${formatBytes(result.size)}${migration}`
+}
+
+const isMissingRemoteSnapshotMessage = (message: string) =>
+  /远端目录|同步快照不存在|远端同步快照不存在|ObjectNotFound|AncestorsNotFound|404|409|not found/i.test(message)
+
+const formatDiagnosticDetails = (scope: string, error: unknown, extra: Record<string, unknown> = {}) => {
+  const diagnostic = typeof error === 'object' && error && 'diagnostic' in error ? (error as { diagnostic?: unknown }).diagnostic : undefined
+
+  return JSON.stringify(
+    {
+      scope,
+      at: new Date().toISOString(),
+      location: window.location.href,
+      userAgent: navigator.userAgent,
+      viewport: {
+        width: window.visualViewport?.width ?? window.innerWidth,
+        height: window.visualViewport?.height ?? window.innerHeight,
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+      },
+      extra,
+      error:
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+            }
+          : error,
+      diagnostic,
+    },
+    null,
+    2,
+  )
+}
+
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>('dashboard')
   const [isNavOpen, setIsNavOpen] = useState(false)
@@ -126,10 +190,13 @@ function App() {
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
   const [summaryError, setSummaryError] = useState('')
   const [writeError, setWriteError] = useState('')
+  const [toast, setToast] = useState<ToastState | null>(null)
+  const [diagnosticDialog, setDiagnosticDialog] = useState<DiagnosticDialogState | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [hasLoadedLocalState, setHasLoadedLocalState] = useState(false)
   const [isWebDavSyncing, setIsWebDavSyncing] = useState(false)
   const [isTestingWebDav, setIsTestingWebDav] = useState(false)
+  const [isExportingSyncBundle, setIsExportingSyncBundle] = useState(false)
   const [webDavTestResult, setWebDavTestResult] = useState<WebDavConnectionTestResult | null>(null)
   const [weatherState, setWeatherState] = useState<WeatherState>({
     status: 'idle',
@@ -141,11 +208,14 @@ function App() {
     driver: localDatabaseDriver,
     databaseName: localDatabaseName,
     databasePath: '',
+    syncBundleName: '',
+    syncBundlePath: '',
     apiBaseUrl: '',
     schemaVersion: 0,
     lastLoadedAt: '',
   })
   const contentShellRef = useRef<HTMLDivElement | null>(null)
+  const toastTimerRef = useRef<number | null>(null)
   const pullStartYRef = useRef<number | null>(null)
   const pullDistanceRef = useRef(0)
   const [pullRefreshDistance, setPullRefreshDistance] = useState(0)
@@ -172,6 +242,32 @@ function App() {
       window.visualViewport?.removeEventListener('resize', updateViewportMetrics)
     }
   }, [])
+
+  const showToast = useCallback((message: string, tone: ToastState['tone'] = 'info') => {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current)
+    }
+
+    setToast({
+      id: Date.now(),
+      message,
+      tone,
+    })
+
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null)
+      toastTimerRef.current = null
+    }, 3600)
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current)
+      }
+    },
+    [],
+  )
 
   const refreshWeather = useCallback(async (force = false) => {
     setWeatherState({
@@ -220,6 +316,8 @@ function App() {
         driver: nextState.meta.driver,
         databaseName: nextState.meta.databaseName,
         databasePath: nextState.meta.databasePath,
+        syncBundleName: nextState.meta.syncBundleName,
+        syncBundlePath: nextState.meta.syncBundlePath,
         apiBaseUrl: nextState.meta.apiBaseUrl,
         schemaVersion: nextState.meta.schemaVersion,
         lastLoadedAt: new Date().toLocaleTimeString('zh-CN', {
@@ -240,9 +338,20 @@ function App() {
     try {
       await refreshWeather(true)
     } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '刷新定位和天气失败。')
+      const message = getErrorMessage(error, '刷新定位和天气失败。')
+
+      setWriteError(message)
+      showToast(message, 'error')
+      setDiagnosticDialog({
+        title: '定位与天气诊断',
+        message,
+        details: formatDiagnosticDetails('weather.refresh', error, {
+          weatherState,
+          geolocationAvailable: Boolean(navigator.geolocation),
+        }),
+      })
     }
-  }, [refreshWeather])
+  }, [refreshWeather, showToast, weatherState])
 
   const getActiveScrollTop = useCallback(() => {
     if (isDesktopNav) {
@@ -631,8 +740,11 @@ function App() {
       )
       setPendingFiles([])
       await reload()
+      showToast('日记已保存', 'success')
     } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '保存日记失败。')
+      const message = getErrorMessage(error, '保存日记失败。')
+      setWriteError(message)
+      showToast(message, 'error')
     } finally {
       setIsSaving(false)
     }
@@ -649,8 +761,11 @@ function App() {
       await addTodo(selectedDate, title)
       setTodoTitle('')
       await reload()
+      showToast('事项已添加', 'success')
     } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '新增事项失败。')
+      const message = getErrorMessage(error, '新增事项失败。')
+      setWriteError(message)
+      showToast(message, 'error')
     }
   }
 
@@ -660,8 +775,11 @@ function App() {
     try {
       await setTodoDone(todo, !todo.done)
       await reload()
+      showToast(todo.done ? '事项已标记未完成' : '事项已完成', 'success')
     } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '更新事项失败。')
+      const message = getErrorMessage(error, '更新事项失败。')
+      setWriteError(message)
+      showToast(message, 'error')
     }
   }
 
@@ -671,8 +789,11 @@ function App() {
     try {
       await deleteTodo(todo)
       await reload()
+      showToast('事项已删除', 'success')
     } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '删除事项失败。')
+      const message = getErrorMessage(error, '删除事项失败。')
+      setWriteError(message)
+      showToast(message, 'error')
     }
   }
 
@@ -682,8 +803,11 @@ function App() {
     try {
       await deleteAttachment(attachment)
       await reload()
+      showToast('图片已删除', 'success')
     } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '删除附件失败。')
+      const message = getErrorMessage(error, '删除附件失败。')
+      setWriteError(message)
+      showToast(message, 'error')
     }
   }
 
@@ -696,8 +820,11 @@ function App() {
     try {
       await deleteJournalEntry(entry)
       await reload()
+      showToast('日记已删除', 'success')
     } catch (error) {
-      setWriteError(error instanceof Error ? error.message : '删除日记失败。')
+      const message = getErrorMessage(error, '删除日记失败。')
+      setWriteError(message)
+      showToast(message, 'error')
     }
   }
 
@@ -769,7 +896,7 @@ function App() {
       const result = await testWebDavConnection(webDavConfig)
       setWebDavTestResult(result)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'WebDAV 连接测试失败。'
+      const message = getErrorMessage(error, 'WebDAV 连接测试失败。')
       const actionableMessage =
         message === 'API route not found.'
           ? '本地 SQLite API 还没有重启到支持 WebDAV 测试的新版本。请重启 npm run dev 后再测试。'
@@ -784,8 +911,44 @@ function App() {
         checkedAt: new Date().toISOString(),
         message: actionableMessage,
       })
+      setDiagnosticDialog({
+        title: 'WebDAV 测试诊断',
+        message: actionableMessage,
+        details: formatDiagnosticDetails('webdav.test', error, {
+          url: webDavConfig.url,
+          remotePath: webDavConfig.remotePath,
+          usernameLength: webDavConfig.username.length,
+        }),
+      })
     } finally {
       setIsTestingWebDav(false)
+    }
+  }
+
+  const handleExportSyncBundle = async () => {
+    if (isExportingSyncBundle) return
+
+    setIsExportingSyncBundle(true)
+    setWriteError('')
+
+    try {
+      const result = await exportSyncBundle()
+      const files = result.files.map((file) => file.name).join('、')
+
+      showToast(`本地同步包已生成：${result.path}；包含 ${files}`, 'success')
+      await reload()
+    } catch (error) {
+      const message = getErrorMessage(error, '生成本地同步包失败。')
+
+      setWriteError(message)
+      showToast(message, 'error')
+      setDiagnosticDialog({
+        title: '本地同步包诊断',
+        message,
+        details: formatDiagnosticDetails('sync-bundle.export', error),
+      })
+    } finally {
+      setIsExportingSyncBundle(false)
     }
   }
 
@@ -821,7 +984,9 @@ function App() {
 
     if (!isWebDavConfigured) {
       if (source === 'manual') {
-        setWriteError('请先配置 WebDAV')
+        const message = '请先配置 WebDAV'
+        setWriteError(message)
+        showToast(message, 'error')
         setSettingsSection('webdav')
         setActiveView('settings')
         if (!isDesktopNav) {
@@ -836,28 +1001,57 @@ function App() {
 
     try {
       const shouldPush = pendingChangeCount > 0
-      await (shouldPush ? pushWebDavSnapshot(webDavConfig) : pullWebDavSnapshot(webDavConfig))
+      const result = await (shouldPush ? pushWebDavSnapshot(webDavConfig) : pullWebDavSnapshot(webDavConfig))
 
       window.localStorage.setItem(webDavLastAutoSyncStorageKey, todayKey)
+      showToast(formatWebDavSyncMessage(result), 'success')
       await reload()
     } catch (error) {
-      const message = error instanceof Error ? error.message : '同步失败。'
+      const message = getErrorMessage(error, '同步失败。')
 
-      if (pendingChangeCount === 0 && /404|not found|不存在/i.test(message)) {
+      if (source === 'manual' && pendingChangeCount === 0 && isMissingRemoteSnapshotMessage(message)) {
         try {
-          await pushWebDavSnapshot(webDavConfig)
+          const result = await pushWebDavSnapshot(webDavConfig)
 
           window.localStorage.setItem(webDavLastAutoSyncStorageKey, todayKey)
+          showToast(`远端目录已初始化；${formatWebDavSyncMessage(result)}`, 'success')
           await reload()
           return
         } catch (fallbackError) {
-          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : '同步初始化失败。'
-          if (source === 'manual') setWriteError(fallbackMessage)
+          const fallbackMessage = getErrorMessage(fallbackError, '初始化远端同步目录失败。')
+
+          setWriteError(fallbackMessage)
+          showToast(fallbackMessage, 'error')
+          setDiagnosticDialog({
+            title: 'WebDAV 初始化诊断',
+            message: fallbackMessage,
+            details: formatDiagnosticDetails('webdav.sync.initialize', fallbackError, {
+              url: webDavConfig.url,
+              remotePath: webDavConfig.remotePath,
+              usernameLength: webDavConfig.username.length,
+              pendingChangeCount,
+              originalPullError: message,
+            }),
+          })
           return
         }
       }
 
-      if (source === 'manual') setWriteError(message)
+      if (source === 'manual') {
+        setWriteError(message)
+        showToast(message, 'error')
+        setDiagnosticDialog({
+          title: 'WebDAV 同步诊断',
+          message,
+          details: formatDiagnosticDetails('webdav.sync', error, {
+            url: webDavConfig.url,
+            remotePath: webDavConfig.remotePath,
+            usernameLength: webDavConfig.username.length,
+            pendingChangeCount,
+            intendedDirection: pendingChangeCount > 0 ? 'push' : 'pull',
+          }),
+        })
+      }
     } finally {
       setIsWebDavSyncing(false)
     }
@@ -867,6 +1061,58 @@ function App() {
     isWebDavSyncing,
     pendingChangeCount,
     reload,
+    showToast,
+    todayKey,
+    webDavConfig,
+  ])
+
+  const handleWebDavRestoreFromCloud = useCallback(async () => {
+    if (isWebDavSyncing) return
+
+    if (!isWebDavConfigured) {
+      const message = '请先配置 WebDAV'
+      setWriteError(message)
+      showToast(message, 'error')
+      setSettingsSection('webdav')
+      setActiveView('settings')
+      return
+    }
+
+    const confirmed = window.confirm('从云端恢复会用远端快照替换本机数据。本机尚未同步的记录可能丢失，确定继续吗？')
+    if (!confirmed) return
+
+    setIsWebDavSyncing(true)
+    setWriteError('')
+
+    try {
+      const result = await pullWebDavSnapshot(webDavConfig)
+
+      window.localStorage.setItem(webDavLastAutoSyncStorageKey, todayKey)
+      showToast(formatWebDavSyncMessage(result), 'success')
+      await reload()
+    } catch (error) {
+      const message = getErrorMessage(error, '从云端恢复失败。')
+      setWriteError(message)
+      showToast(message, 'error')
+      setDiagnosticDialog({
+        title: 'WebDAV 恢复诊断',
+        message,
+        details: formatDiagnosticDetails('webdav.restore', error, {
+          url: webDavConfig.url,
+          remotePath: webDavConfig.remotePath,
+          usernameLength: webDavConfig.username.length,
+          pendingChangeCount,
+        }),
+      })
+    } finally {
+      setIsWebDavSyncing(false)
+    }
+  }, [
+    isWebDavConfigured,
+    isWebDavSyncing,
+    pendingChangeCount,
+    reload,
+    showToast,
     todayKey,
     webDavConfig,
   ])
@@ -939,6 +1185,17 @@ function App() {
       await reload()
     } catch (error) {
       setSummaryError(error instanceof Error ? error.message : '保存周总结失败。')
+    }
+  }
+
+  const handleCopyDiagnosticDetails = async () => {
+    if (!diagnosticDialog) return
+
+    try {
+      await navigator.clipboard.writeText(diagnosticDialog.details)
+      setDiagnosticDialog({ ...diagnosticDialog, copied: true })
+    } catch {
+      setDiagnosticDialog({ ...diagnosticDialog, copied: false })
     }
   }
 
@@ -1127,6 +1384,8 @@ function App() {
             aiConfig={aiConfig}
             webDavConfig={webDavConfig}
             isTestingWebDav={isTestingWebDav}
+            isWebDavSyncing={isWebDavSyncing}
+            isExportingSyncBundle={isExportingSyncBundle}
             webDavTestResult={webDavTestResult}
             themeMode={themeMode}
             resolvedThemeMode={resolvedThemeMode}
@@ -1137,6 +1396,8 @@ function App() {
             onWebDavConfigChange={handleWebDavConfigChange}
             onWebDavAutoSyncChange={handleWebDavAutoSyncChange}
             onTestWebDavConnection={() => void handleTestWebDavConnection()}
+            onExportSyncBundle={() => void handleExportSyncBundle()}
+            onRestoreWebDavSnapshot={() => void handleWebDavRestoreFromCloud()}
             onThemeModeChange={handleThemeModeChange}
             onSnapshotDaysChange={handleSnapshotDaysChange}
           />
@@ -1144,6 +1405,33 @@ function App() {
           </div>
         </div>
       </div>
+      {diagnosticDialog && (
+        <div className="diagnostic-backdrop" role="presentation">
+          <section className="diagnostic-dialog" role="dialog" aria-modal="true" aria-labelledby="diagnostic-title">
+            <div className="section-head mb-3">
+              <div>
+                <p className="eyebrow">Diagnostics</p>
+                <h2 className="section-title text-lg" id="diagnostic-title">
+                  {diagnosticDialog.title}
+                </h2>
+              </div>
+              <button className="icon-button" type="button" aria-label="关闭诊断" onClick={() => setDiagnosticDialog(null)}>
+                X
+              </button>
+            </div>
+            <p className="diagnostic-message">{diagnosticDialog.message}</p>
+            <textarea className="diagnostic-details" readOnly value={diagnosticDialog.details} />
+            <div className="diagnostic-actions">
+              <button className="button-secondary min-h-10 px-3" type="button" onClick={() => void handleCopyDiagnosticDetails()}>
+                {diagnosticDialog.copied ? '已复制' : '复制详情'}
+              </button>
+              <button className="button-primary min-h-10 px-3" type="button" onClick={() => setDiagnosticDialog(null)}>
+                关闭
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {!isDesktopNav && <BottomNav activeView={activeView} navigationItems={navigationItems} onNavigate={navigateTo} />}
     </main>
   )

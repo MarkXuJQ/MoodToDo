@@ -45,6 +45,8 @@ type SettingsViewProps = {
   aiConfig: AiConfig
   webDavConfig: WebDavConfig
   isTestingWebDav: boolean
+  isWebDavSyncing: boolean
+  isExportingSyncBundle: boolean
   webDavTestResult: WebDavConnectionTestResult | null
   themeMode: ThemeMode
   resolvedThemeMode: 'light' | 'dark'
@@ -55,6 +57,8 @@ type SettingsViewProps = {
   onWebDavConfigChange: (key: WebDavTextConfigKey) => (event: ChangeEvent<HTMLInputElement>) => void
   onWebDavAutoSyncChange: (event: ChangeEvent<HTMLInputElement>) => void
   onTestWebDavConnection: () => void
+  onExportSyncBundle: () => void
+  onRestoreWebDavSnapshot: () => void
   onThemeModeChange: (mode: ThemeMode) => void
   onSnapshotDaysChange: (event: ChangeEvent<HTMLInputElement>) => void
 }
@@ -80,6 +84,8 @@ export function SettingsView({
   aiConfig,
   webDavConfig,
   isTestingWebDav,
+  isWebDavSyncing,
+  isExportingSyncBundle,
   webDavTestResult,
   themeMode,
   resolvedThemeMode,
@@ -90,6 +96,8 @@ export function SettingsView({
   onWebDavConfigChange,
   onWebDavAutoSyncChange,
   onTestWebDavConnection,
+  onExportSyncBundle,
+  onRestoreWebDavSnapshot,
   onThemeModeChange,
   onSnapshotDaysChange,
 }: SettingsViewProps) {
@@ -247,6 +255,8 @@ export function SettingsView({
                     <strong className="table-value">{databaseStatus.databaseName}</strong>
                     <span className="table-key">path</span>
                     <strong className="table-value">{databaseStatus.databasePath || '等待本地 API 返回'}</strong>
+                    <span className="table-key">sync bundle</span>
+                    <strong className="table-value">{databaseStatus.syncBundlePath || '桌面端可生成'}</strong>
                     <span className="table-key">schema</span>
                     <strong className="table-value">v{databaseStatus.schemaVersion || '-'}</strong>
                     <span className="table-key">pending content</span>
@@ -254,7 +264,7 @@ export function SettingsView({
                   </div>
 
                   <p className="note mt-3">
-                    主数据已经固定落在项目目录下的 SQLite 文件里。浏览器、端口和 PWA 安装状态改变时，只要本地 API 仍指向同一个文件，数据就不会跟着消失。今日台的云同步会把这个 SQLite 文件作为快照推送到 WebDAV。
+                    主数据固定落在本机 SQLite 文件里。浏览器、端口和 PWA 安装状态改变时，只要本地 API 仍指向同一个文件，数据就不会跟着消失。云同步只使用专用 WebDAV 目录里的跨端快照，不建议把本机 data 文件夹直接同步到坚果云。
                   </p>
 
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -435,6 +445,8 @@ export function SettingsView({
                   <strong className="table-value">{databaseStatus.databaseName}</strong>
                   <span className="table-key">path</span>
                   <strong className="table-value">{databaseStatus.databasePath || '等待本地 API 返回'}</strong>
+                  <span className="table-key">syncBundle</span>
+                  <strong className="table-value">{databaseStatus.syncBundlePath || '-'}</strong>
                   <span className="table-key">api</span>
                   <strong className="table-value">{databaseStatus.apiBaseUrl || '/api'}</strong>
                   <span className="table-key">schema</span>
@@ -453,7 +465,7 @@ export function SettingsView({
                   <strong className="table-value">{weeklySummariesCount}</strong>
                 </div>
                 <p className="note">
-                  当前主库是项目目录下的 SQLite 文件，不再依赖浏览器 profile 或端口隔离。当前 WebDAV 使用整库快照做备份/恢复；后续多端合并会再使用这里的变更日志。
+                  当前主库是本机 SQLite 文件，不再依赖浏览器 profile 或端口隔离。WebDAV 目录只承载跨端同步快照；后续多端合并会继续使用这里的变更日志和设备信息。
                 </p>
               </div>
             </section>
@@ -554,7 +566,7 @@ export function SettingsView({
                     className="text-input"
                     value={webDavConfig.remotePath}
                     onChange={onWebDavConfigChange('remotePath')}
-                    placeholder="/data"
+                    placeholder="/xinxiangyi-sync"
                   />
                 </label>
                 <label className="config-row cursor-pointer">
@@ -571,9 +583,17 @@ export function SettingsView({
                 </label>
 
                 <div className="webdav-test-row">
+                  <button className="button-secondary min-h-9 px-3" type="button" disabled={isExportingSyncBundle} onClick={onExportSyncBundle}>
+                    {isExportingSyncBundle ? <RefreshCw className="animate-spin" size={16} aria-hidden="true" /> : <Database size={16} aria-hidden="true" />}
+                    {isExportingSyncBundle ? '生成中' : '生成本地同步包'}
+                  </button>
                   <button className="button-secondary min-h-9 px-3" type="button" disabled={isTestingWebDav} onClick={onTestWebDavConnection}>
                     {isTestingWebDav ? <RefreshCw className="animate-spin" size={16} aria-hidden="true" /> : <Cloud size={16} aria-hidden="true" />}
                     {isTestingWebDav ? '测试中' : '测试连接'}
+                  </button>
+                  <button className="button-secondary min-h-9 px-3" type="button" disabled={isWebDavSyncing} onClick={onRestoreWebDavSnapshot}>
+                    {isWebDavSyncing ? <RefreshCw className="animate-spin" size={16} aria-hidden="true" /> : <Cloud size={16} aria-hidden="true" />}
+                    从云端恢复
                   </button>
                   {webDavTestResult && (
                     <p className={`webdav-test-result ${webDavTestResult.ok ? 'webdav-test-result-ok' : 'webdav-test-result-error'}`}>
@@ -585,7 +605,7 @@ export function SettingsView({
               </div>
 
               <p className="note mt-3">
-                当前版本会把本地 SQLite 数据库作为一个完整快照同步到 WebDAV 目录。坚果云的公开邀请链接不能作为 WebDAV Server URL；Server URL 通常填写 https://dav.jianguoyun.com/dav/，如果你同步的是 data 文件夹，Remote Path 可以先试 /data。首页的同步按钮会自动选择上传或拉取：本地有未同步内容时上传，本地没有未同步内容时尝试拉取远端快照。
+                本地仍使用 SQLite 保持读写稳定，WebDAV 上只放跨端同步文件。点击“生成本地同步包”会把需要上传的文件整理到 {databaseStatus.syncBundlePath || 'sync/xinxiangyi-sync'}。坚果云的公开邀请链接不能作为 WebDAV Server URL；Server URL 通常填写 https://dav.jianguoyun.com/dav/。Remote Path 建议使用专用目录 /xinxiangyi-sync，不要直接指向本机 data 文件夹。当前采用自用简单同步模式：编辑后点同步上传，换设备前先点同步拉取；迁移和排查时，可以用“从云端恢复”强制拉取远端快照。
               </p>
             </section>
           )}

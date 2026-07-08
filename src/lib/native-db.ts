@@ -1,4 +1,4 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core'
+import { Capacitor, CapacitorHttp, type HttpOptions, type HttpResponse } from '@capacitor/core'
 import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@capacitor-community/sqlite'
 
 import { analyzeMood, type MoodAnalysis } from './mood'
@@ -27,10 +27,25 @@ type PendingFilePayload = {
   dataBase64: string
 }
 
+type NativeSnapshot = {
+  app: 'xinxiangyi'
+  format: 'xinxiangyi-native-json'
+  schemaVersion: number
+  exportedAt: string
+  entries: DbRow[]
+  todos: DbRow[]
+  attachments: DbRow[]
+  changes: DbRow[]
+  weeklySummaries: DbRow[]
+}
+
 const schemaVersion = 4
 const nativeDatabaseId = 'xinxiangyi'
 const nativeDatabaseName = 'xinxiangyi.sqlite'
+const nativeSnapshotFile = 'xinxiangyi-native-snapshot.json'
+const nativeManifestFile = 'manifest-native.json'
 const sqlite = new SQLiteConnection(CapacitorSQLite)
+let webDavHadAuthSuccess = false
 
 let dbConnection: SQLiteDBConnection | null = null
 let dbConnectionPromise: Promise<SQLiteDBConnection> | null = null
@@ -406,6 +421,8 @@ const getNativeMeta = async (db: SQLiteDBConnection) => {
     driver: 'Capacitor SQLite',
     databaseName: nativeDatabaseName,
     databasePath: url || 'Android app sandbox',
+    syncBundleName: '',
+    syncBundlePath: '',
     apiBaseUrl: 'capacitor://native-sqlite',
     schemaVersion,
   }
@@ -760,7 +777,7 @@ export const upsertNativeWeeklySummary = async (
 const normalizeRemotePath = (value: string) => {
   const raw = typeof value === 'string' ? value.trim() : ''
 
-  return raw || '/xinxiangyi'
+  return raw || '/xinxiangyi-sync'
 }
 
 const getRemoteSegments = (...parts: string[]) =>
@@ -828,6 +845,378 @@ const getWebDavHeaders = (config: WebDavSyncConfig, contentType?: string) => ({
   ...(contentType ? { 'Content-Type': contentType } : {}),
 })
 
+class NativeDiagnosticError extends Error {
+  readonly diagnostic: unknown
+
+  constructor(message: string, diagnostic: unknown) {
+    super(message)
+    this.name = 'NativeDiagnosticError'
+    this.diagnostic = diagnostic
+  }
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const getSafeHeaders = (headers?: Record<string, string>) => {
+  const next = { ...(headers ?? {}) }
+
+  if ('Authorization' in next) {
+    next.Authorization = '[redacted]'
+  }
+
+  return next
+}
+
+const getUtf8Size = (value: string) => new TextEncoder().encode(value).length
+
+const isSuccessStatus = (status: number) => status >= 200 && status < 300
+
+const getResponseText = (value: unknown) => {
+  if (typeof value === 'string') return value
+  if (value == null) return ''
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+const getWebDavResponseSnippet = (response: HttpResponse) => getResponseText(response.data).slice(0, 800)
+
+const shouldRetryWebDavStatus = (status: number) => {
+  if (status === 401 && webDavHadAuthSuccess) return true
+  if (status === 429) return true
+  if (status >= 500 && status < 600) return true
+  return false
+}
+
+const requestWebDav = async (options: HttpOptions, label: string) => {
+  const maxAttempts = 3
+  let lastResponse: HttpResponse | null = null
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const startedAt = Date.now()
+
+    try {
+      const response = await CapacitorHttp.request({
+        connectTimeout: 30_000,
+        readTimeout: options.method === 'GET' || options.method === 'PUT' ? 300_000 : 30_000,
+        ...options,
+      })
+      lastResponse = response
+
+      if (isSuccessStatus(response.status) || response.status === 207) {
+        webDavHadAuthSuccess = true
+        return response
+      }
+
+      if (attempt < maxAttempts - 1 && shouldRetryWebDavStatus(response.status)) {
+        await wait(500 * 2 ** attempt)
+        continue
+      }
+
+      return response
+    } catch (error) {
+      if (attempt < maxAttempts - 1) {
+        await wait(500 * 2 ** attempt)
+        continue
+      }
+
+      throw new NativeDiagnosticError(error instanceof Error ? error.message : `${label} 请求失败。`, {
+        label,
+        method: options.method ?? 'GET',
+        url: options.url,
+        headers: getSafeHeaders(options.headers),
+        attempt: attempt + 1,
+        elapsedMs: Date.now() - startedAt,
+        cause: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : error,
+        lastResponse: lastResponse
+          ? {
+              status: lastResponse.status,
+              headers: lastResponse.headers,
+              dataSnippet: getWebDavResponseSnippet(lastResponse),
+            }
+          : null,
+      })
+    }
+  }
+
+  throw new NativeDiagnosticError(`${label} 请求失败。`, {
+    label,
+    method: options.method ?? 'GET',
+    url: options.url,
+    headers: getSafeHeaders(options.headers),
+    lastResponse: lastResponse
+      ? {
+          status: lastResponse.status,
+          headers: lastResponse.headers,
+          dataSnippet: getWebDavResponseSnippet(lastResponse),
+        }
+      : null,
+  })
+}
+
+const syncedRow = (row: DbRow): DbRow => ('sync_state' in row ? { ...row, sync_state: 'synced' } : row)
+
+const createNativeSnapshot = async (): Promise<NativeSnapshot> => {
+  const db = await getDatabase()
+  const [entries, todos, attachments, changes, weeklySummaries] = await Promise.all([
+    queryRows(db, 'SELECT * FROM entries ORDER BY date_key DESC'),
+    queryRows(db, 'SELECT * FROM todos ORDER BY created_at DESC'),
+    queryRows(db, 'SELECT * FROM attachments ORDER BY created_at DESC'),
+    queryRows(db, 'SELECT * FROM changes ORDER BY changed_at DESC'),
+    queryRows(db, 'SELECT * FROM weekly_summaries ORDER BY updated_at DESC'),
+  ])
+
+  return {
+    app: 'xinxiangyi',
+    format: 'xinxiangyi-native-json',
+    schemaVersion,
+    exportedAt: nowIso(),
+    entries: entries.map(syncedRow),
+    todos: todos.map(syncedRow),
+    attachments: attachments.map(syncedRow),
+    changes: changes.map(syncedRow),
+    weeklySummaries,
+  }
+}
+
+const markNativeContentSynced = async () => {
+  const db = await getDatabase()
+
+  await withTransaction(db, async () => {
+    await runStatement(db, `UPDATE entries SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
+    await runStatement(db, `UPDATE todos SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
+    await runStatement(db, `UPDATE attachments SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
+    await runStatement(db, `UPDATE changes SET sync_state = 'synced' WHERE sync_state = 'pending'`, [], false)
+  })
+}
+
+const putWebDavText = async (config: WebDavSyncConfig, file: string, body: string, contentType: string) => {
+  const url = getWebDavUrl(config, file)
+  const response = await requestWebDav({
+    method: 'PUT',
+    url,
+    headers: getWebDavHeaders(config, contentType),
+    data: body,
+  }, `PUT ${file}`)
+
+  if (response.status === 401 || response.status === 403) {
+    throw new NativeDiagnosticError('WebDAV 已响应，但上传没有通过认证。请确认坚果云账号使用邮箱，密码使用应用密码。', {
+      method: 'PUT',
+      url,
+      status: response.status,
+      headers: response.headers,
+      dataSnippet: getWebDavResponseSnippet(response),
+    })
+  }
+
+  if ([404, 409].includes(response.status)) {
+    throw new NativeDiagnosticError(`WebDAV 远端目录不存在或不可写：${response.status}。请先在坚果云中创建 Remote Path。`, {
+      method: 'PUT',
+      url,
+      status: response.status,
+      headers: response.headers,
+      dataSnippet: getWebDavResponseSnippet(response),
+    })
+  }
+
+  if (!isSuccessStatus(response.status)) {
+    throw new NativeDiagnosticError(`WebDAV 上传失败：${response.status}`, {
+      method: 'PUT',
+      url,
+      status: response.status,
+      headers: response.headers,
+      dataSnippet: getWebDavResponseSnippet(response),
+    })
+  }
+
+  return response
+}
+
+const getWebDavText = async (config: WebDavSyncConfig, file: string) => {
+  const url = getWebDavUrl(config, file)
+  const response = await requestWebDav({
+    method: 'GET',
+    url,
+    headers: getWebDavHeaders(config),
+    responseType: 'text',
+  }, `GET ${file}`)
+
+  if (response.status === 401 || response.status === 403) {
+    throw new NativeDiagnosticError('WebDAV 已响应，但下载没有通过认证。请确认坚果云账号使用邮箱，密码使用应用密码。', {
+      method: 'GET',
+      url,
+      status: response.status,
+      headers: response.headers,
+      dataSnippet: getWebDavResponseSnippet(response),
+    })
+  }
+
+  if (response.status === 404) {
+    throw new NativeDiagnosticError(`远端同步快照不存在：404 ${file}`, {
+      method: 'GET',
+      url,
+      status: response.status,
+      headers: response.headers,
+      dataSnippet: getWebDavResponseSnippet(response),
+    })
+  }
+
+  if (!isSuccessStatus(response.status)) {
+    throw new NativeDiagnosticError(`WebDAV 下载失败：${response.status}`, {
+      method: 'GET',
+      url,
+      status: response.status,
+      headers: response.headers,
+      dataSnippet: getWebDavResponseSnippet(response),
+    })
+  }
+
+  return getResponseText(response.data)
+}
+
+const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
+  const snapshot = value as Partial<NativeSnapshot>
+
+  if (
+    snapshot.app !== 'xinxiangyi' ||
+    snapshot.format !== 'xinxiangyi-native-json' ||
+    !Array.isArray(snapshot.entries) ||
+    !Array.isArray(snapshot.todos) ||
+    !Array.isArray(snapshot.attachments) ||
+    !Array.isArray(snapshot.changes) ||
+    !Array.isArray(snapshot.weeklySummaries)
+  ) {
+    throw new Error('远端文件不是有效的心象仪移动端同步快照。')
+  }
+
+  return snapshot as NativeSnapshot
+}
+
+const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
+  const db = await getDatabase()
+  const timestamp = nowIso()
+
+  await withTransaction(db, async () => {
+    await runStatement(db, 'DELETE FROM attachments', [], false)
+    await runStatement(db, 'DELETE FROM entries', [], false)
+    await runStatement(db, 'DELETE FROM todos', [], false)
+    await runStatement(db, 'DELETE FROM changes', [], false)
+    await runStatement(db, 'DELETE FROM weekly_summaries', [], false)
+
+    for (const row of snapshot.entries) {
+      await runStatement(
+        db,
+        `
+          INSERT INTO entries (
+            id, date_key, title, body, mood_text, weather_text, location_text,
+            mood_json, tags_json, created_at, updated_at, sync_state
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+        `,
+        [
+          readString(row, 'id', createId('entry')),
+          readString(row, 'date_key'),
+          readString(row, 'title'),
+          readString(row, 'body'),
+          readString(row, 'mood_text'),
+          readString(row, 'weather_text'),
+          readString(row, 'location_text'),
+          readString(row, 'mood_json', JSON.stringify(analyzeMood(readString(row, 'mood_text')))),
+          readString(row, 'tags_json', '[]'),
+          readString(row, 'created_at', timestamp),
+          readString(row, 'updated_at', timestamp),
+        ],
+        false,
+      )
+    }
+
+    for (const row of snapshot.todos) {
+      await runStatement(
+        db,
+        `
+          INSERT INTO todos (id, date_key, title, done, created_at, updated_at, completed_at, sync_state)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
+        `,
+        [
+          readString(row, 'id', createId('todo')),
+          readString(row, 'date_key'),
+          readString(row, 'title'),
+          readNumber(row, 'done'),
+          readString(row, 'created_at', timestamp),
+          readString(row, 'updated_at', timestamp),
+          readOptionalString(row, 'completed_at') ?? null,
+        ],
+        false,
+      )
+    }
+
+    for (const row of snapshot.attachments) {
+      await runStatement(
+        db,
+        `
+          INSERT INTO attachments (
+            id, entry_id, date_key, name, type, size, data_base64, created_at, updated_at, sync_state
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+        `,
+        [
+          readString(row, 'id', createId('attachment')),
+          readString(row, 'entry_id'),
+          readString(row, 'date_key'),
+          readString(row, 'name'),
+          readString(row, 'type', 'application/octet-stream'),
+          readNumber(row, 'size'),
+          readString(row, 'data_base64'),
+          readString(row, 'created_at', timestamp),
+          readString(row, 'updated_at', timestamp),
+        ],
+        false,
+      )
+    }
+
+    for (const row of snapshot.changes) {
+      await runStatement(
+        db,
+        `
+          INSERT INTO changes (entity, entity_id, operation, changed_at, device_id, sync_state, payload_json)
+          VALUES (?, ?, ?, ?, ?, 'synced', ?)
+        `,
+        [
+          readString(row, 'entity'),
+          readString(row, 'entity_id'),
+          readString(row, 'operation'),
+          readString(row, 'changed_at', timestamp),
+          readString(row, 'device_id', 'webdav'),
+          readString(row, 'payload_json', 'null'),
+        ],
+        false,
+      )
+    }
+
+    for (const row of snapshot.weeklySummaries) {
+      await runStatement(
+        db,
+        `
+          INSERT INTO weekly_summaries (week_key, content, model, provider, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        [
+          readString(row, 'week_key'),
+          readString(row, 'content'),
+          readString(row, 'model'),
+          readString(row, 'provider', 'local'),
+          readString(row, 'created_at', timestamp),
+          readString(row, 'updated_at', timestamp),
+        ],
+        false,
+      )
+    }
+  })
+}
+
 export const testNativeWebDavConnection = async (
   payload: WebDavSyncConfig,
 ): Promise<WebDavConnectionTestResult> => {
@@ -836,12 +1225,12 @@ export const testNativeWebDavConnection = async (
   const testFile = `.xinxiangyi-webdav-test-${Date.now()}.txt`
 
   try {
-    const writeResponse = await CapacitorHttp.request({
+    const writeResponse = await requestWebDav({
       method: 'PUT',
       url: getWebDavUrl(config, testFile),
       headers: getWebDavHeaders(config, 'text/plain; charset=utf-8'),
       data: `xinxiangyi webdav test ${checkedAt}\n`,
-    })
+    }, `PUT ${testFile}`)
 
     if (writeResponse.status === 401 || writeResponse.status === 403) {
       return {
@@ -879,11 +1268,11 @@ export const testNativeWebDavConnection = async (
       }
     }
 
-    await CapacitorHttp.request({
+    await requestWebDav({
       method: 'DELETE',
       url: getWebDavUrl(config, testFile),
       headers: getWebDavHeaders(config),
-    }).catch(() => undefined)
+    }, `DELETE ${testFile}`).catch(() => undefined)
 
     return {
       ok: true,
@@ -895,14 +1284,87 @@ export const testNativeWebDavConnection = async (
       message: 'WebDAV 连接成功，目录存在，并且测试写入通过。',
     }
   } catch (error) {
-    throw new Error(error instanceof Error ? error.message : 'WebDAV 连接测试失败。')
+    throw error instanceof Error ? error : new Error('WebDAV 连接测试失败。')
   }
 }
 
-const nativeSyncNotReady = (): never => {
-  throw new Error('Android 本地 SQLite 已可读写；WebDAV 数据库快照同步需要下一步接入原生导出/导入后再启用。')
+export const pushNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promise<WebDavSyncResult> => {
+  const config = getWebDavConfig(payload)
+  const snapshot = await createNativeSnapshot()
+  const snapshotBody = JSON.stringify(snapshot, null, 2)
+  const syncedAt = nowIso()
+  const manifest = {
+    app: 'xinxiangyi',
+    format: 'xinxiangyi-native-json',
+    schemaVersion,
+    file: nativeSnapshotFile,
+    pushedAt: syncedAt,
+    size: getUtf8Size(snapshotBody),
+  }
+
+  await putWebDavText(config, nativeSnapshotFile, snapshotBody, 'application/json; charset=utf-8')
+  await putWebDavText(config, nativeManifestFile, JSON.stringify(manifest, null, 2), 'application/json; charset=utf-8')
+  await markNativeContentSynced()
+
+  return {
+    ok: true,
+    direction: 'push',
+    remotePath: config.remotePath,
+    file: nativeSnapshotFile,
+    size: manifest.size,
+    syncedAt,
+  }
 }
 
-export const pushNativeWebDavSnapshot = async (_config: WebDavSyncConfig): Promise<WebDavSyncResult> => nativeSyncNotReady()
+export const pullNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promise<WebDavSyncResult> => {
+  const config = getWebDavConfig(payload)
+  let raw = ''
 
-export const pullNativeWebDavSnapshot = async (_config: WebDavSyncConfig): Promise<WebDavSyncResult> => nativeSyncNotReady()
+  try {
+    raw = await getWebDavText(config, nativeSnapshotFile)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+
+    if (/404|不存在|not found/i.test(message)) {
+      const legacyUrl = getWebDavUrl(config, nativeDatabaseName)
+      const legacyResponse = await requestWebDav({
+        method: 'HEAD',
+        url: legacyUrl,
+        headers: getWebDavHeaders(config),
+      }, `HEAD ${nativeDatabaseName}`).catch(() => null)
+
+      if (legacyResponse && isSuccessStatus(legacyResponse.status)) {
+        throw new NativeDiagnosticError('远端目录里只有旧版 SQLite 快照，Android 端不能直接导入。请先在电脑端更新到当前版本后执行一次同步，生成跨端 JSON 快照。', {
+          method: 'HEAD',
+          url: legacyUrl,
+          status: legacyResponse.status,
+          headers: legacyResponse.headers,
+          expectedFile: nativeSnapshotFile,
+          legacyFile: nativeDatabaseName,
+        })
+      }
+    }
+
+    throw error
+  }
+  let parsed: unknown
+
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('远端同步快照不是合法 JSON 文件。')
+  }
+
+  const snapshot = validateNativeSnapshot(parsed)
+
+  await importNativeSnapshot(snapshot)
+
+  return {
+    ok: true,
+    direction: 'pull',
+    remotePath: config.remotePath,
+    file: nativeSnapshotFile,
+    size: getUtf8Size(raw),
+    syncedAt: nowIso(),
+  }
+}

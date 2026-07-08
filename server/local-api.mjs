@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -12,12 +12,42 @@ const dataDir = process.env.XINXIANGYI_DATA_DIR
 const databaseName = 'xinxiangyi.sqlite'
 const databasePath = resolve(dataDir, databaseName)
 const syncDir = resolve(dataDir, '.sync')
+const syncBundleName = 'xinxiangyi-sync'
+const syncBundleRootDir = process.env.XINXIANGYI_SYNC_BUNDLE_DIR
+  ? resolve(process.env.XINXIANGYI_SYNC_BUNDLE_DIR)
+  : resolve(projectRoot, 'sync')
+const syncBundleDir = resolve(syncBundleRootDir, syncBundleName)
 const port = Number(process.env.XINXIANGYI_API_PORT ?? 8787)
 const host = process.env.XINXIANGYI_API_HOST ?? '127.0.0.1'
 const schemaVersion = 4
+const portableSnapshotFile = 'xinxiangyi-native-snapshot.json'
+const portableManifestFile = 'manifest-native.json'
+const syncBundleGuideFile = 'README.txt'
 
-mkdirSync(dataDir, { recursive: true })
-mkdirSync(syncDir, { recursive: true })
+const ensureDirectory = (dir) => {
+  try {
+    mkdirSync(dir, { recursive: true })
+    return
+  } catch (error) {
+    if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') {
+      throw error
+    }
+
+    const stat = lstatSync(dir)
+    if (!stat.isSymbolicLink()) {
+      throw error
+    }
+
+    const target = readlinkSync(dir)
+    const targetPath = resolve(dirname(dir), target)
+    mkdirSync(targetPath, { recursive: true })
+    mkdirSync(dir, { recursive: true })
+  }
+}
+
+ensureDirectory(dataDir)
+ensureDirectory(syncDir)
+ensureDirectory(syncBundleDir)
 
 let db = new DatabaseSync(databasePath)
 
@@ -236,15 +266,15 @@ const getMeta = () => ({
   driver: 'SQLite',
   databaseName,
   databasePath,
+  syncBundleName,
+  syncBundlePath: syncBundleDir,
   apiBaseUrl: `http://${host}:${port}`,
   schemaVersion,
 })
 
-const quoteSqlString = (value) => `'${value.replaceAll("'", "''")}'`
-
 const normalizeRemotePath = (value) => {
   const raw = typeof value === 'string' ? value.trim() : ''
-  return raw || '/xinxiangyi'
+  return raw || '/xinxiangyi-sync'
 }
 
 const getWebDavConfig = (payload) => {
@@ -280,6 +310,8 @@ const getWebDavHeaders = (config, contentType, extraHeaders = {}) => ({
   ...(contentType ? { 'Content-Type': contentType } : {}),
   ...extraHeaders,
 })
+
+const isMissingWebDavResource = (status) => status === 404 || status === 409
 
 const getRemoteSegments = (...parts) =>
   parts
@@ -318,15 +350,6 @@ const ensureWebDavCollection = async (config) => {
   }
 }
 
-const createDatabaseSnapshot = () => {
-  const snapshotPath = resolve(syncDir, `xinxiangyi-${Date.now()}.sqlite`)
-
-  rmSync(snapshotPath, { force: true })
-  db.exec(`VACUUM INTO ${quoteSqlString(snapshotPath)}`)
-
-  return snapshotPath
-}
-
 const markLocalContentSynced = () => {
   transaction(() => {
     db.prepare(`UPDATE entries SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
@@ -336,6 +359,319 @@ const markLocalContentSynced = () => {
     db.prepare(`UPDATE metric_records SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
     db.prepare(`UPDATE changes SET sync_state = 'synced' WHERE sync_state = 'pending'`).run()
   })
+}
+
+const readString = (row, key, fallback = '') => {
+  const value = row?.[key]
+  if (value == null) return fallback
+  return String(value)
+}
+
+const readOptionalString = (row, key) => {
+  const value = row?.[key]
+  if (value == null || value === '') return null
+  return String(value)
+}
+
+const readNumber = (row, key, fallback = 0) => {
+  const value = Number(row?.[key])
+  return Number.isFinite(value) ? value : fallback
+}
+
+const createPortableSnapshot = () => {
+  const attachmentRows = db.prepare(`SELECT * FROM attachments ORDER BY created_at DESC`).all()
+
+  return {
+    app: 'xinxiangyi',
+    format: 'xinxiangyi-native-json',
+    schemaVersion,
+    exportedAt: nowIso(),
+    entries: db.prepare(`SELECT * FROM entries ORDER BY date_key DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
+    todos: db.prepare(`SELECT * FROM todos ORDER BY created_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
+    attachments: attachmentRows.map((row) => {
+      const { blob, ...rest } = row
+
+      return {
+        ...rest,
+        data_base64: Buffer.from(blob ?? '').toString('base64'),
+        sync_state: 'synced',
+      }
+    }),
+    changes: db.prepare(`SELECT * FROM changes ORDER BY changed_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
+    weeklySummaries: db.prepare(`SELECT * FROM weekly_summaries ORDER BY updated_at DESC`).all(),
+    metricDefinitions: db.prepare(`SELECT * FROM metric_definitions ORDER BY created_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
+    metricRecords: db.prepare(`SELECT * FROM metric_records ORDER BY created_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
+  }
+}
+
+const validatePortableSnapshot = (value) => {
+  if (
+    value?.app !== 'xinxiangyi' ||
+    value?.format !== 'xinxiangyi-native-json' ||
+    !Array.isArray(value.entries) ||
+    !Array.isArray(value.todos) ||
+    !Array.isArray(value.attachments) ||
+    !Array.isArray(value.changes) ||
+    !Array.isArray(value.weeklySummaries)
+  ) {
+    throw new Error('远端文件不是有效的心象仪跨端同步快照。')
+  }
+
+  return value
+}
+
+const getSyncBundleGuide = (manifest) => `心象仪本地同步包
+
+这个文件夹可以作为 WebDAV / 坚果云远端同步目录的内容。
+
+推荐远端目录：
+${manifest.recommendedRemotePath}
+
+需要上传的文件：
+- ${portableSnapshotFile}: 跨端数据快照，包含日记、Todo、周总结和当前版本附件数据。
+- ${portableManifestFile}: 同步清单，记录快照格式、schema、生成时间和大小。
+
+不需要上传：
+- data/xinxiangyi.sqlite
+- data/.sync
+- 任意本机临时文件或备份文件
+
+当前推荐使用方式：
+1. 在当前设备编辑后，点击应用里的同步按钮上传快照。
+2. 换到另一台设备后，先点击同步按钮拉取快照，再开始编辑。
+3. 当前版本暂不做复杂冲突合并；如果多台设备同时离线编辑，最后上传的快照会成为云端版本。
+
+当前同步协议：
+${manifest.format}
+
+生成时间：
+${manifest.generatedAt}
+`
+
+const writeSyncBundleFiles = (snapshotBody, manifest) => {
+  mkdirSync(syncBundleDir, { recursive: true })
+
+  const manifestBody = JSON.stringify(manifest, null, 2)
+  writeFileSync(resolve(syncBundleDir, portableSnapshotFile), snapshotBody)
+  writeFileSync(resolve(syncBundleDir, portableManifestFile), manifestBody)
+  writeFileSync(resolve(syncBundleDir, syncBundleGuideFile), getSyncBundleGuide(manifest))
+
+  return manifestBody
+}
+
+const createPortableManifest = (snapshotBody, extra = {}) => {
+  const generatedAt = nowIso()
+  const snapshotSize = Buffer.byteLength(snapshotBody, 'utf8')
+
+  return {
+    app: 'xinxiangyi',
+    format: 'xinxiangyi-native-json',
+    schemaVersion,
+    file: portableSnapshotFile,
+    manifest: portableManifestFile,
+    bundleName: syncBundleName,
+    recommendedRemotePath: `/${syncBundleName}`,
+    generatedAt,
+    pushedAt: generatedAt,
+    size: snapshotSize,
+    files: [
+      {
+        name: portableSnapshotFile,
+        role: 'snapshot',
+        size: snapshotSize,
+      },
+      {
+        name: portableManifestFile,
+        role: 'manifest',
+      },
+      {
+        name: syncBundleGuideFile,
+        role: 'guide',
+      },
+    ],
+    ...extra,
+  }
+}
+
+const createLocalSyncBundle = (extra = {}) => {
+  const snapshot = createPortableSnapshot()
+  const snapshotBody = JSON.stringify(snapshot, null, 2)
+  const manifest = createPortableManifest(snapshotBody, extra)
+  const manifestBody = writeSyncBundleFiles(snapshotBody, manifest)
+
+  return {
+    snapshotBody,
+    manifest,
+    manifestBody,
+  }
+}
+
+const importPortableSnapshot = (snapshot) => {
+  const timestamp = nowIso()
+
+  transaction(() => {
+    db.prepare('DELETE FROM attachments').run()
+    db.prepare('DELETE FROM entries').run()
+    db.prepare('DELETE FROM todos').run()
+    db.prepare('DELETE FROM changes').run()
+    db.prepare('DELETE FROM weekly_summaries').run()
+    db.prepare('DELETE FROM metric_records').run()
+    db.prepare('DELETE FROM metric_definitions').run()
+
+    const insertEntry = db.prepare(`
+      INSERT INTO entries (
+        id, date_key, title, body, mood_text, weather_text, location_text,
+        mood_json, tags_json, created_at, updated_at, sync_state
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+    `)
+    for (const row of snapshot.entries) {
+      insertEntry.run(
+        readString(row, 'id', createId('entry')),
+        readString(row, 'date_key'),
+        readString(row, 'title'),
+        readString(row, 'body'),
+        readString(row, 'mood_text'),
+        readString(row, 'weather_text'),
+        readString(row, 'location_text'),
+        readString(row, 'mood_json', '{}'),
+        readString(row, 'tags_json', '[]'),
+        readString(row, 'created_at', timestamp),
+        readString(row, 'updated_at', timestamp),
+      )
+    }
+
+    const insertTodo = db.prepare(`
+      INSERT INTO todos (id, date_key, title, done, created_at, updated_at, completed_at, sync_state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
+    `)
+    for (const row of snapshot.todos) {
+      insertTodo.run(
+        readString(row, 'id', createId('todo')),
+        readString(row, 'date_key'),
+        readString(row, 'title'),
+        readNumber(row, 'done'),
+        readString(row, 'created_at', timestamp),
+        readString(row, 'updated_at', timestamp),
+        readOptionalString(row, 'completed_at'),
+      )
+    }
+
+    const insertAttachment = db.prepare(`
+      INSERT INTO attachments (
+        id, entry_id, date_key, name, type, size, blob, created_at, updated_at, sync_state
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+    `)
+    for (const row of snapshot.attachments) {
+      const blob = Buffer.from(readString(row, 'data_base64'), 'base64')
+
+      insertAttachment.run(
+        readString(row, 'id', createId('attachment')),
+        readString(row, 'entry_id'),
+        readString(row, 'date_key'),
+        readString(row, 'name'),
+        readString(row, 'type', 'application/octet-stream'),
+        readNumber(row, 'size', blob.length),
+        blob,
+        readString(row, 'created_at', timestamp),
+        readString(row, 'updated_at', timestamp),
+      )
+    }
+
+    const insertChange = db.prepare(`
+      INSERT INTO changes (entity, entity_id, operation, changed_at, device_id, sync_state, payload_json)
+      VALUES (?, ?, ?, ?, ?, 'synced', ?)
+    `)
+    for (const row of snapshot.changes) {
+      insertChange.run(
+        readString(row, 'entity'),
+        readString(row, 'entity_id'),
+        readString(row, 'operation'),
+        readString(row, 'changed_at', timestamp),
+        readString(row, 'device_id', 'webdav'),
+        readString(row, 'payload_json', 'null'),
+      )
+    }
+
+    const insertWeeklySummary = db.prepare(`
+      INSERT INTO weekly_summaries (week_key, content, model, provider, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    for (const row of snapshot.weeklySummaries) {
+      insertWeeklySummary.run(
+        readString(row, 'week_key'),
+        readString(row, 'content'),
+        readString(row, 'model'),
+        readString(row, 'provider', 'local'),
+        readString(row, 'created_at', timestamp),
+        readString(row, 'updated_at', timestamp),
+      )
+    }
+
+    const metricDefinitions = Array.isArray(snapshot.metricDefinitions) ? snapshot.metricDefinitions : []
+    const metricRecords = Array.isArray(snapshot.metricRecords) ? snapshot.metricRecords : []
+    const insertMetricDefinition = db.prepare(`
+      INSERT INTO metric_definitions (id, name, unit, color, target_value, created_at, updated_at, sync_state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
+    `)
+    for (const row of metricDefinitions) {
+      insertMetricDefinition.run(
+        readString(row, 'id', createId('metric')),
+        readString(row, 'name'),
+        readString(row, 'unit'),
+        readString(row, 'color', '#176f66'),
+        row.target_value == null ? null : readNumber(row, 'target_value'),
+        readString(row, 'created_at', timestamp),
+        readString(row, 'updated_at', timestamp),
+      )
+    }
+
+    const insertMetricRecord = db.prepare(`
+      INSERT INTO metric_records (id, metric_id, date_key, value, created_at, updated_at, sync_state)
+      VALUES (?, ?, ?, ?, ?, ?, 'synced')
+    `)
+    for (const row of metricRecords) {
+      insertMetricRecord.run(
+        readString(row, 'id', createId('metric_record')),
+        readString(row, 'metric_id'),
+        readString(row, 'date_key'),
+        readNumber(row, 'value'),
+        readString(row, 'created_at', timestamp),
+        readString(row, 'updated_at', timestamp),
+      )
+    }
+  })
+}
+
+const uploadPortableSnapshot = async (config) => {
+  const { snapshotBody, manifest, manifestBody } = createLocalSyncBundle({
+    remotePath: config.remotePath,
+    source: 'webdav-push',
+  })
+  const uploadResponse = await fetch(getWebDavUrl(config, portableSnapshotFile), {
+    method: 'PUT',
+    headers: getWebDavHeaders(config, 'application/json; charset=utf-8'),
+    body: snapshotBody,
+  })
+
+  if (!uploadResponse.ok) {
+    const detail = await uploadResponse.text().catch(() => '')
+    throw new Error(`上传跨端同步快照失败：${uploadResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
+  }
+
+  const manifestResponse = await fetch(getWebDavUrl(config, portableManifestFile), {
+    method: 'PUT',
+    headers: getWebDavHeaders(config, 'application/json; charset=utf-8'),
+    body: manifestBody,
+  })
+
+  if (!manifestResponse.ok) {
+    const detail = await manifestResponse.text().catch(() => '')
+    throw new Error(`上传同步清单失败：${manifestResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
+  }
+
+  return manifest
 }
 
 const validateIncomingDatabase = (incomingPath) => {
@@ -371,59 +707,40 @@ const pushWebDavSnapshot = async (request, response) => {
     return
   }
 
-  let snapshotPath = ''
-
   try {
     await ensureWebDavCollection(config)
-    snapshotPath = createDatabaseSnapshot()
-
-    const databaseUrl = getWebDavUrl(config, databaseName)
-    const databaseBytes = readFileSync(snapshotPath)
-    const uploadResponse = await fetch(databaseUrl, {
-      method: 'PUT',
-      headers: getWebDavHeaders(config, 'application/vnd.sqlite3'),
-      body: databaseBytes,
-    })
-
-    if (!uploadResponse.ok) {
-      const detail = await uploadResponse.text().catch(() => '')
-      throw new Error(`上传 SQLite 快照失败：${uploadResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
-    }
-
-    const manifest = {
-      app: 'xinxiangyi',
-      databaseName,
-      schemaVersion,
-      pushedAt: nowIso(),
-      size: statSync(snapshotPath).size,
-    }
-    const manifestResponse = await fetch(getWebDavUrl(config, 'manifest.json'), {
-      method: 'PUT',
-      headers: getWebDavHeaders(config, 'application/json; charset=utf-8'),
-      body: JSON.stringify(manifest, null, 2),
-    })
-
-    if (!manifestResponse.ok) {
-      const detail = await manifestResponse.text().catch(() => '')
-      throw new Error(`上传同步清单失败：${manifestResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
-    }
-
+    const manifest = await uploadPortableSnapshot(config)
     markLocalContentSynced()
 
     sendJson(response, 200, {
       ok: true,
       direction: 'push',
       remotePath: config.remotePath,
-      file: databaseName,
+      file: portableSnapshotFile,
       size: manifest.size,
       syncedAt: manifest.pushedAt,
     })
   } catch (error) {
     sendJson(response, 502, { error: error instanceof Error ? error.message : 'WebDAV Push 失败。' })
-  } finally {
-    if (snapshotPath) {
-      rmSync(snapshotPath, { force: true })
-    }
+  }
+}
+
+const exportSyncBundle = async (_request, response) => {
+  try {
+    const { manifest } = createLocalSyncBundle({
+      source: 'manual-export',
+    })
+
+    sendJson(response, 200, {
+      ok: true,
+      path: syncBundleDir,
+      remotePath: `/${syncBundleName}`,
+      exportedAt: manifest.generatedAt,
+      files: manifest.files,
+      message: `本地同步包已生成：${syncBundleDir}`,
+    })
+  } catch (error) {
+    sendJson(response, 500, { error: error instanceof Error ? error.message : '生成本地同步包失败。' })
   }
 }
 
@@ -441,6 +758,81 @@ const pullWebDavSnapshot = async (request, response) => {
   const backupPath = resolve(syncDir, `local-backup-${Date.now()}.sqlite`)
 
   try {
+    const snapshotResponse = await fetch(getWebDavUrl(config, portableSnapshotFile), {
+      method: 'GET',
+      headers: getWebDavHeaders(config),
+    })
+
+    if (snapshotResponse.ok) {
+      const raw = await snapshotResponse.text()
+      let parsed
+
+      try {
+        parsed = JSON.parse(raw)
+      } catch {
+        throw new Error('远端跨端同步快照不是合法 JSON 文件。')
+      }
+
+      const snapshot = validatePortableSnapshot(parsed)
+      let remoteManifest = {}
+      const remoteManifestResponse = await fetch(getWebDavUrl(config, portableManifestFile), {
+        method: 'GET',
+        headers: getWebDavHeaders(config),
+      }).catch(() => null)
+
+      if (remoteManifestResponse?.ok) {
+        const remoteManifestText = await remoteManifestResponse.text().catch(() => '')
+
+        try {
+          remoteManifest = JSON.parse(remoteManifestText)
+        } catch {
+          remoteManifest = {}
+        }
+      }
+
+      writeSyncBundleFiles(
+        raw,
+        createPortableManifest(raw, {
+          ...remoteManifest,
+          remotePath: config.remotePath,
+          source: 'webdav-pull',
+          mirroredAt: nowIso(),
+        }),
+      )
+
+      if (existsSync(databasePath)) {
+        copyFileSync(databasePath, backupPath)
+      }
+
+      try {
+        importPortableSnapshot(snapshot)
+      } catch (error) {
+        if (existsSync(backupPath)) {
+          copyFileSync(backupPath, databasePath)
+          db = new DatabaseSync(databasePath)
+          configureDatabaseConnection()
+        }
+
+        throw error
+      }
+
+      sendJson(response, 200, {
+        ok: true,
+        direction: 'pull',
+        remotePath: config.remotePath,
+        file: portableSnapshotFile,
+        size: Buffer.byteLength(raw, 'utf8'),
+        backupPath: existsSync(backupPath) ? backupPath : '',
+        syncedAt: nowIso(),
+      })
+      return
+    }
+
+    if (!isMissingWebDavResource(snapshotResponse.status)) {
+      const detail = await snapshotResponse.text().catch(() => '')
+      throw new Error(`下载跨端同步快照失败：${snapshotResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
+    }
+
     const remoteResponse = await fetch(getWebDavUrl(config, databaseName), {
       method: 'GET',
       headers: getWebDavHeaders(config),
@@ -448,7 +840,10 @@ const pullWebDavSnapshot = async (request, response) => {
 
     if (!remoteResponse.ok) {
       const detail = await remoteResponse.text().catch(() => '')
-      throw new Error(`下载远端 SQLite 快照失败：${remoteResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
+      if (isMissingWebDavResource(remoteResponse.status)) {
+        throw new Error(`远端目录或同步快照不存在：${remoteResponse.status}。请确认 Remote Path 使用 /xinxiangyi-sync；如果是首次使用，点击同步会上传本机快照初始化远端。${detail ? ` ${detail.slice(0, 160)}` : ''}`)
+      }
+      throw new Error(`远端没有跨端同步快照，也没有旧版 SQLite 快照：${remoteResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
     }
 
     writeFileSync(incomingPath, Buffer.from(await remoteResponse.arrayBuffer()))
@@ -476,6 +871,8 @@ const pullWebDavSnapshot = async (request, response) => {
       throw error
     }
 
+    const manifest = await uploadPortableSnapshot(config)
+
     sendJson(response, 200, {
       ok: true,
       direction: 'pull',
@@ -484,6 +881,8 @@ const pullWebDavSnapshot = async (request, response) => {
       size: statSync(databasePath).size,
       backupPath: existsSync(backupPath) ? backupPath : '',
       syncedAt: nowIso(),
+      migratedFile: manifest.file,
+      migratedSize: manifest.size,
     })
   } catch (error) {
     sendJson(response, 502, { error: error instanceof Error ? error.message : 'WebDAV Pull 失败。' })
@@ -1309,6 +1708,11 @@ const route = async (request, response) => {
 
   if (request.method === 'POST' && pathname === '/api/webdav/pull') {
     await pullWebDavSnapshot(request, response)
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/api/sync-bundle/export') {
+    await exportSyncBundle(request, response)
     return
   }
 

@@ -83,7 +83,7 @@ const getNativePosition = async (): Promise<PositionLike> => {
   let permissions = await Geolocation.checkPermissions()
 
   if (!nativePermissionGranted(permissions.coarseLocation) && !nativePermissionGranted(permissions.location)) {
-    permissions = await Geolocation.requestPermissions({ permissions: ['coarseLocation'] })
+    permissions = await Geolocation.requestPermissions({ permissions: ['location', 'coarseLocation'] })
   }
 
   if (!nativePermissionGranted(permissions.coarseLocation) && !nativePermissionGranted(permissions.location)) {
@@ -113,7 +113,15 @@ const getBrowserPosition = () =>
 
 const getCurrentPosition = async () => {
   if (Capacitor.isNativePlatform()) {
-    return getNativePosition()
+    try {
+      return await getNativePosition()
+    } catch (nativeError) {
+      try {
+        return await getBrowserPosition()
+      } catch {
+        throw nativeError
+      }
+    }
   }
 
   return getBrowserPosition()

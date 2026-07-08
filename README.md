@@ -38,7 +38,7 @@
 - 以“心情原点”为中心，把文本向量投影到愉悦度、唤醒度、恢复力、清晰度等轴。
 - 用历史记录微调每个用户自己的轴权重。
 - 用相似日回顾找出重复模式，例如“高能紧绷后第二天低能承压”或“散步图片出现后修复感升高”。
-- 当前先用 WebDAV 同步 SQLite 整库快照；后续再升级为基于变更日志的跨设备增量合并。
+- 当前先用 WebDAV 同步跨端 JSON 快照；后续再升级为基于变更日志的跨设备增量合并。
 
 ## 数据结构
 
@@ -50,7 +50,7 @@ SQLite 数据库文件：`data/xinxiangyi.sqlite`
 - `changes`：同步队列，包含实体类型、实体 ID、操作、设备 ID、时间和快照。
 - `weeklySummaries`：周总结缓存，包含周起始日期、模型、服务商、总结正文和更新时间。
 
-当前 WebDAV 同步会上传/下载完整 SQLite 快照。后续增量同步可从 `changes` 表生成远端增量包，并把图片附件从 BLOB 拆到独立对象存储。
+本地 SQLite 只负责当前设备的高效读写；WebDAV 不直接同步本机 `data/` 目录或裸 SQLite 文件，而是同步跨端快照。桌面端可生成一个独立的本地同步包目录：`sync/xinxiangyi-sync/`。后续增量同步可从 `changes` 表生成远端增量包，并把图片附件从 BLOB 拆到独立对象存储。
 
 ## 页面框架
 
@@ -77,17 +77,43 @@ SQLite 数据库文件：`data/xinxiangyi.sqlite`
 - Server URL 默认：`https://dav.jianguoyun.com/dav/`
 - Username：坚果云账号邮箱
 - Password：坚果云应用密码
-- Remote Path 默认：`/xinxiangyi`
+- Remote Path 默认：`/xinxiangyi-sync`
 
-当前版本采用整库快照同步，但界面不要求用户选择上传或拉取：
+当前版本采用跨端快照同步，但界面不要求用户选择上传或拉取：
 
-1. 本地有未同步内容时，自动生成一致快照并上传 `xinxiangyi.sqlite` 与 `manifest.json`。
-2. 本地没有未同步内容时，自动尝试下载远端 `xinxiangyi.sqlite`。
-3. 下载远端快照时，会先通过 `PRAGMA integrity_check` 再替换本地数据库。
-4. 替换前会在 `data/.sync/` 保留一份本地备份。
+1. 本地有未同步内容时，自动生成跨端快照并上传 `xinxiangyi-native-snapshot.json` 与 `manifest-native.json`。
+2. 本地没有未同步内容时，自动尝试下载远端 `xinxiangyi-native-snapshot.json`。
+3. 桌面端仍可兼容导入旧版 `xinxiangyi.sqlite`，并会在导入后迁移生成跨端 JSON 快照。
+4. 桌面端替换本地数据前会在 `data/.sync/` 保留一份本地备份。
 5. 设置页可开启“打开后每天自动同步”，每天首次打开应用时执行一次。
 
-这套方式适合单人多设备备份/恢复。它还不是实时增量同步，也不会处理“两个设备同时编辑同一天”的冲突。后续要做真正多端同步时，再基于 `changes`、`updatedAt`、`deviceId` 和 `syncState` 做合并策略。
+不要把本机 `data/` 整个目录作为坚果云同步目录。`data/` 是某一台设备的本地工作区，里面可能包含 SQLite 主库、临时文件和备份。坚果云中建议只创建一个专用远端目录，例如 `/xinxiangyi-sync`，让应用通过 WebDAV 在里面维护同步协议文件。
+
+桌面端设置页提供“生成本地同步包”按钮。它会把当前需要同步的文件整理到：
+
+```text
+sync/xinxiangyi-sync/
+```
+
+当前同步包包含：
+
+```text
+sync/xinxiangyi-sync/
+├── xinxiangyi-native-snapshot.json
+├── manifest-native.json
+└── README.txt
+```
+
+手动上传或手动配置坚果云时，只需要上传 `sync/xinxiangyi-sync/` 这个目录里的内容。不要上传 `data/`、`data/.sync/` 或 `data/xinxiangyi.sqlite`。
+
+当前先采用自用简单同步模式：
+
+1. 在 Mac、Windows 或 Android 上编辑后，点击应用里的同步按钮上传当前设备快照。
+2. 换到另一台设备时，先点击同步按钮拉取云端快照，再开始编辑。
+3. 如果某台设备需要强制恢复云端数据，可以在设置页使用“从云端恢复”。
+4. 当前阶段暂不做复杂冲突合并；如果多台设备同时离线编辑，最后上传的快照会成为云端版本。
+
+这套方式适合单人多设备备份/恢复。它还不是实时增量同步，也不会处理“两个设备同时编辑同一天”的复杂冲突。后续要做真正多端同步时，再基于 `changes`、`updatedAt`、`deviceId`、`syncState`、附件哈希和远端 manifest 做合并策略。
 
 ## 开发
 

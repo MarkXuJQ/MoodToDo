@@ -66,6 +66,8 @@ export type DatabaseStatus = {
   driver: string
   databaseName: string
   databasePath: string
+  syncBundleName?: string
+  syncBundlePath?: string
   apiBaseUrl: string
   schemaVersion: number
   lastLoadedAt: string

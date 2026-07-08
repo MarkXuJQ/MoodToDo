@@ -108,6 +108,8 @@ export type WebDavSyncResult = {
   size: number
   syncedAt: string
   backupPath?: string
+  migratedFile?: string
+  migratedSize?: number
 }
 
 export type WebDavConnectionTestResult = {
@@ -120,10 +122,27 @@ export type WebDavConnectionTestResult = {
   message: string
 }
 
+export type SyncBundleFile = {
+  name: string
+  role: string
+  size?: number
+}
+
+export type SyncBundleExportResult = {
+  ok: true
+  path: string
+  remotePath: string
+  exportedAt: string
+  files: SyncBundleFile[]
+  message: string
+}
+
 export type LocalDatabaseMeta = {
   driver: string
   databaseName: string
   databasePath: string
+  syncBundleName?: string
+  syncBundlePath?: string
   apiBaseUrl: string
   schemaVersion: number
 }
@@ -254,6 +273,8 @@ const normalizeLocalStatePayload = (payload: Partial<LocalStatePayload>): LocalS
     driver: payload.meta?.driver ?? localDatabaseDriver,
     databaseName: payload.meta?.databaseName ?? localDatabaseName,
     databasePath: payload.meta?.databasePath ?? '',
+    syncBundleName: payload.meta?.syncBundleName ?? '',
+    syncBundlePath: payload.meta?.syncBundlePath ?? '',
     apiBaseUrl: payload.meta?.apiBaseUrl ?? apiBaseUrl,
     schemaVersion: payload.meta?.schemaVersion ?? 0,
   },
@@ -389,6 +410,16 @@ export const testWebDavConnection = async (config: WebDavSyncConfig) => {
   return apiFetch<WebDavConnectionTestResult>('/api/webdav/test', {
     method: 'POST',
     body: JSON.stringify(config),
+  })
+}
+
+export const exportSyncBundle = async () => {
+  if (shouldUseNativeDatabase()) {
+    throw new Error('Android 端暂无本地文件夹导出能力。请使用 WebDAV 同步，或在桌面端生成本地同步包。')
+  }
+
+  return apiFetch<SyncBundleExportResult>('/api/sync-bundle/export', {
+    method: 'POST',
   })
 }
 

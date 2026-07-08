@@ -28,7 +28,7 @@ export const defaultWebDavConfig: WebDavConfig = {
   url: 'https://dav.jianguoyun.com/dav/',
   username: '',
   password: '',
-  remotePath: '/xinxiangyi',
+  remotePath: '/xinxiangyi-sync',
   autoSyncDaily: false,
 }
 
@@ -105,7 +105,16 @@ export const readWebDavConfig = (): WebDavConfig => {
   if (!raw) return defaultWebDavConfig
 
   try {
-    return { ...defaultWebDavConfig, ...JSON.parse(raw) }
+    const parsed = { ...defaultWebDavConfig, ...JSON.parse(raw) }
+    const remotePath = typeof parsed.remotePath === 'string' ? parsed.remotePath.trim() : ''
+
+    if (remotePath === '/data') {
+      const migrated = { ...parsed, remotePath: defaultWebDavConfig.remotePath }
+      window.localStorage.setItem(webDavConfigStorageKey, JSON.stringify(migrated))
+      return migrated
+    }
+
+    return parsed
   } catch {
     return defaultWebDavConfig
   }
