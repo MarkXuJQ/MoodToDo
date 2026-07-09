@@ -3,10 +3,11 @@ const { appendFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { pathToFileURL } = require('node:url')
+const { getLocalApiBaseUrl, localApiDefaults } = require('../config/local-api.cjs')
 
-const apiHost = '127.0.0.1'
-const apiPort = process.env.XINXIANGYI_API_PORT ?? '18787'
-const apiBaseUrl = `http://${apiHost}:${apiPort}`
+const apiHost = localApiDefaults.host
+const apiPort = process.env.XINXIANGYI_API_PORT ?? localApiDefaults.desktopPort
+const apiBaseUrl = getLocalApiBaseUrl({ host: apiHost, port: apiPort })
 
 const getLogPath = () => {
   try {

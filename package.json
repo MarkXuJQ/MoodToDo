@@ -12,6 +12,8 @@
     "postinstall": "node scripts/patch-capacitor-android.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "icons:sync": "node scripts/sync-icons.mjs",
+    "verify:assets": "node scripts/verify-assets.mjs",
     "preview": "vite preview",
     "smoke:local": "node scripts/smoke-local.mjs",
     "patch:capacitor": "node scripts/patch-capacitor-android.mjs",
@@ -27,6 +29,7 @@
     },
     "files": [
       "dist/**",
+      "config/**",
       "electron/**",
       "server/**",
       "package.json",
@@ -34,6 +37,7 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "icon": "assets/brand/app-icon.icns",
       "target": [
         "dmg"
       ]

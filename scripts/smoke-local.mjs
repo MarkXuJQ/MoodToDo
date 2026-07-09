@@ -63,10 +63,10 @@ try {
   await page.getByPlaceholder('今天的主线').fill(title)
   await page.getByPlaceholder('比如：上午焦虑但有推进，下午散步后恢复专注').fill('今天状态平稳，完成了本地数据库写入验证。')
   await page.getByPlaceholder('完成了什么，卡在哪里，下一步是什么').fill('测试保存日记、新增 todo、完成 todo。')
-  await page.locator('input[type="file"]').setInputFiles('public/favicon.svg')
+  await page.locator('input[type="file"]').setInputFiles('scripts/fixtures/sample-attachment.svg')
   await page.locator('.attachment-thumb').first().waitFor({ state: 'visible', timeout: 5000 })
   await page.locator('.attachment-media').first().click()
-  await page.getByRole('dialog', { name: 'favicon.svg' }).waitFor({ state: 'visible', timeout: 5000 })
+  await page.getByRole('dialog', { name: 'sample-attachment.svg' }).waitFor({ state: 'visible', timeout: 5000 })
   await page.getByRole('button', { name: '关闭预览' }).nth(1).click()
   await page.getByRole('button', { name: '保存' }).click()
 

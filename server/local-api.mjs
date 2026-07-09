@@ -1,10 +1,13 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 
+const require = createRequire(import.meta.url)
+const { localApiDefaults } = require('../config/local-api.cjs')
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = process.env.XINXIANGYI_DATA_DIR
   ? resolve(process.env.XINXIANGYI_DATA_DIR)
@@ -17,8 +20,8 @@ const syncBundleRootDir = process.env.XINXIANGYI_SYNC_BUNDLE_DIR
   ? resolve(process.env.XINXIANGYI_SYNC_BUNDLE_DIR)
   : resolve(projectRoot, 'sync')
 const syncBundleDir = resolve(syncBundleRootDir, syncBundleName)
-const port = Number(process.env.XINXIANGYI_API_PORT ?? 8787)
-const host = process.env.XINXIANGYI_API_HOST ?? '127.0.0.1'
+const port = Number(process.env.XINXIANGYI_API_PORT ?? localApiDefaults.browserPort)
+const host = process.env.XINXIANGYI_API_HOST ?? localApiDefaults.host
 const schemaVersion = 6
 const portableSnapshotFile = 'xinxiangyi-native-snapshot.json'
 const portableManifestFile = 'manifest-native.json'
