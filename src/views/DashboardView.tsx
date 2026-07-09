@@ -8,22 +8,8 @@ import { ProgressRing, TrendChart, type TrendPoint } from '../components/ui/data
 import { Metric } from '../components/ui/stat-primitives'
 import { addDays } from '../lib/calendar'
 import type { AttachmentRecord, JournalEntry, TodoItem } from '../lib/db'
-import type { DraftState } from '../types/app'
+import type { DashboardMetricCard, DraftState, MoodBreakdownItem } from '../types/app'
 import { formatCountdownDays, getCountdownDaysRemaining, getCountdownTone } from '../utils/countdown'
-
-type DashboardMetricCard = {
-  id: string
-  label: string
-  value: string
-  tone?: string
-}
-
-type MoodBreakdownItem = {
-  id: string
-  label: string
-  value: number
-  note: string
-}
 
 const getNearbyDateKeys = (dateKey: string) => [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((offset) => addDays(dateKey, offset))
 

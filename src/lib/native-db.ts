@@ -50,6 +50,11 @@ const nativeDatabaseId = 'xinxiangyi'
 const nativeDatabaseName = 'xinxiangyi.sqlite'
 const nativeSnapshotFile = 'xinxiangyi-native-snapshot.json'
 const nativeManifestFile = 'manifest-native.json'
+const nativeAttachmentDir = 'attachments'
+const nativeAttachmentExtension = '.b64'
+const compactChangePayloadJson = 'null'
+const changeLogRetentionDays = 60
+const changeLogRetentionMs = changeLogRetentionDays * 24 * 60 * 60 * 1000
 const sqlite = new SQLiteConnection(CapacitorSQLite)
 let webDavHadAuthSuccess = false
 
@@ -57,6 +62,7 @@ let dbConnection: SQLiteDBConnection | null = null
 let dbConnectionPromise: Promise<SQLiteDBConnection> | null = null
 
 const nowIso = () => new Date().toISOString()
+const getChangeLogRetentionCutoffIso = () => new Date(Date.now() - changeLogRetentionMs).toISOString()
 
 const createId = (prefix: string) => {
   const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -132,6 +138,74 @@ const readNumber = (row: DbRow, key: string, fallback = 0) => {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
+type PortableDefaultValue = string | number | null
+
+const toPortableRow = (row: DbRow, defaults: Record<string, PortableDefaultValue> = {}): DbRow => {
+  const next: DbRow = { ...row }
+  delete next.sync_state
+
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    if (next[key] == null || next[key] === defaultValue) {
+      delete next[key]
+    }
+  }
+
+  return next
+}
+
+const toPortableBaseRow = (row: DbRow) => toPortableRow(row)
+
+const toPortableEntryRow = (row: DbRow) =>
+  toPortableRow(row, {
+    weather_text: '',
+    location_text: '',
+  })
+
+const toPortableTodoRow = (row: DbRow) =>
+  toPortableRow(row, {
+    description: '',
+    priority: 'normal',
+    lane_id: 'inbox',
+    countdown_enabled: 0,
+    done: 0,
+    completed_at: null,
+  })
+
+const toPortableChangeRow = (row: DbRow): DbRow => ({
+  entity: readString(row, 'entity'),
+  entity_id: readString(row, 'entity_id'),
+  operation: readString(row, 'operation'),
+  changed_at: readString(row, 'changed_at', nowIso()),
+  device_id: readString(row, 'device_id', 'native'),
+  payload_json: compactChangePayloadJson,
+})
+
+const getSafeAttachmentFileName = (row: DbRow) => {
+  const id = readString(row, 'id')
+  const safeId = id.replace(/[^a-zA-Z0-9._-]/g, '_') || 'attachment'
+
+  return `${safeId}${nativeAttachmentExtension}`
+}
+
+const getAttachmentDataPath = (row: DbRow) => `${nativeAttachmentDir}/${getSafeAttachmentFileName(row)}`
+
+const hasInlineAttachmentData = (row: DbRow) => row.data_base64 != null || row.dataBase64 != null
+
+const readInlineAttachmentDataBase64 = (row: DbRow) => {
+  if (row.data_base64 != null) return readString(row, 'data_base64')
+  if (row.dataBase64 != null) return readString(row, 'dataBase64')
+  return null
+}
+
+const toPortableAttachmentRow = (row: DbRow): DbRow => {
+  const next = toPortableBaseRow(row)
+  delete next.data_base64
+  delete next.dataBase64
+  next.data_path = getAttachmentDataPath(row)
+
+  return next
+}
+
 const readOptionalString = (row: DbRow, key: string) => {
   const value = row[key]
 
@@ -187,7 +261,7 @@ const appendChange = (
   entity: ChangeEntity,
   entityId: string,
   operation: ChangeOperation,
-  payload: unknown,
+  _payload: unknown,
   deviceId: string,
   transaction = true,
 ) =>
@@ -197,7 +271,7 @@ const appendChange = (
       INSERT INTO changes (entity, entity_id, operation, changed_at, device_id, sync_state, payload_json)
       VALUES (?, ?, ?, ?, ?, 'pending', ?)
     `,
-    [entity, entityId, operation, nowIso(), deviceId, JSON.stringify(payload)],
+    [entity, entityId, operation, nowIso(), deviceId, compactChangePayloadJson],
     transaction,
   )
 
@@ -304,6 +378,15 @@ const compactChangeRows = (rows: DbRow[]) => {
   )
 }
 
+const getRetainedChangeRows = (rows: DbRow[]) => {
+  const cutoff = getChangeLogRetentionCutoffIso()
+
+  return compactChangeRows(rows).filter((row) => {
+    if (readString(row, 'sync_state', 'synced') === 'pending') return true
+    return readString(row, 'changed_at').localeCompare(cutoff) >= 0
+  })
+}
+
 const buildTombstones = (changes: DbRow[]) => {
   const tombstones = new Map<string, string>()
 
@@ -354,9 +437,9 @@ const snapshotArray = (snapshot: NativeSnapshot, key: keyof NativeSnapshot) => {
 
 const mergeNativeSnapshots = (localSnapshot: NativeSnapshot, remoteSnapshot: NativeSnapshot): NativeSnapshot => {
   const changes = compactChangeRows([
-    ...snapshotArray(remoteSnapshot, 'changes'),
+    ...getRetainedChangeRows(snapshotArray(remoteSnapshot, 'changes')),
     ...snapshotArray(localSnapshot, 'changes'),
-  ])
+  ]).map(toPortableChangeRow)
   const tombstones = buildTombstones(changes)
   const entries = mergeRowsByKey(
     'entry',
@@ -416,20 +499,28 @@ const mergeNativeSnapshots = (localSnapshot: NativeSnapshot, remoteSnapshot: Nat
       readString(right, 'updated_at').localeCompare(readString(left, 'updated_at')),
     )
 
-  return {
+  const snapshot: NativeSnapshot = {
     app: 'xinxiangyi',
     format: 'xinxiangyi-native-json',
     schemaVersion,
     exportedAt: nowIso(),
-    entries,
-    todos,
-    board_lanes: boardLanes,
-    attachments,
+    entries: entries.map(toPortableEntryRow),
+    todos: todos.map(toPortableTodoRow),
+    board_lanes: boardLanes.map(toPortableBaseRow),
+    attachments: attachments.map(toPortableAttachmentRow),
     changes,
-    weeklySummaries,
-    metricDefinitions,
-    metricRecords,
+    weeklySummaries: weeklySummaries.map(toPortableBaseRow),
   }
+
+  if (metricDefinitions.length) {
+    snapshot.metricDefinitions = metricDefinitions.map(toPortableBaseRow)
+  }
+
+  if (metricRecords.length) {
+    snapshot.metricRecords = metricRecords.map(toPortableBaseRow)
+  }
+
+  return snapshot
 }
 
 const ensureColumn = async (db: SQLiteDBConnection, table: string, column: string, definition: string) => {
@@ -548,11 +639,15 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
     CREATE INDEX IF NOT EXISTS idx_entries_date_key ON entries(date_key);
     CREATE INDEX IF NOT EXISTS idx_todos_date_key ON todos(date_key);
     CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
+    CREATE INDEX IF NOT EXISTS idx_todos_lane_done_created_at ON todos(lane_id, done, created_at);
+    CREATE INDEX IF NOT EXISTS idx_todos_date_done ON todos(date_key, done);
     CREATE INDEX IF NOT EXISTS idx_attachments_entry_id ON attachments(entry_id);
     CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
     CREATE INDEX IF NOT EXISTS idx_board_lanes_created_at ON board_lanes(created_at);
     CREATE INDEX IF NOT EXISTS idx_changes_changed_at ON changes(changed_at);
     CREATE INDEX IF NOT EXISTS idx_changes_sync_state ON changes(sync_state);
+    CREATE INDEX IF NOT EXISTS idx_changes_entity_id_changed_at ON changes(entity, entity_id, changed_at);
+    CREATE INDEX IF NOT EXISTS idx_weekly_summaries_updated_at ON weekly_summaries(updated_at);
     CREATE INDEX IF NOT EXISTS idx_metric_records_metric_id ON metric_records(metric_id);
     CREATE INDEX IF NOT EXISTS idx_metric_records_date_key ON metric_records(date_key);
   `,
@@ -566,6 +661,14 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
   await ensureColumn(db, 'todos', 'lane_id', `lane_id TEXT NOT NULL DEFAULT 'inbox'`)
   await ensureColumn(db, 'todos', 'countdown_enabled', `countdown_enabled INTEGER NOT NULL DEFAULT 0`)
   await ensureColumn(db, 'attachments', 'data_base64', `data_base64 TEXT NOT NULL DEFAULT ''`)
+  await ensureColumn(db, 'changes', 'payload_json', `payload_json TEXT NOT NULL DEFAULT 'null'`)
+  await runStatement(db, `UPDATE changes SET payload_json = ? WHERE payload_json <> ?`, [
+    compactChangePayloadJson,
+    compactChangePayloadJson,
+  ])
+  await runStatement(db, `DELETE FROM changes WHERE sync_state <> 'pending' AND changed_at < ?`, [
+    getChangeLogRetentionCutoffIso(),
+  ])
   await runStatement(db, `PRAGMA user_version = ${schemaVersion}`)
 }
 
@@ -605,6 +708,73 @@ const getDatabase = () => {
 
   return dbConnectionPromise
 }
+
+type DetachedAttachmentResolver = (row: DbRow) => Promise<string | null>
+
+const getLocalNativeAttachmentDataBase64 = async (id: string) => {
+  if (!id) return null
+
+  const db = await getDatabase()
+  const row = await queryFirst(db, 'SELECT data_base64 FROM attachments WHERE id = ?', [id])
+
+  return row ? readString(row, 'data_base64') : null
+}
+
+const getSourceAttachmentDataBase64 = (row: DbRow, sourceSnapshots: NativeSnapshot[] = []) => {
+  const id = readString(row, 'id')
+
+  for (const snapshot of sourceSnapshots) {
+    const sourceRow = snapshotArray(snapshot, 'attachments').find((item) => readString(item, 'id') === id)
+    if (!sourceRow || !hasInlineAttachmentData(sourceRow)) continue
+
+    return readInlineAttachmentDataBase64(sourceRow)
+  }
+
+  return null
+}
+
+const getAttachmentDataBase64ForUpload = async (row: DbRow, sourceSnapshots: NativeSnapshot[] = []) => {
+  if (hasInlineAttachmentData(row)) {
+    return readInlineAttachmentDataBase64(row)
+  }
+
+  return (await getLocalNativeAttachmentDataBase64(readString(row, 'id'))) ?? getSourceAttachmentDataBase64(row, sourceSnapshots)
+}
+
+const resolveNativeAttachmentDataBase64 = async (row: DbRow, resolveDetachedAttachment?: DetachedAttachmentResolver) => {
+  if (hasInlineAttachmentData(row)) {
+    return readInlineAttachmentDataBase64(row)
+  }
+
+  const localDataBase64 = await getLocalNativeAttachmentDataBase64(readString(row, 'id'))
+  if (localDataBase64 != null) {
+    return localDataBase64
+  }
+
+  if (resolveDetachedAttachment) {
+    const remoteDataBase64 = await resolveDetachedAttachment(row)
+    if (remoteDataBase64 != null) {
+      return remoteDataBase64
+    }
+  }
+
+  if (readNumber(row, 'size') === 0) {
+    return ''
+  }
+
+  throw new Error(`附件内容缺失：${readString(row, 'name', readString(row, 'id', 'unknown'))}`)
+}
+
+const prepareNativeAttachmentImports = async (
+  snapshot: NativeSnapshot,
+  resolveDetachedAttachment?: DetachedAttachmentResolver,
+) =>
+  Promise.all(
+    snapshotArray(snapshot, 'attachments').map(async (row) => ({
+      row,
+      dataBase64: await resolveNativeAttachmentDataBase64(row, resolveDetachedAttachment),
+    })),
+  )
 
 const getNativeMeta = async (db: SQLiteDBConnection) => {
   const url = await db.getUrl().then((result) => result.url ?? '').catch(() => '')
@@ -1261,7 +1431,28 @@ const requestWebDav = async (options: HttpOptions, label: string) => {
   })
 }
 
-const syncedRow = (row: DbRow): DbRow => ('sync_state' in row ? { ...row, sync_state: 'synced' } : row)
+const ensureNativeWebDavCollection = async (config: WebDavSyncConfig, ...parts: string[]) => {
+  const segments = getRemoteSegments(config.remotePath, ...parts)
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const remotePath = `/${segments.slice(0, index + 1).join('/')}`
+    const response = await requestWebDav({
+      method: 'MKCOL',
+      url: getWebDavUrl({ ...config, remotePath }),
+      headers: getWebDavHeaders(config),
+    }, `MKCOL ${remotePath}`)
+
+    if (![200, 201, 204, 405].includes(response.status)) {
+      throw new NativeDiagnosticError(`创建 WebDAV 目录失败：${response.status}`, {
+        method: 'MKCOL',
+        url: getWebDavUrl({ ...config, remotePath }),
+        status: response.status,
+        headers: response.headers,
+        dataSnippet: getWebDavResponseSnippet(response),
+      })
+    }
+  }
+}
 
 const createNativeSnapshot = async (): Promise<NativeSnapshot> => {
   const db = await getDatabase()
@@ -1276,20 +1467,28 @@ const createNativeSnapshot = async (): Promise<NativeSnapshot> => {
     queryRows(db, 'SELECT * FROM metric_records ORDER BY date_key DESC, updated_at DESC'),
   ])
 
-  return {
+  const snapshot: NativeSnapshot = {
     app: 'xinxiangyi',
     format: 'xinxiangyi-native-json',
     schemaVersion,
     exportedAt: nowIso(),
-    entries: entries.map(syncedRow),
-    todos: todos.map(syncedRow),
-    board_lanes: boardLanes.map(syncedRow),
-    attachments: attachments.map(syncedRow),
-    changes: compactChangeRows(changes).map(syncedRow),
-    weeklySummaries,
-    metricDefinitions: metricDefinitions.map(syncedRow),
-    metricRecords: metricRecords.map(syncedRow),
+    entries: entries.map(toPortableEntryRow),
+    todos: todos.map(toPortableTodoRow),
+    board_lanes: boardLanes.map(toPortableBaseRow),
+    attachments: attachments.map(toPortableAttachmentRow),
+    changes: getRetainedChangeRows(changes).map(toPortableChangeRow),
+    weeklySummaries: weeklySummaries.map(toPortableBaseRow),
   }
+
+  if (metricDefinitions.length) {
+    snapshot.metricDefinitions = metricDefinitions.map(toPortableBaseRow)
+  }
+
+  if (metricRecords.length) {
+    snapshot.metricRecords = metricRecords.map(toPortableBaseRow)
+  }
+
+  return snapshot
 }
 
 const markNativeContentSynced = async () => {
@@ -1308,7 +1507,11 @@ const markNativeContentSynced = async () => {
 
 const compactNativeChangeLog = async () => {
   const db = await getDatabase()
-  const changes = compactChangeRows(await queryRows(db, 'SELECT * FROM changes ORDER BY changed_at DESC')).map(syncedRow)
+  const changes = getRetainedChangeRows(await queryRows(db, 'SELECT * FROM changes ORDER BY changed_at DESC')).map((row) => ({
+    ...row,
+    sync_state: readString(row, 'sync_state', 'synced'),
+    payload_json: compactChangePayloadJson,
+  }))
 
   await withTransaction(db, async () => {
     await runStatement(db, 'DELETE FROM changes', [], false)
@@ -1318,7 +1521,7 @@ const compactNativeChangeLog = async () => {
         db,
         `
           INSERT INTO changes (entity, entity_id, operation, changed_at, device_id, sync_state, payload_json)
-          VALUES (?, ?, ?, ?, ?, 'synced', ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
         [
           readString(row, 'entity'),
@@ -1326,7 +1529,8 @@ const compactNativeChangeLog = async () => {
           readString(row, 'operation'),
           readString(row, 'changed_at', nowIso()),
           readString(row, 'device_id', 'native'),
-          readString(row, 'payload_json', 'null'),
+          readString(row, 'sync_state', 'synced'),
+          compactChangePayloadJson,
         ],
         false,
       )
@@ -1396,7 +1600,7 @@ const getWebDavText = async (config: WebDavSyncConfig, file: string) => {
   }
 
   if (response.status === 404) {
-    throw new NativeDiagnosticError(`远端同步快照不存在：404 ${file}`, {
+    throw new NativeDiagnosticError(`远端文件不存在：404 ${file}`, {
       method: 'GET',
       url,
       status: response.status,
@@ -1416,6 +1620,41 @@ const getWebDavText = async (config: WebDavSyncConfig, file: string) => {
   }
 
   return getResponseText(response.data)
+}
+
+const uploadNativeAttachmentFiles = async (
+  config: WebDavSyncConfig,
+  snapshot: NativeSnapshot,
+  sourceSnapshots: NativeSnapshot[] = [],
+) => {
+  const attachmentRows = snapshotArray(snapshot, 'attachments')
+  let count = 0
+  let size = 0
+
+  if (!attachmentRows.length) {
+    return {
+      directory: nativeAttachmentDir,
+      count,
+      size,
+    }
+  }
+
+  await ensureNativeWebDavCollection(config, nativeAttachmentDir)
+
+  for (const row of attachmentRows) {
+    const dataBase64 = await getAttachmentDataBase64ForUpload(row, sourceSnapshots)
+    if (dataBase64 == null) continue
+
+    await putWebDavText(config, getAttachmentDataPath(row), dataBase64, 'text/plain; charset=utf-8')
+    count += 1
+    size += getUtf8Size(dataBase64)
+  }
+
+  return {
+    directory: nativeAttachmentDir,
+    count,
+    size,
+  }
 }
 
 const validateNativeSnapshot = (value: unknown): NativeSnapshot => {
@@ -1459,9 +1698,10 @@ const readRemoteNativeSnapshot = async (config: WebDavSyncConfig): Promise<Nativ
   }
 }
 
-const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
+const importNativeSnapshot = async (snapshot: NativeSnapshot, resolveDetachedAttachment?: DetachedAttachmentResolver) => {
   const db = await getDatabase()
   const timestamp = nowIso()
+  const attachmentImports = await prepareNativeAttachmentImports(snapshot, resolveDetachedAttachment)
 
   await withTransaction(db, async () => {
     await runStatement(db, 'DELETE FROM attachments', [], false)
@@ -1542,7 +1782,7 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
       )
     }
 
-    for (const row of snapshot.attachments) {
+    for (const { row, dataBase64 } of attachmentImports) {
       await runStatement(
         db,
         `
@@ -1558,7 +1798,7 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
           readString(row, 'name'),
           readString(row, 'type', 'application/octet-stream'),
           readNumber(row, 'size'),
-          readString(row, 'data_base64'),
+          dataBase64,
           readString(row, 'created_at', timestamp),
           readString(row, 'updated_at', timestamp),
         ],
@@ -1566,7 +1806,7 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
       )
     }
 
-    for (const row of snapshot.changes) {
+    for (const row of getRetainedChangeRows(snapshotArray(snapshot, 'changes'))) {
       await runStatement(
         db,
         `
@@ -1579,7 +1819,7 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
           readString(row, 'operation'),
           readString(row, 'changed_at', timestamp),
           readString(row, 'device_id', 'webdav'),
-          readString(row, 'payload_json', 'null'),
+          compactChangePayloadJson,
         ],
         false,
       )
@@ -1718,10 +1958,15 @@ export const testNativeWebDavConnection = async (
 
 export const pushNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promise<WebDavSyncResult> => {
   const config = getWebDavConfig(payload)
+  await ensureNativeWebDavCollection(config)
   const localSnapshot = await createNativeSnapshot()
   const remoteSnapshot = await readRemoteNativeSnapshot(config)
   const snapshot = remoteSnapshot ? mergeNativeSnapshots(localSnapshot, remoteSnapshot) : localSnapshot
-  const snapshotBody = JSON.stringify(snapshot, null, 2)
+  const uploadedAttachments = await uploadNativeAttachmentFiles(config, snapshot, [
+    localSnapshot,
+    ...(remoteSnapshot ? [remoteSnapshot] : []),
+  ])
+  const snapshotBody = JSON.stringify(snapshot)
   const syncedAt = nowIso()
   const manifest = {
     app: 'xinxiangyi',
@@ -1730,12 +1975,14 @@ export const pushNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promi
     file: nativeSnapshotFile,
     pushedAt: syncedAt,
     size: getUtf8Size(snapshotBody),
+    totalSize: getUtf8Size(snapshotBody) + uploadedAttachments.size,
+    attachmentFiles: uploadedAttachments,
   }
 
   await putWebDavText(config, nativeSnapshotFile, snapshotBody, 'application/json; charset=utf-8')
   await putWebDavText(config, nativeManifestFile, JSON.stringify(manifest, null, 2), 'application/json; charset=utf-8')
   if (remoteSnapshot) {
-    await importNativeSnapshot(snapshot)
+    await importNativeSnapshot(snapshot, (row) => getWebDavText(config, getAttachmentDataPath(row)))
   } else {
     await markNativeContentSynced()
     await compactNativeChangeLog()
@@ -1792,7 +2039,7 @@ export const pullNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promi
 
   const snapshot = validateNativeSnapshot(parsed)
 
-  await importNativeSnapshot(snapshot)
+  await importNativeSnapshot(snapshot, (row) => getWebDavText(config, getAttachmentDataPath(row)))
 
   return {
     ok: true,

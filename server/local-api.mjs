@@ -26,6 +26,12 @@ const schemaVersion = 6
 const portableSnapshotFile = 'xinxiangyi-native-snapshot.json'
 const portableManifestFile = 'manifest-native.json'
 const syncBundleGuideFile = 'README.txt'
+const portableAttachmentDir = 'attachments'
+const portableAttachmentExtension = '.b64'
+const compactChangePayloadJson = 'null'
+const changeLogRetentionDays = 60
+const changeLogRetentionMs = changeLogRetentionDays * 24 * 60 * 60 * 1000
+const getChangeLogRetentionCutoffIso = () => new Date(Date.now() - changeLogRetentionMs).toISOString()
 
 const ensureDirectory = (dir) => {
   try {
@@ -165,11 +171,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_entries_date_key ON entries(date_key);
   CREATE INDEX IF NOT EXISTS idx_todos_date_key ON todos(date_key);
   CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
+  CREATE INDEX IF NOT EXISTS idx_todos_lane_done_created_at ON todos(lane_id, done, created_at);
+  CREATE INDEX IF NOT EXISTS idx_todos_date_done ON todos(date_key, done);
   CREATE INDEX IF NOT EXISTS idx_attachments_entry_id ON attachments(entry_id);
   CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
   CREATE INDEX IF NOT EXISTS idx_board_lanes_created_at ON board_lanes(created_at);
   CREATE INDEX IF NOT EXISTS idx_changes_changed_at ON changes(changed_at);
   CREATE INDEX IF NOT EXISTS idx_changes_sync_state ON changes(sync_state);
+  CREATE INDEX IF NOT EXISTS idx_changes_entity_id_changed_at ON changes(entity, entity_id, changed_at);
+  CREATE INDEX IF NOT EXISTS idx_weekly_summaries_updated_at ON weekly_summaries(updated_at);
   CREATE INDEX IF NOT EXISTS idx_metric_records_metric_id ON metric_records(metric_id);
   CREATE INDEX IF NOT EXISTS idx_metric_records_date_key ON metric_records(date_key);
 `)
@@ -186,6 +196,14 @@ ensureColumn('todos', 'description', `description TEXT NOT NULL DEFAULT ''`)
 ensureColumn('todos', 'priority', `priority TEXT NOT NULL DEFAULT 'normal'`)
 ensureColumn('todos', 'lane_id', `lane_id TEXT NOT NULL DEFAULT 'inbox'`)
 ensureColumn('todos', 'countdown_enabled', `countdown_enabled INTEGER NOT NULL DEFAULT 0`)
+ensureColumn('changes', 'payload_json', `payload_json TEXT NOT NULL DEFAULT 'null'`)
+db.prepare(`UPDATE changes SET payload_json = ? WHERE payload_json <> ?`).run(
+  compactChangePayloadJson,
+  compactChangePayloadJson,
+)
+db.prepare(`DELETE FROM changes WHERE sync_state <> 'pending' AND changed_at < ?`).run(
+  getChangeLogRetentionCutoffIso(),
+)
 
 db.exec(`PRAGMA user_version = ${schemaVersion}`)
 
@@ -367,8 +385,8 @@ const getWebDavUrl = (config, ...parts) => {
   return url
 }
 
-const ensureWebDavCollection = async (config) => {
-  const segments = getRemoteSegments(config.remotePath)
+const ensureWebDavCollection = async (config, ...parts) => {
+  const segments = getRemoteSegments(config.remotePath, ...parts)
 
   for (let index = 0; index < segments.length; index += 1) {
     const url = getWebDavUrl({ ...config, remotePath: `/${segments.slice(0, index + 1).join('/')}` })
@@ -397,9 +415,10 @@ const markLocalContentSynced = () => {
 }
 
 const compactLocalChangeLog = () => {
-  const changes = compactChangeRows(db.prepare(`SELECT * FROM changes ORDER BY changed_at DESC`).all()).map((row) => ({
+  const changes = getRetainedChangeRows(db.prepare(`SELECT * FROM changes ORDER BY changed_at DESC`).all()).map((row) => ({
     ...row,
-    sync_state: 'synced',
+    sync_state: readString(row, 'sync_state', 'synced'),
+    payload_json: compactChangePayloadJson,
   }))
   const insertChange = db.prepare(`
     INSERT INTO changes (entity, entity_id, operation, changed_at, device_id, sync_state, payload_json)
@@ -417,7 +436,7 @@ const compactLocalChangeLog = () => {
         readString(row, 'changed_at', nowIso()),
         readString(row, 'device_id', 'local'),
         readString(row, 'sync_state', 'synced'),
-        readString(row, 'payload_json', 'null'),
+        compactChangePayloadJson,
       )
     }
   })
@@ -438,6 +457,73 @@ const readOptionalString = (row, key) => {
 const readNumber = (row, key, fallback = 0) => {
   const value = Number(row?.[key])
   return Number.isFinite(value) ? value : fallback
+}
+
+const toPortableRow = (row, defaults = {}) => {
+  const next = { ...row }
+  delete next.sync_state
+
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    if (next[key] == null || next[key] === defaultValue) {
+      delete next[key]
+    }
+  }
+
+  return next
+}
+
+const toPortableBaseRow = (row) => toPortableRow(row)
+
+const toPortableEntryRow = (row) =>
+  toPortableRow(row, {
+    weather_text: '',
+    location_text: '',
+  })
+
+const toPortableTodoRow = (row) =>
+  toPortableRow(row, {
+    description: '',
+    priority: 'normal',
+    lane_id: 'inbox',
+    countdown_enabled: 0,
+    done: 0,
+    completed_at: null,
+  })
+
+const toPortableChangeRow = (row) => ({
+  entity: readString(row, 'entity'),
+  entity_id: readString(row, 'entity_id'),
+  operation: readString(row, 'operation'),
+  changed_at: readString(row, 'changed_at', nowIso()),
+  device_id: readString(row, 'device_id', 'local'),
+  payload_json: compactChangePayloadJson,
+})
+
+const getSafeAttachmentFileName = (row) => {
+  const id = readString(row, 'id')
+  const safeId = id.replace(/[^a-zA-Z0-9._-]/g, '_') || 'attachment'
+
+  return `${safeId}${portableAttachmentExtension}`
+}
+
+const getAttachmentDataPath = (row) => `${portableAttachmentDir}/${getSafeAttachmentFileName(row)}`
+
+const hasInlineAttachmentData = (row) => row?.data_base64 != null || row?.dataBase64 != null
+
+const readInlineAttachmentDataBase64 = (row) => {
+  if (row?.data_base64 != null) return readString(row, 'data_base64')
+  if (row?.dataBase64 != null) return readString(row, 'dataBase64')
+  return null
+}
+
+const toPortableAttachmentRow = (row) => {
+  const next = toPortableBaseRow(row)
+  delete next.blob
+  delete next.data_base64
+  delete next.dataBase64
+  next.data_path = getAttachmentDataPath(row)
+
+  return next
 }
 
 const getRowId = (row) => readString(row, 'id')
@@ -465,6 +551,15 @@ const compactChangeRows = (rows) => {
   return [...byEntity.values()].sort((left, right) =>
     readString(right, 'changed_at').localeCompare(readString(left, 'changed_at')),
   )
+}
+
+const getRetainedChangeRows = (rows) => {
+  const cutoff = getChangeLogRetentionCutoffIso()
+
+  return compactChangeRows(rows).filter((row) => {
+    if (readString(row, 'sync_state', 'synced') === 'pending') return true
+    return readString(row, 'changed_at').localeCompare(cutoff) >= 0
+  })
 }
 
 const buildTombstones = (...changeGroups) => {
@@ -507,9 +602,9 @@ const normalizeSnapshotArray = (snapshot, key) => (Array.isArray(snapshot?.[key]
 
 const mergePortableSnapshots = (localSnapshot, remoteSnapshot) => {
   const changes = compactChangeRows([
-    ...normalizeSnapshotArray(remoteSnapshot, 'changes'),
+    ...getRetainedChangeRows(normalizeSnapshotArray(remoteSnapshot, 'changes')),
     ...normalizeSnapshotArray(localSnapshot, 'changes'),
-  ])
+  ]).map(toPortableChangeRow)
   const tombstones = buildTombstones(changes)
   const entries = mergeRowsByKey(
     'entry',
@@ -572,50 +667,62 @@ const mergePortableSnapshots = (localSnapshot, remoteSnapshot) => {
       readString(right, 'updated_at').localeCompare(readString(left, 'updated_at')),
     )
 
-  return {
+  const snapshot = {
     app: 'xinxiangyi',
     format: 'xinxiangyi-native-json',
     schemaVersion,
     exportedAt: nowIso(),
-    entries,
-    todos,
-    board_lanes: boardLanes,
-    attachments,
+    entries: entries.map(toPortableEntryRow),
+    todos: todos.map(toPortableTodoRow),
+    board_lanes: boardLanes.map(toPortableBaseRow),
+    attachments: attachments.map(toPortableAttachmentRow),
     changes,
-    weeklySummaries,
-    metricDefinitions,
-    metricRecords,
+    weeklySummaries: weeklySummaries.map(toPortableBaseRow),
   }
+
+  if (metricDefinitions.length) {
+    snapshot.metricDefinitions = metricDefinitions.map(toPortableBaseRow)
+  }
+
+  if (metricRecords.length) {
+    snapshot.metricRecords = metricRecords.map(toPortableBaseRow)
+  }
+
+  return snapshot
 }
 
 const createPortableSnapshot = () => {
+  const entries = db.prepare(`SELECT * FROM entries ORDER BY date_key DESC`).all()
+  const todos = db.prepare(`SELECT * FROM todos ORDER BY created_at DESC`).all()
+  const boardLanes = db.prepare(`SELECT * FROM board_lanes ORDER BY created_at ASC`).all()
   const attachmentRows = db.prepare(`SELECT * FROM attachments ORDER BY created_at DESC`).all()
+  const changes = getRetainedChangeRows(db.prepare(`SELECT * FROM changes ORDER BY changed_at DESC`).all())
+  const weeklySummaries = db.prepare(`SELECT * FROM weekly_summaries ORDER BY updated_at DESC`).all()
+  const metricDefinitions = db.prepare(`SELECT * FROM metric_definitions ORDER BY created_at DESC`).all()
+  const metricRecords = db.prepare(`SELECT * FROM metric_records ORDER BY created_at DESC`).all()
 
-  return {
+  const snapshot = {
     app: 'xinxiangyi',
     format: 'xinxiangyi-native-json',
     schemaVersion,
     exportedAt: nowIso(),
-    entries: db.prepare(`SELECT * FROM entries ORDER BY date_key DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
-    todos: db.prepare(`SELECT * FROM todos ORDER BY created_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
-    board_lanes: db.prepare(`SELECT * FROM board_lanes ORDER BY created_at ASC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
-    attachments: attachmentRows.map((row) => {
-      const { blob, ...rest } = row
-
-      return {
-        ...rest,
-        data_base64: Buffer.from(blob ?? '').toString('base64'),
-        sync_state: 'synced',
-      }
-    }),
-    changes: compactChangeRows(db.prepare(`SELECT * FROM changes ORDER BY changed_at DESC`).all()).map((row) => ({
-      ...row,
-      sync_state: 'synced',
-    })),
-    weeklySummaries: db.prepare(`SELECT * FROM weekly_summaries ORDER BY updated_at DESC`).all(),
-    metricDefinitions: db.prepare(`SELECT * FROM metric_definitions ORDER BY created_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
-    metricRecords: db.prepare(`SELECT * FROM metric_records ORDER BY created_at DESC`).all().map((row) => ({ ...row, sync_state: 'synced' })),
+    entries: entries.map(toPortableEntryRow),
+    todos: todos.map(toPortableTodoRow),
+    board_lanes: boardLanes.map(toPortableBaseRow),
+    attachments: attachmentRows.map(toPortableAttachmentRow),
+    changes: changes.map(toPortableChangeRow),
+    weeklySummaries: weeklySummaries.map(toPortableBaseRow),
   }
+
+  if (metricDefinitions.length) {
+    snapshot.metricDefinitions = metricDefinitions.map(toPortableBaseRow)
+  }
+
+  if (metricRecords.length) {
+    snapshot.metricRecords = metricRecords.map(toPortableBaseRow)
+  }
+
+  return snapshot
 }
 
 const validatePortableSnapshot = (value) => {
@@ -634,6 +741,72 @@ const validatePortableSnapshot = (value) => {
   return value
 }
 
+const getLocalAttachmentDataBase64 = (id) => {
+  if (!id) return null
+
+  const row = db.prepare('SELECT blob FROM attachments WHERE id = ?').get(id)
+  if (!row) return null
+
+  return Buffer.from(row.blob ?? '').toString('base64')
+}
+
+const getSourceAttachmentDataBase64 = (row, sourceSnapshots = []) => {
+  const id = readString(row, 'id')
+
+  for (const snapshot of sourceSnapshots) {
+    const sourceRow = normalizeSnapshotArray(snapshot, 'attachments').find((item) => readString(item, 'id') === id)
+    if (!sourceRow || !hasInlineAttachmentData(sourceRow)) continue
+
+    return readInlineAttachmentDataBase64(sourceRow)
+  }
+
+  return null
+}
+
+const getAttachmentDataBase64ForWrite = (row, sourceSnapshots = []) => {
+  if (hasInlineAttachmentData(row)) {
+    return readInlineAttachmentDataBase64(row)
+  }
+
+  return getLocalAttachmentDataBase64(readString(row, 'id')) ?? getSourceAttachmentDataBase64(row, sourceSnapshots)
+}
+
+const writeSyncBundleAttachmentFiles = (snapshot) => {
+  const attachmentRows = normalizeSnapshotArray(snapshot, 'attachments')
+  const attachmentDir = resolve(syncBundleDir, portableAttachmentDir)
+  let count = 0
+  let size = 0
+
+  rmSync(attachmentDir, { recursive: true, force: true })
+
+  if (!attachmentRows.length) {
+    return {
+      directory: portableAttachmentDir,
+      count,
+      size,
+    }
+  }
+
+  mkdirSync(attachmentDir, { recursive: true })
+
+  for (const row of attachmentRows) {
+    const dataBase64 = getAttachmentDataBase64ForWrite(row)
+    if (dataBase64 == null) continue
+
+    const filePath = resolve(syncBundleDir, getAttachmentDataPath(row))
+    mkdirSync(dirname(filePath), { recursive: true })
+    writeFileSync(filePath, dataBase64)
+    count += 1
+    size += Buffer.byteLength(dataBase64, 'utf8')
+  }
+
+  return {
+    directory: portableAttachmentDir,
+    count,
+    size,
+  }
+}
+
 const getSyncBundleGuide = (manifest) => `心象仪本地同步包
 
 这个文件夹可以作为 WebDAV / 坚果云远端同步目录的内容。
@@ -642,7 +815,8 @@ const getSyncBundleGuide = (manifest) => `心象仪本地同步包
 ${manifest.recommendedRemotePath}
 
 需要上传的文件：
-- ${portableSnapshotFile}: 跨端数据快照，包含日记、Todo、周总结和当前版本附件数据。
+- ${portableSnapshotFile}: 跨端数据快照，包含日记、Todo、周总结和附件元数据。
+- ${portableAttachmentDir}/: 附件内容文件，每个附件一个独立 .b64 文件。
 - ${portableManifestFile}: 同步清单，记录快照格式、schema、生成时间和大小。
 
 不需要上传：
@@ -673,9 +847,33 @@ const writeSyncBundleFiles = (snapshotBody, manifest) => {
   return manifestBody
 }
 
-const createPortableManifest = (snapshotBody, extra = {}) => {
+const createPortableManifest = (snapshotBody, extra = {}, attachmentFiles = { directory: portableAttachmentDir, count: 0, size: 0 }) => {
   const generatedAt = nowIso()
   const snapshotSize = Buffer.byteLength(snapshotBody, 'utf8')
+  const files = [
+    {
+      name: portableSnapshotFile,
+      role: 'snapshot',
+      size: snapshotSize,
+    },
+    {
+      name: portableManifestFile,
+      role: 'manifest',
+    },
+    {
+      name: syncBundleGuideFile,
+      role: 'guide',
+    },
+  ]
+
+  if (attachmentFiles.count > 0) {
+    files.push({
+      name: attachmentFiles.directory,
+      role: 'attachments',
+      size: attachmentFiles.size,
+      count: attachmentFiles.count,
+    })
+  }
 
   return {
     app: 'xinxiangyi',
@@ -688,28 +886,17 @@ const createPortableManifest = (snapshotBody, extra = {}) => {
     generatedAt,
     pushedAt: generatedAt,
     size: snapshotSize,
-    files: [
-      {
-        name: portableSnapshotFile,
-        role: 'snapshot',
-        size: snapshotSize,
-      },
-      {
-        name: portableManifestFile,
-        role: 'manifest',
-      },
-      {
-        name: syncBundleGuideFile,
-        role: 'guide',
-      },
-    ],
+    totalSize: snapshotSize + attachmentFiles.size,
+    attachmentFiles,
+    files,
     ...extra,
   }
 }
 
 const createLocalSyncBundle = (extra = {}, snapshot = createPortableSnapshot()) => {
-  const snapshotBody = JSON.stringify(snapshot, null, 2)
-  const manifest = createPortableManifest(snapshotBody, extra)
+  const snapshotBody = JSON.stringify(snapshot)
+  const attachmentFiles = writeSyncBundleAttachmentFiles(snapshot)
+  const manifest = createPortableManifest(snapshotBody, extra, attachmentFiles)
   const manifestBody = writeSyncBundleFiles(snapshotBody, manifest)
 
   return {
@@ -749,8 +936,101 @@ const readRemotePortableSnapshot = async (config) => {
   throw new Error(`下载跨端同步快照失败：${snapshotResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
 }
 
-const importPortableSnapshot = (snapshot) => {
+const getWebDavTextFile = async (config, file) => {
+  const response = await fetch(getWebDavUrl(config, file), {
+    method: 'GET',
+    headers: getWebDavHeaders(config),
+  })
+
+  if (response.ok) {
+    return response.text()
+  }
+
+  const detail = await response.text().catch(() => '')
+  throw new Error(`下载远端文件失败：${file} ${response.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
+}
+
+const putWebDavTextFile = async (config, file, body, contentType = 'text/plain; charset=utf-8') => {
+  const response = await fetch(getWebDavUrl(config, file), {
+    method: 'PUT',
+    headers: getWebDavHeaders(config, contentType),
+    body,
+  })
+
+  if (response.ok) {
+    return response
+  }
+
+  const detail = await response.text().catch(() => '')
+  throw new Error(`上传远端文件失败：${file} ${response.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
+}
+
+const uploadPortableAttachmentFiles = async (config, snapshot, sourceSnapshots = []) => {
+  const attachmentRows = normalizeSnapshotArray(snapshot, 'attachments')
+  let count = 0
+  let size = 0
+
+  if (!attachmentRows.length) {
+    return {
+      directory: portableAttachmentDir,
+      count,
+      size,
+    }
+  }
+
+  await ensureWebDavCollection(config, portableAttachmentDir)
+
+  for (const row of attachmentRows) {
+    const dataBase64 = getAttachmentDataBase64ForWrite(row, sourceSnapshots)
+    if (dataBase64 == null) continue
+
+    await putWebDavTextFile(config, getAttachmentDataPath(row), dataBase64)
+    count += 1
+    size += Buffer.byteLength(dataBase64, 'utf8')
+  }
+
+  return {
+    directory: portableAttachmentDir,
+    count,
+    size,
+  }
+}
+
+const resolvePortableAttachmentDataBase64 = async (row, resolveDetachedAttachment) => {
+  if (hasInlineAttachmentData(row)) {
+    return readInlineAttachmentDataBase64(row)
+  }
+
+  const localDataBase64 = getLocalAttachmentDataBase64(readString(row, 'id'))
+  if (localDataBase64 != null) {
+    return localDataBase64
+  }
+
+  if (resolveDetachedAttachment) {
+    const remoteDataBase64 = await resolveDetachedAttachment(row)
+    if (remoteDataBase64 != null) {
+      return remoteDataBase64
+    }
+  }
+
+  if (readNumber(row, 'size') === 0) {
+    return ''
+  }
+
+  throw new Error(`附件内容缺失：${readString(row, 'name', readString(row, 'id', 'unknown'))}`)
+}
+
+const preparePortableAttachmentImports = async (snapshot, resolveDetachedAttachment) =>
+  Promise.all(
+    normalizeSnapshotArray(snapshot, 'attachments').map(async (row) => ({
+      row,
+      dataBase64: await resolvePortableAttachmentDataBase64(row, resolveDetachedAttachment),
+    })),
+  )
+
+const importPortableSnapshot = async (snapshot, options = {}) => {
   const timestamp = nowIso()
+  const attachmentImports = await preparePortableAttachmentImports(snapshot, options.resolveDetachedAttachment)
 
   transaction(() => {
     db.prepare('DELETE FROM attachments').run()
@@ -825,8 +1105,8 @@ const importPortableSnapshot = (snapshot) => {
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
     `)
-    for (const row of snapshot.attachments) {
-      const blob = Buffer.from(readString(row, 'data_base64'), 'base64')
+    for (const { row, dataBase64 } of attachmentImports) {
+      const blob = Buffer.from(dataBase64, 'base64')
 
       insertAttachment.run(
         readString(row, 'id', createId('attachment')),
@@ -845,14 +1125,14 @@ const importPortableSnapshot = (snapshot) => {
       INSERT INTO changes (entity, entity_id, operation, changed_at, device_id, sync_state, payload_json)
       VALUES (?, ?, ?, ?, ?, 'synced', ?)
     `)
-    for (const row of snapshot.changes) {
+    for (const row of getRetainedChangeRows(snapshot.changes)) {
       insertChange.run(
         readString(row, 'entity'),
         readString(row, 'entity_id'),
         readString(row, 'operation'),
         readString(row, 'changed_at', timestamp),
         readString(row, 'device_id', 'webdav'),
-        readString(row, 'payload_json', 'null'),
+        compactChangePayloadJson,
       )
     }
 
@@ -906,32 +1186,15 @@ const importPortableSnapshot = (snapshot) => {
   })
 }
 
-const uploadPortableSnapshot = async (config, snapshot = createPortableSnapshot()) => {
+const uploadPortableSnapshot = async (config, snapshot = createPortableSnapshot(), sourceSnapshots = []) => {
+  const uploadedAttachments = await uploadPortableAttachmentFiles(config, snapshot, sourceSnapshots)
   const { snapshotBody, manifest, manifestBody } = createLocalSyncBundle({
     remotePath: config.remotePath,
     source: 'webdav-push',
+    uploadedAttachments,
   }, snapshot)
-  const uploadResponse = await fetch(getWebDavUrl(config, portableSnapshotFile), {
-    method: 'PUT',
-    headers: getWebDavHeaders(config, 'application/json; charset=utf-8'),
-    body: snapshotBody,
-  })
-
-  if (!uploadResponse.ok) {
-    const detail = await uploadResponse.text().catch(() => '')
-    throw new Error(`上传跨端同步快照失败：${uploadResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
-  }
-
-  const manifestResponse = await fetch(getWebDavUrl(config, portableManifestFile), {
-    method: 'PUT',
-    headers: getWebDavHeaders(config, 'application/json; charset=utf-8'),
-    body: manifestBody,
-  })
-
-  if (!manifestResponse.ok) {
-    const detail = await manifestResponse.text().catch(() => '')
-    throw new Error(`上传同步清单失败：${manifestResponse.status}${detail ? ` ${detail.slice(0, 180)}` : ''}`)
-  }
+  await putWebDavTextFile(config, portableSnapshotFile, snapshotBody, 'application/json; charset=utf-8')
+  await putWebDavTextFile(config, portableManifestFile, manifestBody, 'application/json; charset=utf-8')
 
   return manifest
 }
@@ -974,10 +1237,17 @@ const pushWebDavSnapshot = async (request, response) => {
     const localSnapshot = createPortableSnapshot()
     const remote = await readRemotePortableSnapshot(config)
     const snapshot = remote ? mergePortableSnapshots(localSnapshot, remote.snapshot) : localSnapshot
-    const manifest = await uploadPortableSnapshot(config, snapshot)
+    const manifest = await uploadPortableSnapshot(config, snapshot, [localSnapshot, remote?.snapshot].filter(Boolean))
 
     if (remote) {
-      importPortableSnapshot(snapshot)
+      await importPortableSnapshot(snapshot, {
+        resolveDetachedAttachment: (row) => getWebDavTextFile(config, getAttachmentDataPath(row)),
+      })
+      createLocalSyncBundle({
+        remotePath: config.remotePath,
+        source: 'webdav-push',
+        mirroredAt: nowIso(),
+      })
     } else {
       markLocalContentSynced()
       compactLocalChangeLog()
@@ -1061,22 +1331,14 @@ const pullWebDavSnapshot = async (request, response) => {
         }
       }
 
-      writeSyncBundleFiles(
-        raw,
-        createPortableManifest(raw, {
-          ...remoteManifest,
-          remotePath: config.remotePath,
-          source: 'webdav-pull',
-          mirroredAt: nowIso(),
-        }),
-      )
-
       if (existsSync(databasePath)) {
         copyFileSync(databasePath, backupPath)
       }
 
       try {
-        importPortableSnapshot(snapshot)
+        await importPortableSnapshot(snapshot, {
+          resolveDetachedAttachment: (row) => getWebDavTextFile(config, getAttachmentDataPath(row)),
+        })
       } catch (error) {
         if (existsSync(backupPath)) {
           copyFileSync(backupPath, databasePath)
@@ -1086,6 +1348,13 @@ const pullWebDavSnapshot = async (request, response) => {
 
         throw error
       }
+
+      createLocalSyncBundle({
+        ...remoteManifest,
+        remotePath: config.remotePath,
+        source: 'webdav-pull',
+        mirroredAt: nowIso(),
+      })
 
       sendJson(response, 200, {
         ok: true,
@@ -1400,7 +1669,7 @@ const requestWeeklySummary = async (request, response) => {
   }
 }
 
-const appendChange = (entity, entityId, operation, payload, deviceId) => {
+const appendChange = (entity, entityId, operation, _payload, deviceId) => {
   db.prepare(`
     INSERT INTO changes (entity, entity_id, operation, changed_at, device_id, sync_state, payload_json)
     VALUES ($entity, $entityId, $operation, $changedAt, $deviceId, 'pending', $payloadJson)
@@ -1410,7 +1679,7 @@ const appendChange = (entity, entityId, operation, payload, deviceId) => {
     $operation: operation,
     $changedAt: nowIso(),
     $deviceId: deviceId,
-    $payloadJson: JSON.stringify(payload),
+    $payloadJson: compactChangePayloadJson,
   })
 }
 

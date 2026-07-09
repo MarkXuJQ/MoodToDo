@@ -73,6 +73,13 @@ export type DashboardCardConfig = {
   enabled: boolean
 }
 
+export type DashboardMetricCard = {
+  id: DashboardCardId
+  label: string
+  value: string
+  tone?: string
+}
+
 export type CountdownTodoOption = {
   id: string
   title: string
@@ -80,4 +87,11 @@ export type CountdownTodoOption = {
   daysRemaining: number
   label: string
   value: string
+}
+
+export type MoodBreakdownItem = {
+  id: string
+  label: string
+  value: number
+  note: string
 }

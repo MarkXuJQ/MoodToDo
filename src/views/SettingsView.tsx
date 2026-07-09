@@ -9,6 +9,7 @@ import type {
   CountdownTodoOption,
   DashboardCardConfig,
   DashboardCardId,
+  DashboardMetricCard,
   DatabaseStatus,
   SettingsSection,
   SettingsSectionGroup,
@@ -17,13 +18,6 @@ import type {
   WebDavConfig,
   WebDavTextConfigKey,
 } from '../types/app'
-
-type DashboardMetricCard = {
-  id: string
-  label: string
-  value: string
-  tone?: string
-}
 
 type SettingsViewProps = {
   settingsSection: SettingsSection
