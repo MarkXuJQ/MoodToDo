@@ -13,6 +13,7 @@ dist-ssr
 release
 data
 sync
+tmp
 *.local
 
 # Editor directories and files

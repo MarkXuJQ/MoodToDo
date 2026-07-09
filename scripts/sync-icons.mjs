@@ -2,39 +2,14 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
+const require = createRequire(import.meta.url)
+const { brandConfig } = require('../config/brand.cjs')
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const sourceIcon = join(rootDir, 'assets/brand/app-icon.png')
-const launcherBackground = '2C2F3B'
-
-const webIcons = [
-  ['public/favicon.png', 64],
-  ['public/apple-touch-icon.png', 180],
-  ['public/pwa-192.png', 192],
-  ['public/pwa-512.png', 512],
-]
-
-const pwaMaskableIcons = [
-  ['public/pwa-maskable-192.png', 192, 161],
-  ['public/pwa-maskable-512.png', 512, 430],
-]
-
-const androidLauncherIcons = [
-  ['mdpi', 48],
-  ['hdpi', 72],
-  ['xhdpi', 96],
-  ['xxhdpi', 144],
-  ['xxxhdpi', 192],
-]
-
-const androidForegroundIcons = [
-  ['mdpi', 108, 91],
-  ['hdpi', 162, 136],
-  ['xhdpi', 216, 181],
-  ['xxhdpi', 324, 272],
-  ['xxxhdpi', 432, 363],
-]
+const sourceIcon = join(rootDir, brandConfig.sourceIconPng)
+const launcherBackgroundHex = brandConfig.themeColor.replace('#', '')
 
 const run = (command, args) => {
   const result = spawnSync(command, args, {
@@ -66,7 +41,7 @@ const resize = (input, size, output) => {
 
 const pad = (input, size, output) => {
   ensureParentDir(output)
-  run('sips', ['-p', String(size), String(size), '--padColor', launcherBackground, input, '--out', output])
+  run('sips', ['-p', String(size), String(size), '--padColor', launcherBackgroundHex, input, '--out', output])
 }
 
 const convertToIco = (input, output) => {
@@ -79,7 +54,7 @@ const writeAndroidLauncherBackground = () => {
   ensureParentDir(output)
   writeFileSync(
     output,
-    `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">#${launcherBackground}</color>\n</resources>\n`,
+    `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">${brandConfig.themeColor}</color>\n</resources>\n`,
   )
 }
 
@@ -88,33 +63,33 @@ const tempDir = mkdtempSync(join(tmpdir(), 'xinxiangyi-icons-'))
 try {
   ensureFile(sourceIcon)
 
-  for (const [relativeOutput, size] of webIcons) {
-    resize(sourceIcon, size, join(rootDir, relativeOutput))
+  for (const { path, size } of brandConfig.browserIcons) {
+    resize(sourceIcon, size, join(rootDir, path))
   }
 
-  convertToIco(join(rootDir, 'public/favicon.png'), join(rootDir, 'public/favicon.ico'))
+  convertToIco(join(rootDir, 'public/favicon.png'), join(rootDir, brandConfig.faviconIco))
 
-  for (const [relativeOutput, canvasSize, iconSize] of pwaMaskableIcons) {
-    const inner = join(tempDir, `${relativeOutput.replaceAll('/', '-')}-inner.png`)
-    resize(sourceIcon, iconSize, inner)
-    pad(inner, canvasSize, join(rootDir, relativeOutput))
+  for (const { path, size, innerSize } of brandConfig.pwaMaskableIcons) {
+    const inner = join(tempDir, `${path.replaceAll('/', '-')}-inner.png`)
+    resize(sourceIcon, innerSize, inner)
+    pad(inner, size, join(rootDir, path))
   }
 
-  for (const [density, size] of androidLauncherIcons) {
+  for (const { density, size } of brandConfig.androidLauncherIcons) {
     const directory = join(rootDir, `android/app/src/main/res/mipmap-${density}`)
     resize(sourceIcon, size, join(directory, 'ic_launcher.png'))
     resize(sourceIcon, size, join(directory, 'ic_launcher_round.png'))
   }
 
-  for (const [density, canvasSize, iconSize] of androidForegroundIcons) {
+  for (const { density, size, innerSize } of brandConfig.androidForegroundIcons) {
     const inner = join(tempDir, `ic_launcher_foreground_${density}_inner.png`)
-    resize(sourceIcon, iconSize, inner)
-    pad(inner, canvasSize, join(rootDir, `android/app/src/main/res/mipmap-${density}/ic_launcher_foreground.png`))
+    resize(sourceIcon, innerSize, inner)
+    pad(inner, size, join(rootDir, `android/app/src/main/res/mipmap-${density}/ic_launcher_foreground.png`))
   }
 
   writeAndroidLauncherBackground()
 
-  console.log('Synced app icons from assets/brand/app-icon.png')
+  console.log(`Synced app icons from ${brandConfig.sourceIconPng}`)
 } finally {
   rmSync(tempDir, { recursive: true, force: true })
 }

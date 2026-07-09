@@ -1,8 +1,11 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+const require = createRequire(import.meta.url)
+const { brandConfig } = require('../config/brand.cjs')
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const failures = []
 
@@ -10,18 +13,16 @@ const requiredText = [
   ['index.html', '/favicon.png'],
   ['index.html', '/favicon.ico'],
   ['index.html', '/apple-touch-icon.png'],
-  ['index.html', 'content="#2C2F3B"'],
-  ['vite.config.ts', '/favicon.png'],
-  ['vite.config.ts', '/pwa-192.png'],
-  ['vite.config.ts', '/pwa-512.png'],
-  ['vite.config.ts', '/pwa-maskable-192.png'],
-  ['vite.config.ts', '/pwa-maskable-512.png'],
-  ['vite.config.ts', "theme_color: '#2C2F3B'"],
-  ['android/app/src/main/res/values/ic_launcher_background.xml', '#2C2F3B'],
+  ['index.html', `content="${brandConfig.themeColor}"`],
+  ['vite.config.ts', 'brandConfig.manifestIcons'],
+  ['vite.config.ts', 'theme_color: brandConfig.themeColor'],
+  ['vite.config.ts', 'background_color: brandConfig.backgroundColor'],
+  ['android/app/src/main/res/values/ic_launcher_background.xml', brandConfig.themeColor],
   ['android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml', '@color/ic_launcher_background'],
   ['android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml', '@mipmap/ic_launcher_foreground'],
   ['android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml', '@color/ic_launcher_background'],
   ['android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml', '@mipmap/ic_launcher_foreground'],
+  ...brandConfig.manifestIcons.map((icon) => ['config/brand.cjs', icon.src]),
 ]
 
 const forbiddenText = [
@@ -31,35 +32,24 @@ const forbiddenText = [
 ]
 
 const requiredFiles = [
-  'assets/brand/app-icon.icns',
-  'assets/brand/app-icon.png',
-  'public/favicon.ico',
-  'scripts/fixtures/sample-attachment.svg',
+  brandConfig.sourceIconIcns,
+  brandConfig.sourceIconPng,
+  brandConfig.faviconIco,
+  brandConfig.smokeAttachment,
 ]
 
 const expectedPngSizes = [
-  ['assets/brand/app-icon.png', 1024],
-  ['public/favicon.png', 64],
-  ['public/apple-touch-icon.png', 180],
-  ['public/pwa-192.png', 192],
-  ['public/pwa-512.png', 512],
-  ['public/pwa-maskable-192.png', 192],
-  ['public/pwa-maskable-512.png', 512],
-  ['android/app/src/main/res/mipmap-mdpi/ic_launcher.png', 48],
-  ['android/app/src/main/res/mipmap-hdpi/ic_launcher.png', 72],
-  ['android/app/src/main/res/mipmap-xhdpi/ic_launcher.png', 96],
-  ['android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png', 144],
-  ['android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png', 192],
-  ['android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png', 48],
-  ['android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png', 72],
-  ['android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png', 96],
-  ['android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png', 144],
-  ['android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png', 192],
-  ['android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png', 108],
-  ['android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png', 162],
-  ['android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png', 216],
-  ['android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png', 324],
-  ['android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', 432],
+  [brandConfig.sourceIconPng, 1024],
+  ...brandConfig.browserIcons.map((icon) => [icon.path, icon.size]),
+  ...brandConfig.pwaMaskableIcons.map((icon) => [icon.path, icon.size]),
+  ...brandConfig.androidLauncherIcons.flatMap((icon) => [
+    [`android/app/src/main/res/mipmap-${icon.density}/ic_launcher.png`, icon.size],
+    [`android/app/src/main/res/mipmap-${icon.density}/ic_launcher_round.png`, icon.size],
+  ]),
+  ...brandConfig.androidForegroundIcons.map((icon) => [
+    `android/app/src/main/res/mipmap-${icon.density}/ic_launcher_foreground.png`,
+    icon.size,
+  ]),
 ]
 
 const absolute = (relativePath) => join(rootDir, relativePath)
