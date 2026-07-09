@@ -34,6 +34,7 @@ import {
   deleteJournalEntry,
   deleteTodo,
   exportSyncBundle,
+  getApiUrl,
   getLocalState,
   localDatabaseDriver,
   localDatabaseName,
@@ -1165,7 +1166,7 @@ function App() {
     setSummaryError('')
 
     try {
-      const response = await fetch('/api/ai/weekly-summary', {
+      const response = await fetch(getApiUrl('/api/ai/weekly-summary'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

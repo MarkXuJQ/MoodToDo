@@ -195,7 +195,22 @@ type PendingFilePayload = {
   dataBase64: string
 }
 
-const apiBaseUrl = import.meta.env.VITE_LOCAL_API_URL ?? ''
+type RuntimeWindow = Window & {
+  xinxiangyiDesktop?: {
+    apiBaseUrl?: string
+  }
+}
+
+const getRuntimeApiBaseUrl = () => {
+  if (typeof window === 'undefined') return ''
+
+  return (window as RuntimeWindow).xinxiangyiDesktop?.apiBaseUrl ?? ''
+}
+
+const normalizeApiBaseUrl = (baseUrl: string) => baseUrl.replace(/\/$/, '')
+
+const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_LOCAL_API_URL || getRuntimeApiBaseUrl())
+export const getApiUrl = (path: string) => `${apiBaseUrl}${path}`
 const shouldUseNativeDatabase = () => Capacitor.isNativePlatform()
 
 const createId = (prefix: string) => {
@@ -218,7 +233,7 @@ const getDeviceId = () => {
 }
 
 const apiFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await fetch(getApiUrl(path), {
     ...init,
     headers: {
       'Content-Type': 'application/json',

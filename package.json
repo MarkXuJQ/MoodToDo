@@ -3,9 +3,12 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "api": "node --disable-warning=ExperimentalWarning server/local-api.mjs",
     "dev": "node scripts/dev-local.mjs",
+    "electron": "npm run build && env -u ELECTRON_RUN_AS_NODE electron .",
+    "electron:dev": "env -u ELECTRON_RUN_AS_NODE ELECTRON_DEV_SERVER_URL=http://localhost:5173 electron .",
     "postinstall": "node scripts/patch-capacitor-android.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
@@ -13,7 +16,31 @@
     "smoke:local": "node scripts/smoke-local.mjs",
     "patch:capacitor": "node scripts/patch-capacitor-android.mjs",
     "cap:sync": "npm run build && npm run patch:capacitor && cap sync android",
-    "android:apk": "npm run build && npm run patch:capacitor && cap sync android && cd android && ./gradlew assembleDebug"
+    "android:apk": "npm run build && npm run patch:capacitor && cap sync android && cd android && ./gradlew assembleDebug",
+    "mac:dmg": "npm run build && env -u ELECTRON_RUN_AS_NODE electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "com.markxu.xinxiangyi",
+    "productName": "心象仪",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "server/**",
+      "package.json",
+      "!node_modules/**"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ]
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^8.1.0",
@@ -32,6 +59,8 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
     "oxlint": "^1.71.0",
     "playwright-core": "^1.61.1",
     "typescript": "~6.0.2",
