@@ -47,6 +47,11 @@ export type TodoItem = {
   priority: TodoPriority
   laneId: string
   countdownEnabled: boolean
+  repeatFrequency: TodoRepeatFrequency
+  repeatGroupId: string
+  boardVisible: boolean
+  reminderEnabled: boolean
+  reminderTime: string
   done: boolean
   createdAt: string
   updatedAt: string
@@ -55,12 +60,17 @@ export type TodoItem = {
 }
 
 export type TodoPriority = 'normal' | 'important' | 'urgent'
+export type TodoRepeatFrequency = 'none' | 'daily' | 'weekly' | 'monthly'
 
 export type TodoDetailUpdate = {
   description?: string
   priority?: TodoPriority
   laneId?: string
   countdownEnabled?: boolean
+  repeatFrequency?: TodoRepeatFrequency
+  boardVisible?: boolean
+  reminderEnabled?: boolean
+  reminderTime?: string
 }
 
 export type AttachmentRecord = {
@@ -309,6 +319,11 @@ const normalizeLocalStatePayload = (payload: Partial<LocalStatePayload>): LocalS
   todos: ensureArray<Partial<TodoItem>>(payload.todos).map((todo) => ({
     ...todo,
     countdownEnabled: Boolean(todo.countdownEnabled),
+    repeatFrequency: todo.repeatFrequency ?? 'none',
+    repeatGroupId: todo.repeatGroupId ?? '',
+    boardVisible: todo.boardVisible ?? true,
+    reminderEnabled: Boolean(todo.reminderEnabled),
+    reminderTime: todo.reminderTime ?? '09:00',
   })) as TodoItem[],
   attachments: ensureArray<AttachmentPayload>(payload.attachments).map(mapAttachment),
   boardLanes: ensureArray<BoardLaneRecord>(payload.boardLanes),

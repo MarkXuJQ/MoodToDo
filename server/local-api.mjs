@@ -32,6 +32,8 @@ const compactChangePayloadJson = 'null'
 const changeLogRetentionDays = 60
 const changeLogRetentionMs = changeLogRetentionDays * 24 * 60 * 60 * 1000
 const getChangeLogRetentionCutoffIso = () => new Date(Date.now() - changeLogRetentionMs).toISOString()
+const defaultTodoReminderTime = '09:00'
+const todoRepeatFrequencies = new Set(['none', 'daily', 'weekly', 'monthly'])
 
 const ensureDirectory = (dir) => {
   try {
@@ -95,6 +97,11 @@ db.exec(`
     priority TEXT NOT NULL DEFAULT 'normal',
     lane_id TEXT NOT NULL DEFAULT 'inbox',
     countdown_enabled INTEGER NOT NULL DEFAULT 0,
+    repeat_frequency TEXT NOT NULL DEFAULT 'none',
+    repeat_group_id TEXT NOT NULL DEFAULT '',
+    board_visible INTEGER NOT NULL DEFAULT 1,
+    reminder_enabled INTEGER NOT NULL DEFAULT 0,
+    reminder_time TEXT NOT NULL DEFAULT '09:00',
     done INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -173,6 +180,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
   CREATE INDEX IF NOT EXISTS idx_todos_lane_done_created_at ON todos(lane_id, done, created_at);
   CREATE INDEX IF NOT EXISTS idx_todos_date_done ON todos(date_key, done);
+  CREATE INDEX IF NOT EXISTS idx_todos_repeat_group_date ON todos(repeat_group_id, date_key);
   CREATE INDEX IF NOT EXISTS idx_attachments_entry_id ON attachments(entry_id);
   CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
   CREATE INDEX IF NOT EXISTS idx_board_lanes_created_at ON board_lanes(created_at);
@@ -196,6 +204,11 @@ ensureColumn('todos', 'description', `description TEXT NOT NULL DEFAULT ''`)
 ensureColumn('todos', 'priority', `priority TEXT NOT NULL DEFAULT 'normal'`)
 ensureColumn('todos', 'lane_id', `lane_id TEXT NOT NULL DEFAULT 'inbox'`)
 ensureColumn('todos', 'countdown_enabled', `countdown_enabled INTEGER NOT NULL DEFAULT 0`)
+ensureColumn('todos', 'repeat_frequency', `repeat_frequency TEXT NOT NULL DEFAULT 'none'`)
+ensureColumn('todos', 'repeat_group_id', `repeat_group_id TEXT NOT NULL DEFAULT ''`)
+ensureColumn('todos', 'board_visible', `board_visible INTEGER NOT NULL DEFAULT 1`)
+ensureColumn('todos', 'reminder_enabled', `reminder_enabled INTEGER NOT NULL DEFAULT 0`)
+ensureColumn('todos', 'reminder_time', `reminder_time TEXT NOT NULL DEFAULT '09:00'`)
 ensureColumn('changes', 'payload_json', `payload_json TEXT NOT NULL DEFAULT 'null'`)
 db.prepare(`UPDATE changes SET payload_json = ? WHERE payload_json <> ?`).run(
   compactChangePayloadJson,
@@ -244,6 +257,11 @@ const rowToTodo = (row) => ({
   priority: row.priority ?? 'normal',
   laneId: row.lane_id ?? 'inbox',
   countdownEnabled: Boolean(row.countdown_enabled),
+  repeatFrequency: todoRepeatFrequencies.has(row.repeat_frequency) ? row.repeat_frequency : 'none',
+  repeatGroupId: row.repeat_group_id ?? '',
+  boardVisible: row.board_visible == null ? true : Boolean(row.board_visible),
+  reminderEnabled: Boolean(row.reminder_enabled),
+  reminderTime: normalizeReminderTime(row.reminder_time),
   done: Boolean(row.done),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -448,6 +466,15 @@ const readString = (row, key, fallback = '') => {
   return String(value)
 }
 
+const readStringAny = (row, keys, fallback = '') => {
+  for (const key of keys) {
+    const value = row?.[key]
+    if (value != null && value !== '') return String(value)
+  }
+
+  return fallback
+}
+
 const readOptionalString = (row, key) => {
   const value = row?.[key]
   if (value == null || value === '') return null
@@ -457,6 +484,185 @@ const readOptionalString = (row, key) => {
 const readNumber = (row, key, fallback = 0) => {
   const value = Number(row?.[key])
   return Number.isFinite(value) ? value : fallback
+}
+
+const readNumberAny = (row, keys, fallback = 0) => {
+  for (const key of keys) {
+    const value = Number(row?.[key])
+    if (Number.isFinite(value)) return value
+  }
+
+  return fallback
+}
+
+const toDateKey = (date) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+
+  return local.toISOString().slice(0, 10)
+}
+
+const getTodayKey = () => toDateKey(new Date())
+
+const addDays = (dateKey, amount) => {
+  const date = new Date(`${dateKey}T00:00:00`)
+  date.setDate(date.getDate() + amount)
+
+  return toDateKey(date)
+}
+
+const addMonths = (dateKey, amount) => {
+  const date = new Date(`${dateKey}T00:00:00`)
+  const day = date.getDate()
+  date.setDate(1)
+  date.setMonth(date.getMonth() + amount)
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+  date.setDate(Math.min(day, lastDay))
+
+  return toDateKey(date)
+}
+
+const normalizeRepeatFrequency = (value) => (todoRepeatFrequencies.has(value) ? value : 'none')
+
+const normalizeReminderTime = (value) => {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  const match = raw.match(/^([01]\d|2[0-3]):([0-5]\d)$/)
+
+  return match ? raw : defaultTodoReminderTime
+}
+
+const readRepeatFrequency = (row) => normalizeRepeatFrequency(readStringAny(row, ['repeat_frequency', 'repeatFrequency'], 'none'))
+
+const readReminderTime = (row) => normalizeReminderTime(readStringAny(row, ['reminder_time', 'reminderTime'], defaultTodoReminderTime))
+
+const readBoardVisible = (row, fallback = 1) => readNumberAny(row, ['board_visible', 'boardVisible'], fallback) !== 0
+
+const readReminderEnabled = (row) => readNumberAny(row, ['reminder_enabled', 'reminderEnabled']) !== 0
+
+const getNextRepeatDateKey = (dateKey, frequency, todayKey = getTodayKey()) => {
+  if (frequency === 'daily') return todayKey > dateKey ? todayKey : addDays(dateKey, 1)
+  if (frequency === 'weekly') return addDays(dateKey, 7)
+  if (frequency === 'monthly') return addMonths(dateKey, 1)
+  return ''
+}
+
+const getNextDueRepeatDateKey = (dateKey, frequency, todayKey = getTodayKey()) => {
+  const repeatFrequency = normalizeRepeatFrequency(frequency)
+  let nextDateKey = getNextRepeatDateKey(dateKey, repeatFrequency, todayKey)
+
+  if (!nextDateKey || nextDateKey.localeCompare(todayKey) > 0) {
+    return ''
+  }
+
+  for (let index = 0; index < 120; index += 1) {
+    const followingDateKey =
+      repeatFrequency === 'weekly'
+        ? addDays(nextDateKey, 7)
+        : repeatFrequency === 'monthly'
+          ? addMonths(nextDateKey, 1)
+          : ''
+
+    if (!followingDateKey || followingDateKey.localeCompare(todayKey) > 0) break
+    nextDateKey = followingDateKey
+  }
+
+  return nextDateKey
+}
+
+const createRecurringTodoInstance = (template, nextDateKey, timestamp = nowIso()) => ({
+  ...template,
+  id: createId('todo'),
+  dateKey: nextDateKey,
+  done: false,
+  completedAt: undefined,
+  laneId: 'inbox',
+  boardVisible: false,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  syncState: 'pending',
+})
+
+const insertTodoRecord = db.prepare(`
+  INSERT INTO todos (
+    id, date_key, title, description, priority, lane_id, countdown_enabled,
+    repeat_frequency, repeat_group_id, board_visible, reminder_enabled, reminder_time,
+    done, created_at, updated_at, completed_at, sync_state
+  )
+  VALUES (
+    $id, $dateKey, $title, $description, $priority, $laneId, $countdownEnabled,
+    $repeatFrequency, $repeatGroupId, $boardVisible, $reminderEnabled, $reminderTime,
+    $done, $createdAt, $updatedAt, $completedAt, $syncState
+  )
+`)
+
+const runInsertTodo = (todo) =>
+  insertTodoRecord.run({
+    $id: todo.id,
+    $dateKey: todo.dateKey,
+    $title: todo.title,
+    $description: todo.description,
+    $priority: todo.priority,
+    $laneId: todo.laneId,
+    $countdownEnabled: todo.countdownEnabled ? 1 : 0,
+    $repeatFrequency: normalizeRepeatFrequency(todo.repeatFrequency),
+    $repeatGroupId: todo.repeatGroupId ?? '',
+    $boardVisible: todo.boardVisible ? 1 : 0,
+    $reminderEnabled: todo.reminderEnabled ? 1 : 0,
+    $reminderTime: normalizeReminderTime(todo.reminderTime),
+    $done: todo.done ? 1 : 0,
+    $createdAt: todo.createdAt,
+    $updatedAt: todo.updatedAt,
+    $completedAt: todo.completedAt ?? null,
+    $syncState: todo.syncState,
+  })
+
+const materializeDueRecurringTodos = () => {
+  const rows = db
+    .prepare(`SELECT * FROM todos WHERE repeat_frequency <> 'none' OR repeat_group_id <> '' ORDER BY date_key ASC, created_at ASC`)
+    .all()
+
+  if (rows.length === 0) return []
+
+  const todayKey = getTodayKey()
+  const groups = new Map()
+  const createdTodos = []
+
+  for (const row of rows) {
+    const groupId = readString(row, 'repeat_group_id') || readString(row, 'id')
+    if (!groupId) continue
+
+    const existing = groups.get(groupId)
+    if (
+      !existing ||
+      readString(row, 'date_key').localeCompare(readString(existing, 'date_key')) > 0 ||
+      (readString(row, 'date_key') === readString(existing, 'date_key') &&
+        readString(row, 'created_at').localeCompare(readString(existing, 'created_at')) > 0)
+    ) {
+      groups.set(groupId, row)
+    }
+  }
+
+  const deviceId = 'recurrence'
+
+  transaction(() => {
+    for (const row of groups.values()) {
+      const template = rowToTodo(row)
+      const repeatFrequency = normalizeRepeatFrequency(template.repeatFrequency)
+      const repeatGroupId = template.repeatGroupId || template.id
+      if (repeatFrequency === 'none' || !repeatGroupId || !template.done) continue
+
+      const nextDateKey = getNextDueRepeatDateKey(template.dateKey, repeatFrequency, todayKey)
+      if (!nextDateKey) continue
+
+      const timestamp = nowIso()
+      const todo = createRecurringTodoInstance({ ...template, repeatGroupId }, nextDateKey, timestamp)
+
+      runInsertTodo(todo)
+      appendChange('todo', todo.id, 'upsert', todo, deviceId)
+      createdTodos.push(todo)
+    }
+  })
+
+  return createdTodos
 }
 
 const toPortableRow = (row, defaults = {}) => {
@@ -486,6 +692,11 @@ const toPortableTodoRow = (row) =>
     priority: 'normal',
     lane_id: 'inbox',
     countdown_enabled: 0,
+    repeat_frequency: 'none',
+    repeat_group_id: '',
+    board_visible: 1,
+    reminder_enabled: 0,
+    reminder_time: defaultTodoReminderTime,
     done: 0,
     completed_at: null,
   })
@@ -692,6 +903,8 @@ const mergePortableSnapshots = (localSnapshot, remoteSnapshot) => {
 }
 
 const createPortableSnapshot = () => {
+  materializeDueRecurringTodos()
+
   const entries = db.prepare(`SELECT * FROM entries ORDER BY date_key DESC`).all()
   const todos = db.prepare(`SELECT * FROM todos ORDER BY created_at DESC`).all()
   const boardLanes = db.prepare(`SELECT * FROM board_lanes ORDER BY created_at ASC`).all()
@@ -1066,8 +1279,12 @@ const importPortableSnapshot = async (snapshot, options = {}) => {
     }
 
     const insertTodo = db.prepare(`
-      INSERT INTO todos (id, date_key, title, description, priority, lane_id, countdown_enabled, done, created_at, updated_at, completed_at, sync_state)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+      INSERT INTO todos (
+        id, date_key, title, description, priority, lane_id, countdown_enabled,
+        repeat_frequency, repeat_group_id, board_visible, reminder_enabled, reminder_time,
+        done, created_at, updated_at, completed_at, sync_state
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
     `)
     for (const row of snapshot.todos) {
       insertTodo.run(
@@ -1077,7 +1294,12 @@ const importPortableSnapshot = async (snapshot, options = {}) => {
         readString(row, 'description', ''),
         readString(row, 'priority', 'normal'),
         readString(row, 'lane_id', 'inbox'),
-        readNumber(row, 'countdown_enabled', readNumber(row, 'countdownEnabled')),
+        readNumberAny(row, ['countdown_enabled', 'countdownEnabled']),
+        readRepeatFrequency(row),
+        readStringAny(row, ['repeat_group_id', 'repeatGroupId']),
+        readBoardVisible(row) ? 1 : 0,
+        readReminderEnabled(row) ? 1 : 0,
+        readReminderTime(row),
         readNumber(row, 'done'),
         readString(row, 'created_at', timestamp),
         readString(row, 'updated_at', timestamp),
@@ -1401,6 +1623,15 @@ const pullWebDavSnapshot = async (request, response) => {
       configureDatabaseConnection()
       ensureColumn('entries', 'weather_text', `weather_text TEXT NOT NULL DEFAULT ''`)
       ensureColumn('entries', 'location_text', `location_text TEXT NOT NULL DEFAULT ''`)
+      ensureColumn('todos', 'description', `description TEXT NOT NULL DEFAULT ''`)
+      ensureColumn('todos', 'priority', `priority TEXT NOT NULL DEFAULT 'normal'`)
+      ensureColumn('todos', 'lane_id', `lane_id TEXT NOT NULL DEFAULT 'inbox'`)
+      ensureColumn('todos', 'countdown_enabled', `countdown_enabled INTEGER NOT NULL DEFAULT 0`)
+      ensureColumn('todos', 'repeat_frequency', `repeat_frequency TEXT NOT NULL DEFAULT 'none'`)
+      ensureColumn('todos', 'repeat_group_id', `repeat_group_id TEXT NOT NULL DEFAULT ''`)
+      ensureColumn('todos', 'board_visible', `board_visible INTEGER NOT NULL DEFAULT 1`)
+      ensureColumn('todos', 'reminder_enabled', `reminder_enabled INTEGER NOT NULL DEFAULT 0`)
+      ensureColumn('todos', 'reminder_time', `reminder_time TEXT NOT NULL DEFAULT '09:00'`)
       db.exec(`PRAGMA user_version = ${schemaVersion}`)
     } catch (error) {
       if (existsSync(backupPath)) {
@@ -1729,26 +1960,30 @@ const sendJson = (response, status, payload) => {
 
 const notFound = (response) => sendJson(response, 404, { error: 'API route not found.' })
 
-const getState = () => ({
-  entries: db.prepare('SELECT * FROM entries ORDER BY date_key DESC').all().map(rowToEntry),
-  todos: db.prepare('SELECT * FROM todos ORDER BY created_at DESC').all().map(rowToTodo),
-  boardLanes: db.prepare('SELECT * FROM board_lanes ORDER BY created_at ASC').all().map(rowToBoardLane),
-  attachments: db.prepare('SELECT * FROM attachments ORDER BY created_at DESC').all().map(rowToAttachment),
-  metricDefinitions: db
-    .prepare('SELECT * FROM metric_definitions ORDER BY created_at ASC')
-    .all()
-    .map(rowToMetricDefinition),
-  metricRecords: db
-    .prepare('SELECT * FROM metric_records ORDER BY date_key DESC, updated_at DESC')
-    .all()
-    .map(rowToMetricRecord),
-  changes: db.prepare('SELECT * FROM changes ORDER BY changed_at DESC').all().map(rowToChange),
-  weeklySummaries: db
-    .prepare('SELECT * FROM weekly_summaries ORDER BY updated_at DESC')
-    .all()
-    .map(rowToWeeklySummary),
-  meta: getMeta(),
-})
+const getState = () => {
+  materializeDueRecurringTodos()
+
+  return {
+    entries: db.prepare('SELECT * FROM entries ORDER BY date_key DESC').all().map(rowToEntry),
+    todos: db.prepare('SELECT * FROM todos ORDER BY created_at DESC').all().map(rowToTodo),
+    boardLanes: db.prepare('SELECT * FROM board_lanes ORDER BY created_at ASC').all().map(rowToBoardLane),
+    attachments: db.prepare('SELECT * FROM attachments ORDER BY created_at DESC').all().map(rowToAttachment),
+    metricDefinitions: db
+      .prepare('SELECT * FROM metric_definitions ORDER BY created_at ASC')
+      .all()
+      .map(rowToMetricDefinition),
+    metricRecords: db
+      .prepare('SELECT * FROM metric_records ORDER BY date_key DESC, updated_at DESC')
+      .all()
+      .map(rowToMetricRecord),
+    changes: db.prepare('SELECT * FROM changes ORDER BY changed_at DESC').all().map(rowToChange),
+    weeklySummaries: db
+      .prepare('SELECT * FROM weekly_summaries ORDER BY updated_at DESC')
+      .all()
+      .map(rowToWeeklySummary),
+    meta: getMeta(),
+  }
+}
 
 const upsertEntry = async (request, response) => {
   const payload = await readJson(request)
@@ -1931,6 +2166,11 @@ const deleteEntriesBatch = async (request, response) => {
 const addTodo = async (request, response) => {
   const payload = await readJson(request)
   const timestamp = nowIso()
+  const repeatFrequency = normalizeRepeatFrequency(payload.repeatFrequency)
+  const repeatGroupId = repeatFrequency === 'none' ? '' : createId('repeat')
+  const boardVisible = Object.hasOwn(payload, 'boardVisible')
+    ? Boolean(payload.boardVisible)
+    : repeatFrequency === 'none'
   const todo = {
     id: createId('todo'),
     dateKey: payload.dateKey,
@@ -1939,29 +2179,21 @@ const addTodo = async (request, response) => {
     priority: typeof payload.priority === 'string' ? payload.priority : 'normal',
     laneId: typeof payload.laneId === 'string' ? payload.laneId : 'inbox',
     countdownEnabled: Boolean(payload.countdownEnabled),
+    repeatFrequency,
+    repeatGroupId,
+    boardVisible,
+    reminderEnabled: Boolean(payload.reminderEnabled),
+    reminderTime: normalizeReminderTime(payload.reminderTime),
     done: false,
     createdAt: timestamp,
     updatedAt: timestamp,
+    completedAt: undefined,
     syncState: 'pending',
   }
   const deviceId = getDeviceId(request)
 
   transaction(() => {
-    db.prepare(`
-      INSERT INTO todos (id, date_key, title, description, priority, lane_id, countdown_enabled, done, created_at, updated_at, sync_state)
-      VALUES ($id, $dateKey, $title, $description, $priority, $laneId, $countdownEnabled, 0, $createdAt, $updatedAt, $syncState)
-    `).run({
-      $id: todo.id,
-      $dateKey: todo.dateKey,
-      $title: todo.title,
-      $description: todo.description,
-      $priority: todo.priority,
-      $laneId: todo.laneId,
-      $countdownEnabled: todo.countdownEnabled ? 1 : 0,
-      $createdAt: todo.createdAt,
-      $updatedAt: todo.updatedAt,
-      $syncState: todo.syncState,
-    })
+    runInsertTodo(todo)
     appendChange('todo', todo.id, 'upsert', todo, deviceId)
   })
 
@@ -1980,12 +2212,29 @@ const updateTodo = async (request, response, id) => {
   const timestamp = nowIso()
   const existingTodo = rowToTodo(existing)
   const nextDone = Object.hasOwn(payload, 'done') ? Boolean(payload.done) : existingTodo.done
+  const repeatFrequency = Object.hasOwn(payload, 'repeatFrequency')
+    ? normalizeRepeatFrequency(payload.repeatFrequency)
+    : existingTodo.repeatFrequency
+  const repeatGroupId =
+    repeatFrequency === 'none'
+      ? existingTodo.repeatGroupId
+      : existingTodo.repeatGroupId || createId('repeat')
+  const boardVisible = Object.hasOwn(payload, 'boardVisible')
+    ? Boolean(payload.boardVisible)
+    : existingTodo.repeatFrequency === 'none' && repeatFrequency !== 'none'
+      ? false
+      : existingTodo.boardVisible
   const todo = {
     ...existingTodo,
     description: typeof payload.description === 'string' ? payload.description : existingTodo.description,
     priority: typeof payload.priority === 'string' ? payload.priority : existingTodo.priority,
     laneId: typeof payload.laneId === 'string' ? payload.laneId : existingTodo.laneId,
     countdownEnabled: Object.hasOwn(payload, 'countdownEnabled') ? Boolean(payload.countdownEnabled) : existingTodo.countdownEnabled,
+    repeatFrequency,
+    repeatGroupId,
+    boardVisible,
+    reminderEnabled: Object.hasOwn(payload, 'reminderEnabled') ? Boolean(payload.reminderEnabled) : existingTodo.reminderEnabled,
+    reminderTime: Object.hasOwn(payload, 'reminderTime') ? normalizeReminderTime(payload.reminderTime) : existingTodo.reminderTime,
     done: nextDone,
     completedAt: Object.hasOwn(payload, 'done') ? (nextDone ? timestamp : undefined) : existingTodo.completedAt,
     updatedAt: timestamp,
@@ -1997,6 +2246,8 @@ const updateTodo = async (request, response, id) => {
     db.prepare(`
       UPDATE todos
       SET description = $description, priority = $priority, lane_id = $laneId, countdown_enabled = $countdownEnabled,
+          repeat_frequency = $repeatFrequency, repeat_group_id = $repeatGroupId, board_visible = $boardVisible,
+          reminder_enabled = $reminderEnabled, reminder_time = $reminderTime,
           done = $done, completed_at = $completedAt, updated_at = $updatedAt, sync_state = 'pending'
       WHERE id = $id
     `).run({
@@ -2005,11 +2256,29 @@ const updateTodo = async (request, response, id) => {
       $priority: todo.priority,
       $laneId: todo.laneId,
       $countdownEnabled: todo.countdownEnabled ? 1 : 0,
+      $repeatFrequency: todo.repeatFrequency,
+      $repeatGroupId: todo.repeatGroupId,
+      $boardVisible: todo.boardVisible ? 1 : 0,
+      $reminderEnabled: todo.reminderEnabled ? 1 : 0,
+      $reminderTime: todo.reminderTime,
       $done: todo.done ? 1 : 0,
       $completedAt: todo.completedAt ?? null,
       $updatedAt: todo.updatedAt,
     })
     appendChange('todo', todo.id, 'upsert', todo, deviceId)
+
+    if (!existingTodo.done && todo.done && todo.repeatFrequency !== 'none' && todo.repeatGroupId) {
+      const nextDateKey = getNextDueRepeatDateKey(todo.dateKey, todo.repeatFrequency)
+      const existingNext = nextDateKey
+        ? db.prepare('SELECT id FROM todos WHERE repeat_group_id = ? AND date_key = ?').get(todo.repeatGroupId, nextDateKey)
+        : null
+
+      if (nextDateKey && !existingNext) {
+        const nextTodo = createRecurringTodoInstance(todo, nextDateKey, timestamp)
+        runInsertTodo(nextTodo)
+        appendChange('todo', nextTodo.id, 'upsert', nextTodo, deviceId)
+      }
+    }
   })
 
   sendJson(response, 200, { todo })

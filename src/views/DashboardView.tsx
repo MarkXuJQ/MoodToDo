@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
-import { CheckCircle2, Circle, Clock3, ImagePlus, LocateFixed, Plus, Save, Trash2 } from 'lucide-react'
+import { Bell, CheckCircle2, Circle, Clock3, ImagePlus, LocateFixed, Plus, Repeat2, Save, Trash2 } from 'lucide-react'
 
 import { AttachmentThumb } from '../components/ui/attachment-thumb'
 import { DatePickerButton } from '../components/ui/date-picker-button'
@@ -10,6 +10,7 @@ import { addDays } from '../lib/calendar'
 import type { AttachmentRecord, JournalEntry, TodoItem } from '../lib/db'
 import type { DashboardMetricCard, DraftState, MoodBreakdownItem } from '../types/app'
 import { formatCountdownDays, getCountdownDaysRemaining, getCountdownTone } from '../utils/countdown'
+import { getTodoRepeatLabel } from '../utils/todo'
 
 const getNearbyDateKeys = (dateKey: string) => [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((offset) => addDays(dateKey, offset))
 
@@ -50,8 +51,6 @@ type DashboardViewProps = {
   moodBreakdownItems: MoodBreakdownItem[]
   moodTrendPoints: TrendPoint[]
   selectedMoodTrendIndex?: number
-  trendStartLabel: string
-  trendEndLabel: string
   moodWindowAverage: number
   onDateChange: (dateKey: string) => void
   onGoToday: () => void
@@ -85,8 +84,6 @@ export function DashboardView({
   moodBreakdownItems,
   moodTrendPoints,
   selectedMoodTrendIndex,
-  trendStartLabel,
-  trendEndLabel,
   moodWindowAverage,
   onDateChange,
   onGoToday,
@@ -183,7 +180,6 @@ export function DashboardView({
         <section className="section dashboard-mood-panel" aria-labelledby="stats-title">
           <div className="section-head">
             <div>
-              <p className="eyebrow">Mood Space</p>
               <h2 className="section-title" id="stats-title">
                 心象分
               </h2>
@@ -245,7 +241,6 @@ export function DashboardView({
             <>
               <div className="section-head dashboard-details-head">
                 <div>
-                  <p className="eyebrow">Mood Analysis</p>
                   <h2 className="section-title" id="mood-details-title">
                     最近心象
                   </h2>
@@ -279,14 +274,10 @@ export function DashboardView({
               <div className="dashboard-mood-trend" aria-labelledby="mood-trend-title">
                 <div className="mood-trend-head">
                   <div>
-                    <p className="eyebrow">Mood Trend</p>
                     <h3 className="section-title text-lg" id="mood-trend-title">
                       心情折线
                     </h3>
                   </div>
-                  <span className="pill">
-                    {trendStartLabel} - {trendEndLabel}
-                  </span>
                 </div>
 
                 <TrendChart
@@ -315,7 +306,6 @@ export function DashboardView({
           <section className="section dashboard-todo-panel" aria-labelledby="todo-title">
             <div className="section-head">
               <div>
-                <p className="eyebrow">Todo</p>
                 <h2 className="section-title" id="todo-title">
                   今日事项
                 </h2>
@@ -348,6 +338,18 @@ export function DashboardView({
                       <strong className={`break-words ${todo.done ? 'todo-done' : ''}`}>{todo.title}</strong>
                       <small>
                         {todo.dateKey}
+                        {todo.repeatFrequency !== 'none' && (
+                          <span className="todo-inline-meta">
+                            <Repeat2 size={12} aria-hidden="true" />
+                            {getTodoRepeatLabel(todo.repeatFrequency)}
+                          </span>
+                        )}
+                        {todo.reminderEnabled && (
+                          <span className="todo-inline-meta">
+                            <Bell size={12} aria-hidden="true" />
+                            {todo.reminderTime}
+                          </span>
+                        )}
                         {countdownDays != null && (
                           <span className={`todo-inline-countdown ${getCountdownTone(countdownDays)}`}>
                             <Clock3 size={12} aria-hidden="true" />
@@ -370,7 +372,6 @@ export function DashboardView({
           <section className="section dashboard-journal-panel" aria-labelledby="journal-title">
             <div className="section-head">
               <div>
-                <p className="eyebrow">{selectedDateLabel}</p>
                 <h2 className="section-title" id="journal-title">
                   今日记录
                 </h2>

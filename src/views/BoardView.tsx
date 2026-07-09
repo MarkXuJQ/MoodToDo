@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
-import { Check, Plus, Search, Trash2, X } from 'lucide-react'
+import { Bell, Check, Plus, Repeat2, Search, Trash2, X } from 'lucide-react'
 
 import { DatePickerButton } from '../components/ui/date-picker-button'
-import type { BoardLaneRecord, JournalEntry, TodoDetailUpdate, TodoItem, TodoPriority } from '../lib/db'
+import type { BoardLaneRecord, JournalEntry, TodoDetailUpdate, TodoItem, TodoPriority, TodoRepeatFrequency } from '../lib/db'
 import type { ActiveView } from '../types/app'
 import { getCountdownDaysRemaining, getCountdownTone } from '../utils/countdown'
+import { getTodoRepeatLabel } from '../utils/todo'
 
 type LaneColor = {
   id: string
@@ -72,6 +73,13 @@ const priorityOptions: Array<{ id: TodoPriority; label: string; shortLabel: stri
   { id: 'urgent', label: '紧急', shortLabel: '⭐️⭐️⭐️' },
 ]
 
+const repeatOptions: Array<{ id: TodoRepeatFrequency; label: string }> = [
+  { id: 'none', label: '不重复' },
+  { id: 'daily', label: '每天' },
+  { id: 'weekly', label: '每周' },
+  { id: 'monthly', label: '每月' },
+]
+
 const getLaneColor = (colorId?: string) => laneColors.find((color) => color.id === colorId) ?? defaultInboxColor
 
 const getLaneStyle = (color: LaneColor) =>
@@ -117,6 +125,10 @@ export function BoardView({
   const [todoDraftPriority, setTodoDraftPriority] = useState<TodoPriority>('normal')
   const [todoDraftDescription, setTodoDraftDescription] = useState('')
   const [todoDraftCountdownEnabled, setTodoDraftCountdownEnabled] = useState(false)
+  const [todoDraftRepeatFrequency, setTodoDraftRepeatFrequency] = useState<TodoRepeatFrequency>('none')
+  const [todoDraftBoardVisible, setTodoDraftBoardVisible] = useState(true)
+  const [todoDraftReminderEnabled, setTodoDraftReminderEnabled] = useState(false)
+  const [todoDraftReminderTime, setTodoDraftReminderTime] = useState('09:00')
   const [laneDraftTitle, setLaneDraftTitle] = useState('')
   const [laneDraftColorId, setLaneDraftColorId] = useState(laneColors[0].id)
   const [focusedLaneId, setFocusedLaneId] = useState('inbox')
@@ -129,6 +141,10 @@ export function BoardView({
   const [detailPriority, setDetailPriority] = useState<TodoPriority>('normal')
   const [detailLaneId, setDetailLaneId] = useState('inbox')
   const [detailCountdownEnabled, setDetailCountdownEnabled] = useState(false)
+  const [detailRepeatFrequency, setDetailRepeatFrequency] = useState<TodoRepeatFrequency>('none')
+  const [detailBoardVisible, setDetailBoardVisible] = useState(true)
+  const [detailReminderEnabled, setDetailReminderEnabled] = useState(false)
+  const [detailReminderTime, setDetailReminderTime] = useState('09:00')
   const activeTodoCount = filteredBoardTodos.filter((todo) => !todo.done).length
 
   useEffect(() => {
@@ -217,6 +233,26 @@ export function BoardView({
     setLaneDraftColorId(laneColors[0].id)
   }
 
+  const handleTodoDraftRepeatChange = (frequency: TodoRepeatFrequency) => {
+    const previousFrequency = todoDraftRepeatFrequency
+    setTodoDraftRepeatFrequency(frequency)
+    if (frequency === 'none') {
+      setTodoDraftBoardVisible(true)
+    } else if (previousFrequency === 'none') {
+      setTodoDraftBoardVisible(false)
+    }
+  }
+
+  const handleDetailRepeatChange = (frequency: TodoRepeatFrequency) => {
+    const previousFrequency = detailRepeatFrequency
+    setDetailRepeatFrequency(frequency)
+    if (frequency === 'none') {
+      setDetailBoardVisible(true)
+    } else if (previousFrequency === 'none') {
+      setDetailBoardVisible(false)
+    }
+  }
+
   const handleAddLane = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const title = laneDraftTitle.trim()
@@ -238,6 +274,10 @@ export function BoardView({
     setDetailPriority(todo.priority)
     setDetailLaneId(todo.laneId || 'inbox')
     setDetailCountdownEnabled(todo.countdownEnabled)
+    setDetailRepeatFrequency(todo.repeatFrequency)
+    setDetailBoardVisible(todo.boardVisible)
+    setDetailReminderEnabled(todo.reminderEnabled)
+    setDetailReminderTime(todo.reminderTime)
   }
 
   const closeTodoDetail = () => {
@@ -253,6 +293,10 @@ export function BoardView({
       priority: detailPriority,
       laneId: detailLaneId,
       countdownEnabled: detailCountdownEnabled,
+      repeatFrequency: detailRepeatFrequency,
+      boardVisible: detailBoardVisible,
+      reminderEnabled: detailReminderEnabled,
+      reminderTime: detailReminderTime,
     })
     closeTodoDetail()
   }
@@ -289,6 +333,10 @@ export function BoardView({
     setTodoDraftPriority('normal')
     setTodoDraftDescription('')
     setTodoDraftCountdownEnabled(false)
+    setTodoDraftRepeatFrequency('none')
+    setTodoDraftBoardVisible(true)
+    setTodoDraftReminderEnabled(false)
+    setTodoDraftReminderTime('09:00')
     setIsTodoDialogOpen(true)
   }
 
@@ -310,6 +358,10 @@ export function BoardView({
         priority: todoDraftPriority,
         laneId: 'inbox',
         countdownEnabled: todoDraftCountdownEnabled,
+        repeatFrequency: todoDraftRepeatFrequency,
+        boardVisible: todoDraftBoardVisible,
+        reminderEnabled: todoDraftReminderEnabled,
+        reminderTime: todoDraftReminderTime,
       })
     }
     if (title) {
@@ -319,18 +371,17 @@ export function BoardView({
 
   return (
     <section className="py-3 sm:py-5" aria-labelledby="todo-board-title">
-      <div className="mb-3 flex flex-col gap-3 md:mb-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="eyebrow">Todo Board</p>
-          <h2 className="section-title" id="todo-board-title">
+      <div className="mb-2 flex items-start justify-between gap-3 md:mb-3">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h2 className="section-title shrink-0" id="todo-board-title">
             Todo 看板
           </h2>
-          <p className="mt-1 hidden text-sm font-bold text-ink-400 md:block">
-            {activeTodoCount} 个待做 · 共 {todos.length} 个事项 · 按日期从过去到未来排列
-          </p>
+          <span className="hidden min-w-0 truncate text-sm font-bold text-ink-400 md:inline">
+            {activeTodoCount} 个待做 · 共 {todos.length} 个事项 · 按日期排列
+          </span>
         </div>
 
-        <button className="button-primary w-fit" type="button" onClick={openTodoDialog}>
+        <button className="button-primary min-h-10 shrink-0 px-3" type="button" onClick={openTodoDialog}>
           <Plus size={18} aria-hidden="true" />
           添加
         </button>
@@ -411,6 +462,7 @@ export function BoardView({
                   const priorityOption = priorityOptions.find((option) => option.id === priority) ?? priorityOptions[0]
                   const description = todo.description
                   const countdownDays = todo.countdownEnabled ? getCountdownDaysRemaining(todo.dateKey) : null
+                  const repeatLabel = todo.repeatFrequency !== 'none' ? getTodoRepeatLabel(todo.repeatFrequency) : ''
 
                   return (
                     <article
@@ -465,6 +517,22 @@ export function BoardView({
 
                       <div className="board-card-actions">
                         <span className={`board-priority board-priority-${priority}`}>{priorityOption.shortLabel}</span>
+                        {(repeatLabel || todo.reminderEnabled) && (
+                          <span className="todo-mini-meta">
+                            {repeatLabel && (
+                              <span>
+                                <Repeat2 size={12} aria-hidden="true" />
+                                {repeatLabel}
+                              </span>
+                            )}
+                            {todo.reminderEnabled && (
+                              <span>
+                                <Bell size={12} aria-hidden="true" />
+                                {todo.reminderTime}
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </div>
                     </article>
                   )
@@ -579,6 +647,56 @@ export function BoardView({
                   <small>按 Todo 日期计算剩余天数</small>
                 </span>
               </label>
+              <fieldset className="todo-repeat-field">
+                <legend>重复</legend>
+                <div className="todo-repeat-options">
+                  {repeatOptions.map((option) => (
+                    <button
+                      className={`todo-repeat-option ${detailRepeatFrequency === option.id ? 'todo-repeat-option-active' : ''}`}
+                      type="button"
+                      aria-pressed={detailRepeatFrequency === option.id}
+                      key={option.id}
+                      onClick={() => handleDetailRepeatChange(option.id)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+              <label className="todo-toggle-row">
+                <input
+                  type="checkbox"
+                  checked={detailBoardVisible}
+                  onChange={(event) => setDetailBoardVisible(event.target.checked)}
+                />
+                <span>
+                  <strong>显示在看板</strong>
+                  <small>{detailBoardVisible ? '已显示' : '已隐藏'}</small>
+                </span>
+              </label>
+              <div className="todo-reminder-grid">
+                <label className="todo-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={detailReminderEnabled}
+                    onChange={(event) => setDetailReminderEnabled(event.target.checked)}
+                  />
+                  <span>
+                    <strong>本地提醒</strong>
+                    <small>{detailReminderEnabled ? detailReminderTime : '未开启'}</small>
+                  </span>
+                </label>
+                <label className="input-label">
+                  <span>时间</span>
+                  <input
+                    className="text-input"
+                    type="time"
+                    value={detailReminderTime}
+                    disabled={!detailReminderEnabled}
+                    onChange={(event) => setDetailReminderTime(event.target.value)}
+                  />
+                </label>
+              </div>
               <fieldset className="todo-priority-field">
                 <legend>重要级</legend>
                 <div className="todo-priority-options">
@@ -680,6 +798,56 @@ export function BoardView({
                   <small>按上方 Todo 日期计算剩余天数</small>
                 </span>
               </label>
+              <fieldset className="todo-repeat-field">
+                <legend>重复</legend>
+                <div className="todo-repeat-options">
+                  {repeatOptions.map((option) => (
+                    <button
+                      className={`todo-repeat-option ${todoDraftRepeatFrequency === option.id ? 'todo-repeat-option-active' : ''}`}
+                      type="button"
+                      aria-pressed={todoDraftRepeatFrequency === option.id}
+                      key={option.id}
+                      onClick={() => handleTodoDraftRepeatChange(option.id)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+              <label className="todo-toggle-row">
+                <input
+                  type="checkbox"
+                  checked={todoDraftBoardVisible}
+                  onChange={(event) => setTodoDraftBoardVisible(event.target.checked)}
+                />
+                <span>
+                  <strong>显示在看板</strong>
+                  <small>{todoDraftBoardVisible ? '已显示' : '已隐藏'}</small>
+                </span>
+              </label>
+              <div className="todo-reminder-grid">
+                <label className="todo-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={todoDraftReminderEnabled}
+                    onChange={(event) => setTodoDraftReminderEnabled(event.target.checked)}
+                  />
+                  <span>
+                    <strong>本地提醒</strong>
+                    <small>{todoDraftReminderEnabled ? todoDraftReminderTime : '未开启'}</small>
+                  </span>
+                </label>
+                <label className="input-label">
+                  <span>时间</span>
+                  <input
+                    className="text-input"
+                    type="time"
+                    value={todoDraftReminderTime}
+                    disabled={!todoDraftReminderEnabled}
+                    onChange={(event) => setTodoDraftReminderTime(event.target.value)}
+                  />
+                </label>
+              </div>
               <fieldset className="todo-priority-field">
                 <legend>重要级</legend>
                 <div className="todo-priority-options">

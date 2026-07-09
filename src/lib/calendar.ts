@@ -18,6 +18,17 @@ export const addDays = (dateKey: string, amount: number) => {
   return toDateKey(date)
 }
 
+export const addMonths = (dateKey: string, amount: number) => {
+  const date = new Date(`${dateKey}T00:00:00`)
+  const day = date.getDate()
+  date.setDate(1)
+  date.setMonth(date.getMonth() + amount)
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+  date.setDate(Math.min(day, lastDay))
+
+  return toDateKey(date)
+}
+
 export const formatDateLabel = (dateKey: string) => {
   const date = new Date(`${dateKey}T00:00:00`)
 

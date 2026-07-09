@@ -202,15 +202,18 @@ export const TrendChart = ({
           <text className="trend-axis-value" x={pad} y={14}>
             {`${Math.round(domainMax)}${valueSuffix}`}
           </text>
-          <text className="trend-axis-value" x={pad} y={chartHeight - 4}>
+          <text className="trend-axis-value trend-axis-value-min" x={pad} y={chartHeight - 18}>
             {`${Math.round(domainMin)}${valueSuffix}`}
           </text>
           {points.map((point, index) => {
             if (index !== 0 && index !== points.length - 1 && index !== Math.floor(points.length / 2)) return null
-            const x = chartPoints[index]?.x ?? pad
+            const isFirst = index === 0
+            const isLast = index === points.length - 1
+            const x = isFirst ? pad + 2 : isLast ? width - pad - 2 : chartPoints[index]?.x ?? pad
+            const textAnchor = isFirst ? 'start' : isLast ? 'end' : 'middle'
 
             return (
-              <text className="trend-axis-label" key={point.label} x={x} y={chartHeight - 2} textAnchor="middle">
+              <text className="trend-axis-label" key={point.label} x={x} y={chartHeight - 2} textAnchor={textAnchor}>
                 {point.label}
               </text>
             )

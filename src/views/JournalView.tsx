@@ -154,7 +154,6 @@ export function JournalView({
     <section className="py-3 sm:py-5" aria-labelledby="journal-browser-title">
       <div className="mb-3 flex flex-col gap-3 md:mb-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="eyebrow">Journal Browser</p>
           <h2 className="section-title" id="journal-browser-title">
             日记浏览
           </h2>
@@ -173,7 +172,6 @@ export function JournalView({
       <section className="section" aria-labelledby="year-heatmap-title">
         <div className="section-head">
           <div>
-            <p className="eyebrow">Year Heatmap</p>
             <h3 className="section-title" id="year-heatmap-title">
               年度心象
             </h3>
@@ -256,18 +254,15 @@ export function JournalView({
                 return (
                   <article className="journal-entry-row" key={entry.id}>
                     <button className="journal-entry-main" type="button" onClick={() => setPreviewEntry(entry)}>
-                      <div className="journal-entry-date">
-                        <span>{entry.dateKey.slice(5).replace('-', '/')}</span>
-                        <strong className={`score-${entry.mood.level}`}>{entry.mood.score}</strong>
+                      <div className="journal-entry-title-row">
+                        <h4 className="m-0 min-w-0 truncate text-base font-black text-ink-950">{entry.title}</h4>
+                        <strong className={`journal-entry-score score-${entry.mood.level}`}>{entry.mood.score}</strong>
                       </div>
-
-                      <div className="min-w-0">
-                        <h4 className="m-0 truncate text-base font-black text-ink-950">{entry.title}</h4>
-                        <p className="mt-1 line-clamp-2 text-sm font-bold text-ink-600">{entry.moodText || entry.body || '没有正文'}</p>
-                      </div>
+                      <p className="m-0 line-clamp-2 text-sm font-bold text-ink-600">{entry.moodText || entry.body || '没有正文'}</p>
                     </button>
 
                     <div className="journal-entry-footer">
+                      <span className="journal-entry-date">{entry.dateKey.slice(5).replace('-', '/')}</span>
                       <div className="journal-entry-meta">
                         {entryAttachments > 0 && <span className="pill min-h-7 text-xs">{entryAttachments} 图</span>}
                       </div>

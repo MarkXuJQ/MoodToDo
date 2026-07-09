@@ -1,6 +1,7 @@
 import { Capacitor, CapacitorHttp, type HttpOptions, type HttpResponse } from '@capacitor/core'
 import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@capacitor-community/sqlite'
 
+import { addDays, addMonths, getTodayKey } from './calendar'
 import { analyzeMood, type MoodAnalysis } from './mood'
 import type {
   AttachmentRecord,
@@ -13,6 +14,7 @@ import type {
   LocalState,
   TodoItem,
   TodoDetailUpdate,
+  TodoRepeatFrequency,
   WebDavConnectionTestResult,
   WebDavSyncConfig,
   WebDavSyncResult,
@@ -55,6 +57,8 @@ const nativeAttachmentExtension = '.b64'
 const compactChangePayloadJson = 'null'
 const changeLogRetentionDays = 60
 const changeLogRetentionMs = changeLogRetentionDays * 24 * 60 * 60 * 1000
+const defaultTodoReminderTime = '09:00'
+const todoRepeatFrequencies = new Set<TodoRepeatFrequency>(['none', 'daily', 'weekly', 'monthly'])
 const sqlite = new SQLiteConnection(CapacitorSQLite)
 let webDavHadAuthSuccess = false
 
@@ -132,10 +136,28 @@ const readString = (row: DbRow, key: string, fallback = '') => {
   return typeof value === 'string' ? value : fallback
 }
 
-const readNumber = (row: DbRow, key: string, fallback = 0) => {
-  const value = row[key]
+const readStringAny = (row: DbRow, keys: string[], fallback = '') => {
+  for (const key of keys) {
+    const value = row[key]
+    if (value != null && value !== '') return String(value)
+  }
 
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+  return fallback
+}
+
+const readNumber = (row: DbRow, key: string, fallback = 0) => {
+  const value = Number(row[key])
+
+  return Number.isFinite(value) ? value : fallback
+}
+
+const readNumberAny = (row: DbRow, keys: string[], fallback = 0) => {
+  for (const key of keys) {
+    const value = Number(row[key])
+    if (Number.isFinite(value)) return value
+  }
+
+  return fallback
 }
 
 type PortableDefaultValue = string | number | null
@@ -167,6 +189,11 @@ const toPortableTodoRow = (row: DbRow) =>
     priority: 'normal',
     lane_id: 'inbox',
     countdown_enabled: 0,
+    repeat_frequency: 'none',
+    repeat_group_id: '',
+    board_visible: 1,
+    reminder_enabled: 0,
+    reminder_time: defaultTodoReminderTime,
     done: 0,
     completed_at: null,
   })
@@ -223,6 +250,29 @@ const parseJson = <T>(value: unknown, fallback: T): T => {
     return fallback
   }
 }
+
+const normalizeRepeatFrequency = (value: unknown): TodoRepeatFrequency => {
+  const raw = typeof value === 'string' ? value : 'none'
+
+  return todoRepeatFrequencies.has(raw as TodoRepeatFrequency) ? (raw as TodoRepeatFrequency) : 'none'
+}
+
+const normalizeReminderTime = (value: unknown) => {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  const match = raw.match(/^([01]\d|2[0-3]):([0-5]\d)$/)
+
+  return match ? raw : defaultTodoReminderTime
+}
+
+const readRepeatFrequency = (row: DbRow) =>
+  normalizeRepeatFrequency(readStringAny(row, ['repeat_frequency', 'repeatFrequency'], 'none'))
+
+const readReminderTime = (row: DbRow) =>
+  normalizeReminderTime(readStringAny(row, ['reminder_time', 'reminderTime'], defaultTodoReminderTime))
+
+const readBoardVisible = (row: DbRow, fallback = 1) => readNumberAny(row, ['board_visible', 'boardVisible'], fallback) !== 0
+
+const readReminderEnabled = (row: DbRow) => readNumberAny(row, ['reminder_enabled', 'reminderEnabled']) !== 0
 
 const queryRows = async <T extends DbRow>(db: SQLiteDBConnection, statement: string, values: SqlValue[] = []) => {
   const result = await db.query(statement, values)
@@ -302,6 +352,11 @@ const rowToTodo = (row: DbRow): TodoItem => ({
   priority: readString(row, 'priority', 'normal') as TodoItem['priority'],
   laneId: readString(row, 'lane_id', 'inbox'),
   countdownEnabled: Boolean(readNumber(row, 'countdown_enabled')),
+  repeatFrequency: readRepeatFrequency(row),
+  repeatGroupId: readString(row, 'repeat_group_id'),
+  boardVisible: readBoardVisible(row),
+  reminderEnabled: readReminderEnabled(row),
+  reminderTime: readReminderTime(row),
   done: Boolean(readNumber(row, 'done')),
   createdAt: readString(row, 'created_at'),
   updatedAt: readString(row, 'updated_at'),
@@ -563,6 +618,11 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
       priority TEXT NOT NULL DEFAULT 'normal',
       lane_id TEXT NOT NULL DEFAULT 'inbox',
       countdown_enabled INTEGER NOT NULL DEFAULT 0,
+      repeat_frequency TEXT NOT NULL DEFAULT 'none',
+      repeat_group_id TEXT NOT NULL DEFAULT '',
+      board_visible INTEGER NOT NULL DEFAULT 1,
+      reminder_enabled INTEGER NOT NULL DEFAULT 0,
+      reminder_time TEXT NOT NULL DEFAULT '09:00',
       done INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -641,6 +701,7 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
     CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
     CREATE INDEX IF NOT EXISTS idx_todos_lane_done_created_at ON todos(lane_id, done, created_at);
     CREATE INDEX IF NOT EXISTS idx_todos_date_done ON todos(date_key, done);
+    CREATE INDEX IF NOT EXISTS idx_todos_repeat_group_date ON todos(repeat_group_id, date_key);
     CREATE INDEX IF NOT EXISTS idx_attachments_entry_id ON attachments(entry_id);
     CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
     CREATE INDEX IF NOT EXISTS idx_board_lanes_created_at ON board_lanes(created_at);
@@ -660,6 +721,11 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
   await ensureColumn(db, 'todos', 'priority', `priority TEXT NOT NULL DEFAULT 'normal'`)
   await ensureColumn(db, 'todos', 'lane_id', `lane_id TEXT NOT NULL DEFAULT 'inbox'`)
   await ensureColumn(db, 'todos', 'countdown_enabled', `countdown_enabled INTEGER NOT NULL DEFAULT 0`)
+  await ensureColumn(db, 'todos', 'repeat_frequency', `repeat_frequency TEXT NOT NULL DEFAULT 'none'`)
+  await ensureColumn(db, 'todos', 'repeat_group_id', `repeat_group_id TEXT NOT NULL DEFAULT ''`)
+  await ensureColumn(db, 'todos', 'board_visible', `board_visible INTEGER NOT NULL DEFAULT 1`)
+  await ensureColumn(db, 'todos', 'reminder_enabled', `reminder_enabled INTEGER NOT NULL DEFAULT 0`)
+  await ensureColumn(db, 'todos', 'reminder_time', `reminder_time TEXT NOT NULL DEFAULT '09:00'`)
   await ensureColumn(db, 'attachments', 'data_base64', `data_base64 TEXT NOT NULL DEFAULT ''`)
   await ensureColumn(db, 'changes', 'payload_json', `payload_json TEXT NOT NULL DEFAULT 'null'`)
   await runStatement(db, `UPDATE changes SET payload_json = ? WHERE payload_json <> ?`, [
@@ -790,8 +856,132 @@ const getNativeMeta = async (db: SQLiteDBConnection) => {
   }
 }
 
+const getNextRepeatDateKey = (dateKey: string, frequency: TodoRepeatFrequency, todayKey = getTodayKey()) => {
+  if (frequency === 'daily') return todayKey > dateKey ? todayKey : addDays(dateKey, 1)
+  if (frequency === 'weekly') return addDays(dateKey, 7)
+  if (frequency === 'monthly') return addMonths(dateKey, 1)
+  return ''
+}
+
+const getNextDueRepeatDateKey = (dateKey: string, frequency: TodoRepeatFrequency, todayKey = getTodayKey()) => {
+  let nextDateKey = getNextRepeatDateKey(dateKey, frequency, todayKey)
+
+  if (!nextDateKey || nextDateKey.localeCompare(todayKey) > 0) {
+    return ''
+  }
+
+  for (let index = 0; index < 120; index += 1) {
+    const followingDateKey =
+      frequency === 'weekly'
+        ? addDays(nextDateKey, 7)
+        : frequency === 'monthly'
+          ? addMonths(nextDateKey, 1)
+          : ''
+
+    if (!followingDateKey || followingDateKey.localeCompare(todayKey) > 0) break
+    nextDateKey = followingDateKey
+  }
+
+  return nextDateKey
+}
+
+const createRecurringTodoInstance = (template: TodoItem, nextDateKey: string, timestamp = nowIso()): TodoItem => ({
+  ...template,
+  id: createId('todo'),
+  dateKey: nextDateKey,
+  done: false,
+  completedAt: undefined,
+  laneId: 'inbox',
+  boardVisible: false,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  syncState: 'pending',
+})
+
+const runInsertNativeTodo = (db: SQLiteDBConnection, todo: TodoItem, transaction = true) =>
+  runStatement(
+    db,
+    `
+      INSERT INTO todos (
+        id, date_key, title, description, priority, lane_id, countdown_enabled,
+        repeat_frequency, repeat_group_id, board_visible, reminder_enabled, reminder_time,
+        done, created_at, updated_at, completed_at, sync_state
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      todo.id,
+      todo.dateKey,
+      todo.title,
+      todo.description,
+      todo.priority,
+      todo.laneId,
+      todo.countdownEnabled ? 1 : 0,
+      todo.repeatFrequency,
+      todo.repeatGroupId,
+      todo.boardVisible ? 1 : 0,
+      todo.reminderEnabled ? 1 : 0,
+      normalizeReminderTime(todo.reminderTime),
+      todo.done ? 1 : 0,
+      todo.createdAt,
+      todo.updatedAt,
+      todo.completedAt ?? null,
+      todo.syncState,
+    ],
+    transaction,
+  )
+
+const materializeDueNativeRecurringTodos = async (db: SQLiteDBConnection) => {
+  const rows = await queryRows(
+    db,
+    `SELECT * FROM todos WHERE repeat_frequency <> 'none' OR repeat_group_id <> '' ORDER BY date_key ASC, created_at ASC`,
+  )
+
+  if (rows.length === 0) return []
+
+  const groups = new Map<string, DbRow>()
+  const todayKey = getTodayKey()
+  const createdTodos: TodoItem[] = []
+
+  for (const row of rows) {
+    const groupId = readString(row, 'repeat_group_id') || readString(row, 'id')
+    if (!groupId) continue
+
+    const existing = groups.get(groupId)
+    if (
+      !existing ||
+      readString(row, 'date_key').localeCompare(readString(existing, 'date_key')) > 0 ||
+      (readString(row, 'date_key') === readString(existing, 'date_key') &&
+        readString(row, 'created_at').localeCompare(readString(existing, 'created_at')) > 0)
+    ) {
+      groups.set(groupId, row)
+    }
+  }
+
+  await withTransaction(db, async () => {
+    for (const row of groups.values()) {
+      const template = rowToTodo(row)
+      const repeatGroupId = template.repeatGroupId || template.id
+      if (template.repeatFrequency === 'none' || !repeatGroupId || !template.done) continue
+
+      const nextDateKey = getNextDueRepeatDateKey(template.dateKey, template.repeatFrequency, todayKey)
+      if (!nextDateKey) continue
+
+      const timestamp = nowIso()
+      const todo = createRecurringTodoInstance({ ...template, repeatGroupId }, nextDateKey, timestamp)
+      await runInsertNativeTodo(db, todo, false)
+      await appendChange(db, 'todo', todo.id, 'upsert', todo, 'recurrence', false)
+      createdTodos.push(todo)
+    }
+  })
+
+  return createdTodos
+}
+
 export const getNativeLocalState = async (): Promise<LocalState> => {
   const db = await getDatabase()
+  await materializeDueNativeRecurringTodos(db)
+
   const [entries, todos, boardLanes, attachments, changes, weeklySummaries, meta] = await Promise.all([
     queryRows(db, 'SELECT * FROM entries ORDER BY date_key DESC').then((rows) => rows.map(rowToEntry)),
     queryRows(db, 'SELECT * FROM todos ORDER BY created_at DESC').then((rows) => rows.map(rowToTodo)),
@@ -994,6 +1184,7 @@ export const deleteNativeJournalEntries = async (entryIds: string[]) => {
 export const addNativeTodo = async (dateKey: string, title: string, details: TodoDetailUpdate = {}) => {
   const db = await getDatabase()
   const timestamp = nowIso()
+  const repeatFrequency = normalizeRepeatFrequency(details.repeatFrequency)
   const todo: TodoItem = {
     id: createId('todo'),
     dateKey,
@@ -1002,6 +1193,11 @@ export const addNativeTodo = async (dateKey: string, title: string, details: Tod
     priority: details.priority ?? 'normal',
     laneId: details.laneId ?? 'inbox',
     countdownEnabled: Boolean(details.countdownEnabled),
+    repeatFrequency,
+    repeatGroupId: repeatFrequency === 'none' ? '' : createId('repeat'),
+    boardVisible: details.boardVisible ?? repeatFrequency === 'none',
+    reminderEnabled: Boolean(details.reminderEnabled),
+    reminderTime: normalizeReminderTime(details.reminderTime),
     done: false,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -1010,26 +1206,7 @@ export const addNativeTodo = async (dateKey: string, title: string, details: Tod
   const deviceId = getDeviceId()
 
   await withTransaction(db, async () => {
-    await runStatement(
-      db,
-      `
-        INSERT INTO todos (id, date_key, title, description, priority, lane_id, countdown_enabled, done, created_at, updated_at, sync_state)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-      `,
-      [
-        todo.id,
-        todo.dateKey,
-        todo.title,
-        todo.description,
-        todo.priority,
-        todo.laneId,
-        todo.countdownEnabled ? 1 : 0,
-        todo.createdAt,
-        todo.updatedAt,
-        todo.syncState,
-      ],
-      false,
-    )
+    await runInsertNativeTodo(db, todo, false)
     await appendChange(db, 'todo', todo.id, 'upsert', todo, deviceId, false)
   })
 
@@ -1046,12 +1223,21 @@ export const updateNativeTodoDetails = async (todo: TodoItem, details: TodoDetai
 
   const timestamp = nowIso()
   const existingTodo = rowToTodo(existing)
+  const repeatFrequency = details.repeatFrequency == null ? existingTodo.repeatFrequency : normalizeRepeatFrequency(details.repeatFrequency)
+  const boardVisible =
+    details.boardVisible ??
+    (existingTodo.repeatFrequency === 'none' && repeatFrequency !== 'none' ? false : existingTodo.boardVisible)
   const next: TodoItem = {
     ...existingTodo,
     description: details.description ?? existingTodo.description,
     priority: details.priority ?? existingTodo.priority,
     laneId: details.laneId ?? existingTodo.laneId,
     countdownEnabled: details.countdownEnabled ?? existingTodo.countdownEnabled,
+    repeatFrequency,
+    repeatGroupId: repeatFrequency === 'none' ? existingTodo.repeatGroupId : existingTodo.repeatGroupId || createId('repeat'),
+    boardVisible,
+    reminderEnabled: details.reminderEnabled ?? existingTodo.reminderEnabled,
+    reminderTime: details.reminderTime == null ? existingTodo.reminderTime : normalizeReminderTime(details.reminderTime),
     updatedAt: timestamp,
     syncState: 'pending',
   }
@@ -1062,10 +1248,24 @@ export const updateNativeTodoDetails = async (todo: TodoItem, details: TodoDetai
       db,
       `
         UPDATE todos
-        SET description = ?, priority = ?, lane_id = ?, countdown_enabled = ?, updated_at = ?, sync_state = 'pending'
+        SET description = ?, priority = ?, lane_id = ?, countdown_enabled = ?,
+            repeat_frequency = ?, repeat_group_id = ?, board_visible = ?, reminder_enabled = ?, reminder_time = ?,
+            updated_at = ?, sync_state = 'pending'
         WHERE id = ?
       `,
-      [next.description, next.priority, next.laneId, next.countdownEnabled ? 1 : 0, next.updatedAt, next.id],
+      [
+        next.description,
+        next.priority,
+        next.laneId,
+        next.countdownEnabled ? 1 : 0,
+        next.repeatFrequency,
+        next.repeatGroupId,
+        next.boardVisible ? 1 : 0,
+        next.reminderEnabled ? 1 : 0,
+        next.reminderTime,
+        next.updatedAt,
+        next.id,
+      ],
       false,
     )
     await appendChange(db, 'todo', next.id, 'upsert', next, deviceId, false)
@@ -1140,8 +1340,9 @@ export const setNativeTodoDone = async (todo: TodoItem, done: boolean) => {
   }
 
   const timestamp = nowIso()
+  const existingTodo = rowToTodo(existing)
   const next: TodoItem = {
-    ...rowToTodo(existing),
+    ...existingTodo,
     done,
     completedAt: done ? timestamp : undefined,
     updatedAt: timestamp,
@@ -1161,6 +1362,22 @@ export const setNativeTodoDone = async (todo: TodoItem, done: boolean) => {
       false,
     )
     await appendChange(db, 'todo', next.id, 'upsert', next, deviceId, false)
+
+    if (!existingTodo.done && next.done && next.repeatFrequency !== 'none' && next.repeatGroupId) {
+      const nextDateKey = getNextDueRepeatDateKey(next.dateKey, next.repeatFrequency)
+      const existingNext = nextDateKey
+        ? await queryFirst(db, 'SELECT id FROM todos WHERE repeat_group_id = ? AND date_key = ?', [
+            next.repeatGroupId,
+            nextDateKey,
+          ])
+        : null
+
+      if (nextDateKey && !existingNext) {
+        const nextTodo = createRecurringTodoInstance(next, nextDateKey, timestamp)
+        await runInsertNativeTodo(db, nextTodo, false)
+        await appendChange(db, 'todo', nextTodo.id, 'upsert', nextTodo, deviceId, false)
+      }
+    }
   })
 
   return next
@@ -1456,6 +1673,8 @@ const ensureNativeWebDavCollection = async (config: WebDavSyncConfig, ...parts: 
 
 const createNativeSnapshot = async (): Promise<NativeSnapshot> => {
   const db = await getDatabase()
+  await materializeDueNativeRecurringTodos(db)
+
   const [entries, todos, boardLanes, attachments, changes, weeklySummaries, metricDefinitions, metricRecords] = await Promise.all([
     queryRows(db, 'SELECT * FROM entries ORDER BY date_key DESC'),
     queryRows(db, 'SELECT * FROM todos ORDER BY created_at DESC'),
@@ -1744,8 +1963,12 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot, resolveDetachedAtt
       await runStatement(
         db,
         `
-          INSERT INTO todos (id, date_key, title, description, priority, lane_id, countdown_enabled, done, created_at, updated_at, completed_at, sync_state)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+          INSERT INTO todos (
+            id, date_key, title, description, priority, lane_id, countdown_enabled,
+            repeat_frequency, repeat_group_id, board_visible, reminder_enabled, reminder_time,
+            done, created_at, updated_at, completed_at, sync_state
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
         `,
         [
           readString(row, 'id', createId('todo')),
@@ -1754,7 +1977,12 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot, resolveDetachedAtt
           readString(row, 'description', ''),
           readString(row, 'priority', 'normal'),
           readString(row, 'lane_id', 'inbox'),
-          readNumber(row, 'countdown_enabled', readNumber(row, 'countdownEnabled')),
+          readNumberAny(row, ['countdown_enabled', 'countdownEnabled']),
+          readRepeatFrequency(row),
+          readStringAny(row, ['repeat_group_id', 'repeatGroupId']),
+          readBoardVisible(row) ? 1 : 0,
+          readReminderEnabled(row) ? 1 : 0,
+          readReminderTime(row),
           readNumber(row, 'done'),
           readString(row, 'created_at', timestamp),
           readString(row, 'updated_at', timestamp),

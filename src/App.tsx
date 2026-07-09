@@ -176,7 +176,6 @@ function App() {
     selectedWeekScore,
     selectedWeekSummary,
     selectedWeekTodos,
-    trendDateKeys,
     visibleDashboardCards,
   } = useAppDerivedState({
     attachments,
@@ -320,8 +319,6 @@ function App() {
           moodBreakdownItems={moodBreakdownItems}
           moodTrendPoints={moodTrendPoints}
           selectedMoodTrendIndex={selectedMoodTrendIndex}
-          trendStartLabel={trendDateKeys[0]}
-          trendEndLabel={trendDateKeys[trendDateKeys.length - 1]}
           moodWindowAverage={moodWindowAverage}
           onDateChange={(dateKey) => focusDate(dateKey, 'dashboard')}
           onGoToday={() => focusDate(todayKey, 'dashboard')}

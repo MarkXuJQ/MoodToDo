@@ -933,7 +933,12 @@
     @apply inline-flex min-h-6 w-fit items-center gap-1 rounded-full border border-field-200 bg-field-50 px-2 text-xs font-black no-underline;
   }
 
-  .todo-inline-countdown svg {
+  .todo-inline-meta {
+    @apply inline-flex min-h-6 w-fit items-center gap-1 text-xs font-black text-ink-400 no-underline;
+  }
+
+  .todo-inline-countdown svg,
+  .todo-inline-meta svg {
     @apply shrink-0;
   }
 
@@ -1344,7 +1349,7 @@
   }
 
   .todo-dialog {
-    @apply w-full max-w-md rounded-lg border border-white/75 bg-[rgba(252,253,252,0.94)] p-4 shadow-[0_24px_80px_rgba(17,24,22,0.18)] backdrop-blur-xl;
+    @apply max-h-[min(760px,calc(100vh-2rem))] w-full max-w-md overflow-y-auto rounded-lg border border-white/75 bg-[rgba(252,253,252,0.94)] p-4 shadow-[0_24px_80px_rgba(17,24,22,0.18)] backdrop-blur-xl;
   }
 
   .journal-dialog {
@@ -1615,24 +1620,65 @@
     @apply border-coral-500/30 bg-[#fff1ee] text-coral-500 hover:border-coral-500/50 hover:bg-[#ffe1da];
   }
 
-  .countdown-toggle {
+  .countdown-toggle,
+  .todo-toggle-row {
     @apply grid min-h-14 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md border border-field-200 bg-field-50 px-3 py-2 text-left;
   }
 
-  .countdown-toggle input {
+  .countdown-toggle input,
+  .todo-toggle-row input {
     @apply size-5 accent-xin-700;
   }
 
-  .countdown-toggle span {
+  .countdown-toggle span,
+  .todo-toggle-row span {
     @apply grid min-w-0 gap-0.5;
   }
 
-  .countdown-toggle strong {
+  .countdown-toggle strong,
+  .todo-toggle-row strong {
     @apply text-sm font-black text-ink-950;
   }
 
-  .countdown-toggle small {
+  .countdown-toggle small,
+  .todo-toggle-row small {
     @apply text-xs font-bold text-ink-400;
+  }
+
+  .todo-repeat-field {
+    @apply m-0 grid gap-2 border-0 p-0;
+  }
+
+  .todo-repeat-field legend {
+    @apply mb-1 text-sm font-bold text-ink-600;
+  }
+
+  .todo-repeat-options {
+    @apply grid grid-cols-4 gap-2;
+  }
+
+  .todo-repeat-option {
+    @apply min-h-11 rounded-md border border-field-200 bg-field-50 px-2 text-sm font-black text-ink-600 transition-colors hover:border-xin-700;
+  }
+
+  .todo-repeat-option-active {
+    @apply border-xin-700 bg-xin-100 text-xin-800;
+  }
+
+  .todo-reminder-grid {
+    @apply grid gap-2 sm:grid-cols-[minmax(0,1fr)_136px];
+  }
+
+  .todo-reminder-grid .text-input:disabled {
+    @apply cursor-not-allowed opacity-55;
+  }
+
+  .todo-mini-meta {
+    @apply flex min-w-0 flex-wrap items-center justify-end gap-2 text-[11px] font-black text-ink-400;
+  }
+
+  .todo-mini-meta span {
+    @apply inline-flex items-center gap-1;
   }
 
   .board-priority {
@@ -1957,7 +2003,7 @@
   }
 
   .journal-entry-row {
-    @apply grid min-h-40 gap-3 rounded-md border border-white/70 bg-white/82 p-3 transition-colors hover:border-xin-700/60 hover:bg-white/95;
+    @apply grid min-h-32 gap-3 rounded-md border border-white/70 bg-white/82 p-3 transition-colors hover:border-xin-700/60 hover:bg-white/95;
     align-content: space-between;
   }
 
@@ -1965,24 +2011,28 @@
     @apply grid min-w-0 gap-2 text-left;
   }
 
-  .journal-entry-date {
-    @apply flex items-center justify-between gap-3 text-sm font-black text-ink-400;
+  .journal-entry-title-row {
+    @apply grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3;
   }
 
-  .journal-entry-date strong {
-    @apply text-2xl leading-none;
+  .journal-entry-score {
+    @apply text-2xl font-black leading-none;
+  }
+
+  .journal-entry-date {
+    @apply text-xs font-black text-ink-400;
   }
 
   .journal-entry-meta {
-    @apply flex flex-wrap items-start gap-2;
+    @apply flex min-w-0 flex-wrap items-center gap-2;
   }
 
   .journal-entry-footer {
-    @apply flex min-h-9 items-center justify-between gap-2 border-t border-field-200 pt-2;
+    @apply grid min-h-9 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-t border-field-200 pt-2;
   }
 
   .journal-entry-actions {
-    @apply flex items-center gap-2;
+    @apply flex items-center justify-end gap-2;
   }
 
   .attachment-thumb {
@@ -2220,6 +2270,7 @@
   :root[data-theme='dark'] .settings-link,
   :root[data-theme='dark'] .config-row,
   :root[data-theme='dark'] .countdown-toggle,
+  :root[data-theme='dark'] .todo-toggle-row,
   :root[data-theme='dark'] .webdav-test-row,
   :root[data-theme='dark'] .journal-entry-row,
   :root[data-theme='dark'] .todo-dialog,
@@ -2416,7 +2467,8 @@
   :root[data-theme='dark'] .board-trash-drop,
   :root[data-theme='dark'] .board-detail-select,
   :root[data-theme='dark'] .board-drop-empty,
-  :root[data-theme='dark'] .todo-inline-countdown {
+  :root[data-theme='dark'] .todo-inline-countdown,
+  :root[data-theme='dark'] .todo-repeat-option {
     border-color: rgba(126, 151, 142, 0.3);
     background-color: rgba(12, 20, 18, 0.56);
   }
@@ -2446,6 +2498,12 @@
   :root[data-theme='dark'] .todo-priority-option {
     border-color: rgba(126, 151, 142, 0.3);
     background-color: rgba(12, 20, 18, 0.56);
+  }
+
+  :root[data-theme='dark'] .todo-repeat-option-active {
+    border-color: var(--color-xin-700);
+    background-color: rgba(28, 76, 69, 0.92);
+    color: var(--color-ink-900);
   }
 
   :root[data-theme='dark'] .year-heatmap-cell {

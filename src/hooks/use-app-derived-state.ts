@@ -112,7 +112,7 @@ export const useAppDerivedState = ({
   )
 
   const filteredBoardTodos = useMemo(() => {
-    return [...todos].sort((left, right) => {
+    return todos.filter((todo) => todo.boardVisible !== false).sort((left, right) => {
       if (left.done !== right.done) return Number(left.done) - Number(right.done)
       if (!left.done && left.dateKey !== right.dateKey) return left.dateKey.localeCompare(right.dateKey)
 

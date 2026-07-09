@@ -158,7 +158,6 @@ export function SettingsView({
 
       <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="eyebrow">Preferences</p>
           <h2 className="section-title" id="settings-title">
             设置
           </h2>

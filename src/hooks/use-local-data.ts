@@ -11,6 +11,7 @@ import {
   type TodoItem,
   type WeeklySummary,
 } from '../lib/db'
+import { syncTodoReminders } from '../lib/local-notifications'
 import type { DatabaseStatus } from '../types/app'
 import { getErrorMessage } from '../utils/errors'
 
@@ -50,6 +51,7 @@ export const useLocalData = ({ onLoadError }: LocalDataOptions) => {
       setAttachments(nextState.attachments)
       setChanges(nextState.changes)
       setWeeklySummaries(nextState.weeklySummaries)
+      void syncTodoReminders(nextState.todos)
       setDatabaseStatus({
         origin: window.location.origin,
         driver: nextState.meta.driver,

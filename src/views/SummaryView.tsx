@@ -1,10 +1,11 @@
 import type { FormEvent } from 'react'
-import { CheckCircle2, ChevronLeft, ChevronRight, Circle, Plus, RefreshCw, Save, Settings2, Sparkles, Trash2 } from 'lucide-react'
+import { Bell, CheckCircle2, ChevronLeft, ChevronRight, Circle, Plus, RefreshCw, Repeat2, Save, Settings2, Sparkles, Trash2 } from 'lucide-react'
 
 import { DatePickerButton } from '../components/ui/date-picker-button'
 import { Metric } from '../components/ui/stat-primitives'
 import type { JournalEntry, TodoItem } from '../lib/db'
 import type { CalendarCell } from '../types/app'
+import { getTodoRepeatLabel } from '../utils/todo'
 
 type SummaryViewProps = {
   visibleMonthLabel: string
@@ -94,7 +95,6 @@ export function SummaryView({
     <section className="py-3 sm:py-5" aria-labelledby="summary-title">
       <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="eyebrow">Traceable Progress</p>
           <h2 className="section-title" id="summary-title">
             总结
           </h2>
@@ -123,7 +123,6 @@ export function SummaryView({
         <section className="section" aria-labelledby="calendar-title">
           <div className="section-head">
             <div>
-              <p className="eyebrow">Calendar Heatmap</p>
               <h2 className="section-title" id="calendar-title">
                 心情日历
               </h2>
@@ -178,7 +177,6 @@ export function SummaryView({
           <div className="calendar-day-todos" aria-labelledby="calendar-day-todos-title">
             <div className="section-head mb-3">
               <div>
-                <p className="eyebrow">{selectedDate}</p>
                 <h3 className="section-title text-lg" id="calendar-day-todos-title">
                   当日 Todo
                 </h3>
@@ -216,7 +214,21 @@ export function SummaryView({
                   </button>
                   <span className="todo-copy">
                     <strong className={`break-words ${todo.done ? 'todo-done' : ''}`}>{todo.title}</strong>
-                    <small>{todo.dateKey}</small>
+                    <small>
+                      {todo.dateKey}
+                      {todo.repeatFrequency !== 'none' && (
+                        <span className="todo-inline-meta">
+                          <Repeat2 size={12} aria-hidden="true" />
+                          {getTodoRepeatLabel(todo.repeatFrequency)}
+                        </span>
+                      )}
+                      {todo.reminderEnabled && (
+                        <span className="todo-inline-meta">
+                          <Bell size={12} aria-hidden="true" />
+                          {todo.reminderTime}
+                        </span>
+                      )}
+                    </small>
                   </span>
                   <button className="icon-button" type="button" aria-label={`删除 ${todo.title}`} onClick={() => onDeleteTodo(todo)}>
                     <Trash2 size={16} aria-hidden="true" />
@@ -232,7 +244,6 @@ export function SummaryView({
         <section className="section" aria-labelledby="week-title">
           <div className="section-head">
             <div>
-              <p className="eyebrow">Weekly Review</p>
               <h2 className="section-title" id="week-title">
                 一周回顾
               </h2>
