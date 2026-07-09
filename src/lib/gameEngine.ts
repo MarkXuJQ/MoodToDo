@@ -89,7 +89,8 @@ const getTodayKey = () => {
 
 const getCurrentStreak = (entries: JournalEntry[]) => {
   const entryDateKeys = new Set(entries.map((entry) => entry.dateKey))
-  let cursor = getTodayKey()
+  const todayKey = getTodayKey()
+  let cursor = entryDateKeys.has(todayKey) ? todayKey : addDays(todayKey, -1)
   let streak = 0
 
   while (entryDateKeys.has(cursor)) {

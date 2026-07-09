@@ -36,12 +36,14 @@ export const webDavConfigStorageKey = 'xinxiangyi-webdav-config-v1'
 export const webDavLastAutoSyncStorageKey = 'xinxiangyi-webdav-last-auto-sync-v1'
 export const gameEngineSettingsStorageKey = 'xinxiangyi-game-engine-settings-v1'
 export const dashboardCardsStorageKey = 'xinxiangyi-dashboard-cards-v1'
+export const countdownDashboardTodoStorageKey = 'xinxiangyi-countdown-dashboard-todo-v1'
 export const themeModeStorageKey = 'xinxiangyi-theme-mode-v1'
 
 export const defaultDashboardCards: DashboardCardConfig[] = [
   { id: 'streak', enabled: true },
   { id: 'todoCompletion', enabled: true },
   { id: 'monthCheckin', enabled: true },
+  { id: 'countdown', enabled: true },
   { id: 'pendingSync', enabled: true },
   { id: 'attachments', enabled: false },
 ]

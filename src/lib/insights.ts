@@ -22,13 +22,19 @@ export const getCompletionRate = (items: TodoItem[]) => {
   return Math.round((items.filter((item) => item.done).length / items.length) * 100)
 }
 
-export const getCheckinRate = (entries: JournalEntry[], monthKey: string) => {
+const getEffectiveCheckinEndDate = (entryDateKeys: Set<string>) => {
   const todayKey = getTodayKey()
-  const monthDays = getMonthDays(monthKey).filter((dateKey) => dateKey <= todayKey)
+
+  return entryDateKeys.has(todayKey) ? todayKey : addDays(todayKey, -1)
+}
+
+export const getCheckinRate = (entries: JournalEntry[], monthKey: string) => {
+  const entryDateKeys = new Set(entries.map((entry) => entry.dateKey))
+  const checkinEndDate = getEffectiveCheckinEndDate(entryDateKeys)
+  const monthDays = getMonthDays(monthKey).filter((dateKey) => dateKey <= checkinEndDate)
 
   if (monthDays.length === 0) return 0
 
-  const entryDateKeys = new Set(entries.map((entry) => entry.dateKey))
   const checkedDays = monthDays.filter((dateKey) => entryDateKeys.has(dateKey)).length
 
   return Math.round((checkedDays / monthDays.length) * 100)
@@ -36,7 +42,7 @@ export const getCheckinRate = (entries: JournalEntry[], monthKey: string) => {
 
 export const getCurrentStreak = (entries: JournalEntry[]) => {
   const entryDateKeys = new Set(entries.map((entry) => entry.dateKey))
-  let cursor = getTodayKey()
+  let cursor = getEffectiveCheckinEndDate(entryDateKeys)
   let streak = 0
 
   while (entryDateKeys.has(cursor)) {

@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
-import { CheckCircle2, Circle, ImagePlus, LocateFixed, Plus, Save, Trash2 } from 'lucide-react'
+import { CheckCircle2, Circle, Clock3, ImagePlus, LocateFixed, Plus, Save, Trash2 } from 'lucide-react'
 
 import { AttachmentThumb } from '../components/ui/attachment-thumb'
 import { DatePickerButton } from '../components/ui/date-picker-button'
 import { ImagePreviewDialog } from '../components/ui/image-preview-dialog'
 import { ProgressRing, TrendChart, type TrendPoint } from '../components/ui/data-viz'
 import { Metric } from '../components/ui/stat-primitives'
+import { addDays } from '../lib/calendar'
 import type { AttachmentRecord, JournalEntry, TodoItem } from '../lib/db'
 import type { DraftState } from '../types/app'
+import { formatCountdownDays, getCountdownDaysRemaining, getCountdownTone } from '../utils/countdown'
 
 type DashboardMetricCard = {
   id: string
@@ -23,29 +25,13 @@ type MoodBreakdownItem = {
   note: string
 }
 
-const toLocalDate = (dateKey: string) => new Date(`${dateKey}T00:00:00`)
-
-const toDateKey = (date: Date) => {
-  const year = date.getFullYear()
-  const month = `${date.getMonth() + 1}`.padStart(2, '0')
-  const day = `${date.getDate()}`.padStart(2, '0')
-
-  return `${year}-${month}-${day}`
-}
-
-const addDays = (dateKey: string, offset: number) => {
-  const date = toLocalDate(dateKey)
-  date.setDate(date.getDate() + offset)
-  return toDateKey(date)
-}
-
 const getNearbyDateKeys = (dateKey: string) => [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((offset) => addDays(dateKey, offset))
 
 const getDayLabel = (dateKey: string) => `${Number(dateKey.slice(8, 10))}号`
 
 const getWeekdayLabel = (dateKey: string) => {
   const weekdays = ['日', '一', '二', '三', '四', '五', '六']
-  return `周${weekdays[toLocalDate(dateKey).getDay()]}`
+  return `周${weekdays[new Date(`${dateKey}T00:00:00`).getDay()]}`
 }
 
 const getMoodBreakdownColor = (id: string) => {
@@ -359,25 +345,37 @@ export function DashboardView({
             </form>
 
             <ul className="m-0 grid list-none p-0">
-              {dayTodos.map((todo) => (
-                <li className="todo-row" key={todo.id}>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label={todo.done ? '标记未完成' : '标记完成'}
-                    onClick={() => onToggleTodo(todo)}
-                  >
-                    {todo.done ? <CheckCircle2 size={20} aria-hidden="true" /> : <Circle size={20} aria-hidden="true" />}
-                  </button>
-                  <span className="todo-copy">
-                    <strong className={`break-words ${todo.done ? 'todo-done' : ''}`}>{todo.title}</strong>
-                    <small>{todo.dateKey}</small>
-                  </span>
-                  <button className="icon-button" type="button" aria-label={`删除 ${todo.title}`} onClick={() => onDeleteTodo(todo)}>
-                    <Trash2 size={16} aria-hidden="true" />
-                  </button>
-                </li>
-              ))}
+              {dayTodos.map((todo) => {
+                const countdownDays = todo.countdownEnabled ? getCountdownDaysRemaining(todo.dateKey) : null
+
+                return (
+                  <li className="todo-row" key={todo.id}>
+                    <button
+                      className="icon-button"
+                      type="button"
+                      aria-label={todo.done ? '标记未完成' : '标记完成'}
+                      onClick={() => onToggleTodo(todo)}
+                    >
+                      {todo.done ? <CheckCircle2 size={20} aria-hidden="true" /> : <Circle size={20} aria-hidden="true" />}
+                    </button>
+                    <span className="todo-copy">
+                      <strong className={`break-words ${todo.done ? 'todo-done' : ''}`}>{todo.title}</strong>
+                      <small>
+                        {todo.dateKey}
+                        {countdownDays != null && (
+                          <span className={`todo-inline-countdown ${getCountdownTone(countdownDays)}`}>
+                            <Clock3 size={12} aria-hidden="true" />
+                            {todo.done ? '已完成' : formatCountdownDays(countdownDays)}
+                          </span>
+                        )}
+                      </small>
+                    </span>
+                    <button className="icon-button" type="button" aria-label={`删除 ${todo.title}`} onClick={() => onDeleteTodo(todo)}>
+                      <Trash2 size={16} aria-hidden="true" />
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
 
             {dayTodos.length === 0 && <p className="empty-state">今天还没有事项。</p>}

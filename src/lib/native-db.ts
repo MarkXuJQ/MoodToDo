@@ -45,7 +45,7 @@ type NativeSnapshot = {
   metricRecords?: DbRow[]
 }
 
-const schemaVersion = 5
+const schemaVersion = 6
 const nativeDatabaseId = 'xinxiangyi'
 const nativeDatabaseName = 'xinxiangyi.sqlite'
 const nativeSnapshotFile = 'xinxiangyi-native-snapshot.json'
@@ -227,6 +227,7 @@ const rowToTodo = (row: DbRow): TodoItem => ({
   description: readString(row, 'description', ''),
   priority: readString(row, 'priority', 'normal') as TodoItem['priority'],
   laneId: readString(row, 'lane_id', 'inbox'),
+  countdownEnabled: Boolean(readNumber(row, 'countdown_enabled')),
   done: Boolean(readNumber(row, 'done')),
   createdAt: readString(row, 'created_at'),
   updatedAt: readString(row, 'updated_at'),
@@ -470,6 +471,7 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
       description TEXT NOT NULL DEFAULT '',
       priority TEXT NOT NULL DEFAULT 'normal',
       lane_id TEXT NOT NULL DEFAULT 'inbox',
+      countdown_enabled INTEGER NOT NULL DEFAULT 0,
       done INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -562,6 +564,7 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
   await ensureColumn(db, 'todos', 'description', `description TEXT NOT NULL DEFAULT ''`)
   await ensureColumn(db, 'todos', 'priority', `priority TEXT NOT NULL DEFAULT 'normal'`)
   await ensureColumn(db, 'todos', 'lane_id', `lane_id TEXT NOT NULL DEFAULT 'inbox'`)
+  await ensureColumn(db, 'todos', 'countdown_enabled', `countdown_enabled INTEGER NOT NULL DEFAULT 0`)
   await ensureColumn(db, 'attachments', 'data_base64', `data_base64 TEXT NOT NULL DEFAULT ''`)
   await runStatement(db, `PRAGMA user_version = ${schemaVersion}`)
 }
@@ -828,6 +831,7 @@ export const addNativeTodo = async (dateKey: string, title: string, details: Tod
     description: details.description ?? '',
     priority: details.priority ?? 'normal',
     laneId: details.laneId ?? 'inbox',
+    countdownEnabled: Boolean(details.countdownEnabled),
     done: false,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -839,10 +843,21 @@ export const addNativeTodo = async (dateKey: string, title: string, details: Tod
     await runStatement(
       db,
       `
-        INSERT INTO todos (id, date_key, title, description, priority, lane_id, done, created_at, updated_at, sync_state)
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        INSERT INTO todos (id, date_key, title, description, priority, lane_id, countdown_enabled, done, created_at, updated_at, sync_state)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
       `,
-      [todo.id, todo.dateKey, todo.title, todo.description, todo.priority, todo.laneId, todo.createdAt, todo.updatedAt, todo.syncState],
+      [
+        todo.id,
+        todo.dateKey,
+        todo.title,
+        todo.description,
+        todo.priority,
+        todo.laneId,
+        todo.countdownEnabled ? 1 : 0,
+        todo.createdAt,
+        todo.updatedAt,
+        todo.syncState,
+      ],
       false,
     )
     await appendChange(db, 'todo', todo.id, 'upsert', todo, deviceId, false)
@@ -866,6 +881,7 @@ export const updateNativeTodoDetails = async (todo: TodoItem, details: TodoDetai
     description: details.description ?? existingTodo.description,
     priority: details.priority ?? existingTodo.priority,
     laneId: details.laneId ?? existingTodo.laneId,
+    countdownEnabled: details.countdownEnabled ?? existingTodo.countdownEnabled,
     updatedAt: timestamp,
     syncState: 'pending',
   }
@@ -876,10 +892,10 @@ export const updateNativeTodoDetails = async (todo: TodoItem, details: TodoDetai
       db,
       `
         UPDATE todos
-        SET description = ?, priority = ?, lane_id = ?, updated_at = ?, sync_state = 'pending'
+        SET description = ?, priority = ?, lane_id = ?, countdown_enabled = ?, updated_at = ?, sync_state = 'pending'
         WHERE id = ?
       `,
-      [next.description, next.priority, next.laneId, next.updatedAt, next.id],
+      [next.description, next.priority, next.laneId, next.countdownEnabled ? 1 : 0, next.updatedAt, next.id],
       false,
     )
     await appendChange(db, 'todo', next.id, 'upsert', next, deviceId, false)
@@ -1488,8 +1504,8 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
       await runStatement(
         db,
         `
-          INSERT INTO todos (id, date_key, title, description, priority, lane_id, done, created_at, updated_at, completed_at, sync_state)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+          INSERT INTO todos (id, date_key, title, description, priority, lane_id, countdown_enabled, done, created_at, updated_at, completed_at, sync_state)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
         `,
         [
           readString(row, 'id', createId('todo')),
@@ -1498,6 +1514,7 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot) => {
           readString(row, 'description', ''),
           readString(row, 'priority', 'normal'),
           readString(row, 'lane_id', 'inbox'),
+          readNumber(row, 'countdown_enabled', readNumber(row, 'countdownEnabled')),
           readNumber(row, 'done'),
           readString(row, 'created_at', timestamp),
           readString(row, 'updated_at', timestamp),

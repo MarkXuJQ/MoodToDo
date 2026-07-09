@@ -6,6 +6,7 @@ import type { GameEngineSettings, GameEngineSnapshot } from '../lib/gameEngine'
 import type { WebDavConnectionTestResult } from '../lib/db'
 import type {
   AiConfig,
+  CountdownTodoOption,
   DashboardCardConfig,
   DashboardCardId,
   DatabaseStatus,
@@ -42,6 +43,8 @@ type SettingsViewProps = {
   dashboardCards: DashboardCardConfig[]
   dashboardCardMetrics: DashboardMetricCard[]
   visibleDashboardCards: DashboardMetricCard[]
+  countdownTodoOptions: CountdownTodoOption[]
+  selectedCountdownTodoId: string
   aiConfig: AiConfig
   webDavConfig: WebDavConfig
   isTestingWebDav: boolean
@@ -56,6 +59,7 @@ type SettingsViewProps = {
   onAiConfigChange: (key: keyof AiConfig) => (event: ChangeEvent<HTMLInputElement>) => void
   onWebDavConfigChange: (key: WebDavTextConfigKey) => (event: ChangeEvent<HTMLInputElement>) => void
   onWebDavAutoSyncChange: (event: ChangeEvent<HTMLInputElement>) => void
+  onCountdownTodoSelect: (todoId: string) => void
   onTestWebDavConnection: () => void
   onExportSyncBundle: () => void
   onRestoreWebDavSnapshot: () => void
@@ -81,6 +85,8 @@ export function SettingsView({
   dashboardCards,
   dashboardCardMetrics,
   visibleDashboardCards,
+  countdownTodoOptions,
+  selectedCountdownTodoId,
   aiConfig,
   webDavConfig,
   isTestingWebDav,
@@ -95,6 +101,7 @@ export function SettingsView({
   onAiConfigChange,
   onWebDavConfigChange,
   onWebDavAutoSyncChange,
+  onCountdownTodoSelect,
   onTestWebDavConnection,
   onExportSyncBundle,
   onRestoreWebDavSnapshot,
@@ -333,9 +340,30 @@ export function SettingsView({
 
                     return (
                       <div className="config-row" key={card.id}>
-                        <div>
+                        <div className="grid min-w-0 gap-2">
                           <strong className="block text-sm font-black text-ink-950">{card.label}</strong>
                           <small className="block text-xs font-bold text-ink-400">当前值 {card.value}</small>
+                          {card.id === 'countdown' && (
+                            <label className="grid gap-1">
+                              <span className="text-xs font-black text-ink-500">仪表盘展示</span>
+                              <select
+                                className="board-detail-select min-h-10 text-sm"
+                                value={selectedCountdownTodoId}
+                                onChange={(event) => onCountdownTodoSelect(event.target.value)}
+                                disabled={countdownTodoOptions.length === 0}
+                              >
+                                {countdownTodoOptions.length === 0 ? (
+                                  <option value="">先在 Todo 详情里开启倒计时</option>
+                                ) : (
+                                  countdownTodoOptions.map((todo) => (
+                                    <option value={todo.id} key={todo.id}>
+                                      {todo.label} · {todo.value}
+                                    </option>
+                                  ))
+                                )}
+                              </select>
+                            </label>
+                          )}
                         </div>
                         <button
                           className={`button-secondary min-h-9 px-3 ${enabled ? 'border-xin-700 bg-xin-100 text-xin-800' : ''}`}

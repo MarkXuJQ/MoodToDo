@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type TouchEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { RefreshCw } from 'lucide-react'
 
 import './App.css'
@@ -7,25 +7,19 @@ import { BottomNav } from './components/layout/BottomNav'
 import { NavDrawer } from './components/layout/NavDrawer'
 import DynamicBackground from './components/ui/dynamic-background'
 import {
-  aiConfigStorageKey,
-  dashboardCardsStorageKey,
-  defaultAiConfig,
-  defaultDashboardCards,
-  defaultWebDavConfig,
   emptyDraft,
-  gameEngineSettingsStorageKey,
   navigationItems,
-  readAiConfig,
-  readDashboardCards,
-  readGameEngineSettings,
-  readThemeMode,
-  readWebDavConfig,
   settingsSectionGroups,
   settingsSections,
-  themeModeStorageKey,
   webDavLastAutoSyncStorageKey,
-  webDavConfigStorageKey,
 } from './config/app-shell'
+import { useAppPreferences } from './hooks/use-app-preferences'
+import { useLocalData } from './hooks/use-local-data'
+import { usePullRefresh } from './hooks/use-pull-refresh'
+import { useResponsiveNav } from './hooks/use-responsive-nav'
+import { useThemeMode } from './hooks/use-theme-mode'
+import { useToast } from './hooks/use-toast'
+import { useViewportMetrics } from './hooks/use-viewport-metrics'
 import {
   addBoardLane,
   addTodo,
@@ -35,9 +29,6 @@ import {
   deleteTodo,
   exportSyncBundle,
   getApiUrl,
-  getLocalState,
-  localDatabaseDriver,
-  localDatabaseName,
   pullWebDavSnapshot,
   pushWebDavSnapshot,
   setTodoDone,
@@ -47,15 +38,12 @@ import {
   upsertJournalEntry,
   type AttachmentRecord,
   type BoardLaneRecord,
-  type ChangeLogRecord,
   type JournalEntry,
   type TodoDetailUpdate,
   type TodoItem,
   type WebDavConnectionTestResult,
-  type WebDavSyncResult,
-  type WeeklySummary,
 } from './lib/db'
-import { createGameEngineSnapshot, defaultGameEngineSettings, type GameEngineSettings } from './lib/gameEngine'
+import { createGameEngineSnapshot } from './lib/gameEngine'
 import {
   formatDateLabel,
   formatMonthLabel,
@@ -80,16 +68,15 @@ import {
 } from './lib/insights'
 import type {
   ActiveView,
-  AiConfig,
-  DashboardCardConfig,
-  DashboardCardId,
-  DatabaseStatus,
+  CountdownTodoOption,
   DraftState,
   SettingsSection,
-  ThemeMode,
-  WebDavConfig,
-  WebDavTextConfigKey,
 } from './types/app'
+import { formatCountdownDays, getCountdownDaysRemaining, getCountdownTone, sortCountdownTodos } from './utils/countdown'
+import { formatDiagnosticDetails, type DiagnosticDialogState } from './utils/diagnostics'
+import { getErrorMessage } from './utils/errors'
+import { completedTodoRetentionMs, getTodoCompletedAt, sortTodosByDateThenCreatedAt } from './utils/todo'
+import { formatWebDavSyncMessage, isMissingRemoteSnapshotMessage } from './utils/webdav'
 import { BoardView } from './views/BoardView'
 import { DashboardView } from './views/DashboardView'
 import { JournalView } from './views/JournalView'
@@ -97,230 +84,74 @@ import { SettingsView } from './views/SettingsView'
 import { SummaryView } from './views/SummaryView'
 import type { TrendPoint } from './components/ui/data-viz'
 
-const navCollapseStorageKey = 'xinxiangyi-nav-collapsed-v1'
-const desktopNavMediaQuery = '(min-width: 1024px), (orientation: landscape) and (min-width: 900px) and (min-height: 560px)'
-const getSystemThemeMode = () => (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-const getDesktopNavMode = () => window.matchMedia(desktopNavMediaQuery).matches
-
-type DiagnosticDialogState = {
-  title: string
-  message: string
-  details: string
-  copied?: boolean
-}
-
-type ToastState = {
-  id: number
-  message: string
-  tone: 'success' | 'error' | 'info'
-  actionLabel?: string
-  onAction?: () => void
-}
-
-const getErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback)
-
-const formatBytes = (size: number) => {
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`
-  return `${Math.round(size / 1024 / 102.4) / 10} MB`
-}
-
-const formatWebDavSyncMessage = (result: WebDavSyncResult) => {
-  const action = result.direction === 'pull' ? '已从云端拉取' : '已上传本机快照'
-  const migration = result.migratedFile ? `；旧库已迁移为 ${result.migratedFile}` : ''
-
-  return `${action} ${result.file} · ${formatBytes(result.size)}${migration}`
-}
-
-const isMissingRemoteSnapshotMessage = (message: string) =>
-  /远端目录|同步快照不存在|远端同步快照不存在|ObjectNotFound|AncestorsNotFound|404|409|not found/i.test(message)
-
-const formatDiagnosticDetails = (scope: string, error: unknown, extra: Record<string, unknown> = {}) => {
-  const diagnostic = typeof error === 'object' && error && 'diagnostic' in error ? (error as { diagnostic?: unknown }).diagnostic : undefined
-
-  return JSON.stringify(
-    {
-      scope,
-      at: new Date().toISOString(),
-      location: window.location.href,
-      userAgent: navigator.userAgent,
-      viewport: {
-        width: window.visualViewport?.width ?? window.innerWidth,
-        height: window.visualViewport?.height ?? window.innerHeight,
-        innerWidth: window.innerWidth,
-        innerHeight: window.innerHeight,
-      },
-      extra,
-      error:
-        error instanceof Error
-          ? {
-              name: error.name,
-              message: error.message,
-              stack: error.stack,
-            }
-          : error,
-      diagnostic,
-    },
-    null,
-    2,
-  )
-}
-
-const completedTodoRetentionMs = 14 * 24 * 60 * 60 * 1000
-
-const getTodoCompletedAt = (todo: TodoItem) => {
-  const timestamp = new Date(todo.completedAt ?? todo.updatedAt).getTime()
-
-  return Number.isFinite(timestamp) ? timestamp : null
-}
-
 function App() {
+  useViewportMetrics()
+
+  const { toast, setToast, showToast } = useToast()
+  const handleLocalDataError = useCallback((message: string) => showToast(message, 'error'), [showToast])
+  const {
+    attachments,
+    boardLanes,
+    changes,
+    databaseStatus,
+    entries,
+    hasLoadedLocalState,
+    reload,
+    setTodos,
+    todos,
+    weeklySummaries,
+  } = useLocalData({ onLoadError: handleLocalDataError })
+  const {
+    aiConfig,
+    dashboardCards,
+    gameEngineSettings,
+    handleAiConfigChange,
+    handleSnapshotDaysChange,
+    handleWebDavAutoSyncChange,
+    handleWebDavConfigChange,
+    isWebDavConfigured,
+    selectedCountdownTodoId,
+    setSelectedCountdownTodoId,
+    toggleDashboardCard,
+    webDavConfig,
+  } = useAppPreferences()
+  const { resolvedThemeMode, setThemeMode: handleThemeModeChange, themeMode } = useThemeMode()
+  const { isDesktopNav, isNavCollapsed, isNavOpen, setIsNavCollapsed, setIsNavOpen } = useResponsiveNav()
   const [activeView, setActiveView] = useState<ActiveView>('dashboard')
-  const [isNavOpen, setIsNavOpen] = useState(false)
-  const [isNavCollapsed, setIsNavCollapsed] = useState(() => window.localStorage.getItem(navCollapseStorageKey) === '1')
-  const [isDesktopNav, setIsDesktopNav] = useState(getDesktopNavMode)
   const [settingsMenuKey, setSettingsMenuKey] = useState(0)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('overview')
-  const [entries, setEntries] = useState<JournalEntry[]>([])
-  const [todos, setTodos] = useState<TodoItem[]>([])
-  const [boardLanes, setBoardLanes] = useState<BoardLaneRecord[]>([])
-  const [attachments, setAttachments] = useState<AttachmentRecord[]>([])
-  const [changes, setChanges] = useState<ChangeLogRecord[]>([])
-  const [weeklySummaries, setWeeklySummaries] = useState<WeeklySummary[]>([])
   const [selectedDate, setSelectedDate] = useState(getTodayKey)
   const [visibleMonth, setVisibleMonth] = useState(getTodayKey().slice(0, 7))
   const [selectedWeek, setSelectedWeek] = useState(getWeekKey(getTodayKey()))
   const [draft, setDraft] = useState<DraftState>(emptyDraft)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [todoTitle, setTodoTitle] = useState('')
-  const [aiConfig, setAiConfig] = useState<AiConfig>(defaultAiConfig)
-  const [webDavConfig, setWebDavConfig] = useState<WebDavConfig>(defaultWebDavConfig)
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => readThemeMode())
-  const [systemThemeMode, setSystemThemeMode] = useState<'light' | 'dark'>(() => getSystemThemeMode())
-  const [gameEngineSettings, setGameEngineSettings] = useState<GameEngineSettings>(defaultGameEngineSettings)
-  const [dashboardCards, setDashboardCards] = useState<DashboardCardConfig[]>(defaultDashboardCards)
   const [summaryDraft, setSummaryDraft] = useState('')
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
   const [summaryError, setSummaryError] = useState('')
-  const [, setWriteError] = useState('')
-  const [toast, setToast] = useState<ToastState | null>(null)
   const [diagnosticDialog, setDiagnosticDialog] = useState<DiagnosticDialogState | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-  const [hasLoadedLocalState, setHasLoadedLocalState] = useState(false)
   const [isWebDavSyncing, setIsWebDavSyncing] = useState(false)
   const [isTestingWebDav, setIsTestingWebDav] = useState(false)
   const [isExportingSyncBundle, setIsExportingSyncBundle] = useState(false)
   const [webDavTestResult, setWebDavTestResult] = useState<WebDavConnectionTestResult | null>(null)
-  const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus>({
-    origin: window.location.origin,
-    driver: localDatabaseDriver,
-    databaseName: localDatabaseName,
-    databasePath: '',
-    syncBundleName: '',
-    syncBundlePath: '',
-    apiBaseUrl: '',
-    schemaVersion: 0,
-    lastLoadedAt: '',
-  })
   const contentShellRef = useRef<HTMLDivElement | null>(null)
-  const toastTimerRef = useRef<number | null>(null)
   const pendingTodoDeleteTimersRef = useRef<Map<string, number>>(new Map())
   const completedTodoCleanupRef = useRef<Set<string>>(new Set())
-  const pullStartYRef = useRef<number | null>(null)
-  const pullDistanceRef = useRef(0)
-  const [pullRefreshDistance, setPullRefreshDistance] = useState(0)
-  const [isPullRefreshing, setIsPullRefreshing] = useState(false)
-
-  useEffect(() => {
-    const updateViewportMetrics = () => {
-      const viewport = window.visualViewport
-      const width = Math.round(viewport?.width ?? window.innerWidth)
-      const height = Math.round(viewport?.height ?? window.innerHeight)
-
-      document.documentElement.style.setProperty('--app-viewport-width', `${width}px`)
-      document.documentElement.style.setProperty('--app-viewport-height', `${height}px`)
-    }
-
-    updateViewportMetrics()
-    window.addEventListener('resize', updateViewportMetrics)
-    window.addEventListener('orientationchange', updateViewportMetrics)
-    window.visualViewport?.addEventListener('resize', updateViewportMetrics)
-
-    return () => {
-      window.removeEventListener('resize', updateViewportMetrics)
-      window.removeEventListener('orientationchange', updateViewportMetrics)
-      window.visualViewport?.removeEventListener('resize', updateViewportMetrics)
-    }
-  }, [])
-
-  const showToast = useCallback((
-    message: string,
-    tone: ToastState['tone'] = 'info',
-    options: { actionLabel?: string; onAction?: () => void; durationMs?: number } = {},
-  ) => {
-    if (toastTimerRef.current) {
-      window.clearTimeout(toastTimerRef.current)
-    }
-
-    setToast({
-      id: Date.now(),
-      message,
-      tone,
-      actionLabel: options.actionLabel,
-      onAction: options.onAction,
-    })
-
-    toastTimerRef.current = window.setTimeout(() => {
-      setToast(null)
-      toastTimerRef.current = null
-    }, options.durationMs ?? 3600)
-  }, [])
+  const { isPullRefreshing, pullRefreshDistance, pullRefreshHandlers } = usePullRefresh({
+    contentShellRef,
+    isDesktopNav,
+    onRefresh: reload,
+  })
 
   useEffect(
     () => () => {
-      if (toastTimerRef.current) {
-        window.clearTimeout(toastTimerRef.current)
-      }
-
       for (const timer of pendingTodoDeleteTimersRef.current.values()) {
         window.clearTimeout(timer)
       }
     },
     [],
   )
-
-  const reload = useCallback(async () => {
-    try {
-      const nextState = await getLocalState()
-
-      setEntries(nextState.entries)
-      setTodos(nextState.todos)
-      setBoardLanes(nextState.boardLanes)
-      setAttachments(nextState.attachments)
-      setChanges(nextState.changes)
-      setWeeklySummaries(nextState.weeklySummaries)
-      setDatabaseStatus({
-        origin: window.location.origin,
-        driver: nextState.meta.driver,
-        databaseName: nextState.meta.databaseName,
-        databasePath: nextState.meta.databasePath,
-        syncBundleName: nextState.meta.syncBundleName,
-        syncBundlePath: nextState.meta.syncBundlePath,
-        apiBaseUrl: nextState.meta.apiBaseUrl,
-        schemaVersion: nextState.meta.schemaVersion,
-        lastLoadedAt: new Date().toLocaleTimeString('zh-CN', {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
-      })
-      setHasLoadedLocalState(true)
-    } catch (error) {
-      const message = getErrorMessage(error, '读取本地 SQLite 数据库失败。')
-      setWriteError(message)
-      showToast(message, 'error')
-    }
-  }, [showToast])
 
   useEffect(() => {
     if (!hasLoadedLocalState) return
@@ -353,132 +184,14 @@ function App() {
         }
 
         const message = getErrorMessage(error, '自动清理已完成事项失败。')
-        setWriteError(message)
         showToast(message, 'error')
       }
     })()
   }, [hasLoadedLocalState, reload, showToast, todos])
 
-  const getActiveScrollTop = useCallback(() => {
-    if (isDesktopNav) {
-      return contentShellRef.current?.scrollTop ?? 0
-    }
-
-    return window.scrollY
-  }, [isDesktopNav])
-
-  const handlePullRefreshStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length !== 1 || getActiveScrollTop() > 0) {
-      pullStartYRef.current = null
-      return
-    }
-
-    pullStartYRef.current = event.touches[0]?.clientY ?? null
-    pullDistanceRef.current = 0
-  }, [getActiveScrollTop])
-
-  const handlePullRefreshMove = useCallback((event: TouchEvent<HTMLDivElement>) => {
-    const startY = pullStartYRef.current
-
-    if (startY == null || isPullRefreshing || getActiveScrollTop() > 0) return
-
-    const nextY = event.touches[0]?.clientY ?? startY
-    const delta = nextY - startY
-
-    if (delta <= 0) {
-      pullDistanceRef.current = 0
-      setPullRefreshDistance(0)
-      return
-    }
-
-    const distance = Math.min(96, delta * 0.45)
-    pullDistanceRef.current = distance
-    setPullRefreshDistance(distance)
-
-    if (distance > 8) {
-      event.preventDefault()
-    }
-  }, [getActiveScrollTop, isPullRefreshing])
-
-  const handlePullRefreshEnd = useCallback(() => {
-    const distance = pullDistanceRef.current
-
-    pullStartYRef.current = null
-    pullDistanceRef.current = 0
-
-    if (distance < 64 || isPullRefreshing) {
-      setPullRefreshDistance(0)
-      return
-    }
-
-    setIsPullRefreshing(true)
-    setPullRefreshDistance(72)
-
-    void reload().finally(() => {
-      setIsPullRefreshing(false)
-      setPullRefreshDistance(0)
-    })
-  }, [isPullRefreshing, reload])
-
   useEffect(() => {
-    setAiConfig(readAiConfig())
-    setWebDavConfig(readWebDavConfig())
-    setThemeMode(readThemeMode())
-    setGameEngineSettings(readGameEngineSettings())
-    setDashboardCards(readDashboardCards())
     void reload()
   }, [reload])
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    const handleChange = (event: MediaQueryListEvent | MediaQueryList) => {
-      const matches = 'matches' in event ? event.matches : mediaQuery.matches
-      setSystemThemeMode(matches ? 'dark' : 'light')
-    }
-
-    handleChange(mediaQuery)
-
-    if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', handleChange)
-      return () => mediaQuery.removeEventListener('change', handleChange)
-    }
-
-    mediaQuery.addListener(handleChange)
-    return () => mediaQuery.removeListener(handleChange)
-  }, [])
-
-  const resolvedThemeMode = themeMode === 'system' ? systemThemeMode : themeMode
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = resolvedThemeMode
-    document.documentElement.dataset.themeMode = themeMode
-  }, [resolvedThemeMode, themeMode])
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia(desktopNavMediaQuery)
-    const handleChange = (event: MediaQueryListEvent | MediaQueryList) => {
-      const matches = 'matches' in event ? event.matches : mediaQuery.matches
-      setIsDesktopNav(matches)
-
-      if (matches) {
-        setIsNavOpen(false)
-      }
-    }
-
-    handleChange(mediaQuery)
-
-    if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', handleChange)
-      return () => mediaQuery.removeEventListener('change', handleChange)
-    }
-
-    mediaQuery.addListener(handleChange)
-    return () => mediaQuery.removeListener(handleChange)
-  }, [])
-
-  useEffect(() => {
-    window.localStorage.setItem(navCollapseStorageKey, isNavCollapsed ? '1' : '0')
-  }, [isNavCollapsed])
 
   const selectedEntry = useMemo(
     () => entries.find((entry) => entry.dateKey === selectedDate),
@@ -559,6 +272,31 @@ function App() {
       [...entries, ...todos, ...boardLanes, ...attachments, ...changes].filter((item) => item.syncState === 'pending').length,
     [attachments, boardLanes, changes, entries, todos],
   )
+  const countdownTodoOptions = useMemo<CountdownTodoOption[]>(
+    () =>
+      todos
+        .filter((todo) => todo.countdownEnabled && !todo.done)
+        .sort(sortCountdownTodos)
+        .map((todo) => {
+          const daysRemaining = getCountdownDaysRemaining(todo.dateKey)
+
+          return {
+            id: todo.id,
+            title: todo.title,
+            dateKey: todo.dateKey,
+            daysRemaining,
+            label: `${todo.title} · ${todo.dateKey}`,
+            value: formatCountdownDays(daysRemaining),
+          }
+        }),
+    [todos],
+  )
+  const selectedCountdownTodo = useMemo(
+    () =>
+      countdownTodoOptions.find((todo) => todo.id === selectedCountdownTodoId) ??
+      countdownTodoOptions[0],
+    [countdownTodoOptions, selectedCountdownTodoId],
+  )
   const monthEntries = entries.filter((entry) => entry.dateKey.startsWith(visibleMonth))
   const monthTodos = todos.filter((todo) => todo.dateKey.startsWith(visibleMonth))
   const monthScore = average(monthEntries.map((entry) => entry.mood.score))
@@ -576,12 +314,6 @@ function App() {
 
   const canSave = Boolean(draft.body.trim() || draft.moodText.trim() || draft.title.trim() || pendingFiles.length > 0)
   const canGenerateSummary = Boolean(aiConfig.endpoint.trim() && aiConfig.apiKey.trim() && selectedWeekEntries.length > 0)
-  const isWebDavConfigured = Boolean(
-    webDavConfig.url.trim() &&
-      webDavConfig.username.trim() &&
-      webDavConfig.password.trim() &&
-      webDavConfig.remotePath.trim(),
-  )
 
   const dashboardCardMetrics = [
     {
@@ -598,6 +330,12 @@ function App() {
       id: 'monthCheckin' as const,
       label: '本月打卡率',
       value: `${monthCheckinRate}%`,
+    },
+    {
+      id: 'countdown' as const,
+      label: selectedCountdownTodo ? `倒计时 · ${selectedCountdownTodo.title}` : '倒计时',
+      value: selectedCountdownTodo ? selectedCountdownTodo.value : '未开启',
+      tone: selectedCountdownTodo ? getCountdownTone(selectedCountdownTodo.daysRemaining) : undefined,
     },
     {
       id: 'pendingSync' as const,
@@ -666,7 +404,6 @@ function App() {
     if (!canSave || isSaving) return
 
     setIsSaving(true)
-    setWriteError('')
 
     try {
       await upsertJournalEntry(
@@ -684,7 +421,6 @@ function App() {
       showToast('日记已保存', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '保存日记失败。')
-      setWriteError(message)
       showToast(message, 'error')
     } finally {
       setIsSaving(false)
@@ -696,8 +432,6 @@ function App() {
     const title = todoTitle.trim()
     if (!title) return
 
-    setWriteError('')
-
     try {
       await addTodo(selectedDate, title)
       setTodoTitle('')
@@ -705,7 +439,6 @@ function App() {
       showToast('事项已添加', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '新增事项失败。')
-      setWriteError(message)
       showToast(message, 'error')
     }
   }
@@ -714,8 +447,6 @@ function App() {
     const nextTitle = title.trim()
     if (!nextTitle) return
 
-    setWriteError('')
-
     try {
       await addTodo(dateKey, nextTitle, details)
       setTodoTitle('')
@@ -723,34 +454,27 @@ function App() {
       showToast('事项已添加', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '新增事项失败。')
-      setWriteError(message)
       showToast(message, 'error')
     }
   }
 
   const handleUpdateTodoDetails = async (todo: TodoItem, details: TodoDetailUpdate) => {
-    setWriteError('')
-
     try {
       await updateTodoDetails(todo, details)
       await reload()
     } catch (error) {
       const message = getErrorMessage(error, '更新事项详情失败。')
-      setWriteError(message)
       showToast(message, 'error')
     }
   }
 
   const handleAddBoardLane = async (label: string, colorId: string) => {
-    setWriteError('')
-
     try {
       await addBoardLane(label, colorId)
       await reload()
       showToast('栏目已添加', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '新增栏目失败。')
-      setWriteError(message)
       showToast(message, 'error')
     }
   }
@@ -759,35 +483,28 @@ function App() {
     const confirmed = window.confirm(`确认删除栏目「${lane.label}」吗？该栏目下的待做事项会回到「待做」。`)
     if (!confirmed) return
 
-    setWriteError('')
-
     try {
       await deleteBoardLane(lane)
       await reload()
       showToast('栏目已删除，相关事项已回到待做', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '删除栏目失败。')
-      setWriteError(message)
       showToast(message, 'error')
     }
   }
 
   const handleToggleTodo = async (todo: TodoItem) => {
-    setWriteError('')
-
     try {
       await setTodoDone(todo, !todo.done)
       await reload()
       showToast(todo.done ? '事项已标记未完成' : '事项已完成', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '更新事项失败。')
-      setWriteError(message)
       showToast(message, 'error')
     }
   }
 
   const handleDeleteTodo = async (todo: TodoItem) => {
-    setWriteError('')
     if (pendingTodoDeleteTimersRef.current.has(todo.id)) return
 
     setTodos((current) => current.filter((item) => item.id !== todo.id))
@@ -799,7 +516,7 @@ function App() {
       setTodos((current) =>
         current.some((item) => item.id === todo.id)
           ? current
-          : [...current, todo].sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.createdAt.localeCompare(right.createdAt)),
+          : [...current, todo].sort(sortTodosByDateThenCreatedAt),
       )
       showToast('已撤回删除', 'info')
     }
@@ -813,7 +530,6 @@ function App() {
           showToast('事项已删除', 'success')
         } catch (error) {
           const message = getErrorMessage(error, '删除事项失败。')
-          setWriteError(message)
           setTodos((current) => (current.some((item) => item.id === todo.id) ? current : [...current, todo]))
           showToast(message, 'error')
         }
@@ -829,15 +545,12 @@ function App() {
   }
 
   const handleDeleteAttachment = async (attachment: AttachmentRecord) => {
-    setWriteError('')
-
     try {
       await deleteAttachment(attachment)
       await reload()
       showToast('图片已删除', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '删除附件失败。')
-      setWriteError(message)
       showToast(message, 'error')
     }
   }
@@ -846,15 +559,12 @@ function App() {
     const confirmed = window.confirm(`确认删除 ${entry.dateKey} 的日记记录吗？这会同时删除关联图片。`)
     if (!confirmed) return
 
-    setWriteError('')
-
     try {
       await deleteJournalEntry(entry)
       await reload()
       showToast('日记已删除', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '删除日记失败。')
-      setWriteError(message)
       showToast(message, 'error')
     }
   }
@@ -882,26 +592,6 @@ function App() {
     setSelectedWeek(getWeekKey(dateKey))
     setVisibleMonth(dateKey.slice(0, 7))
     navigateTo(nextView)
-  }
-
-  const handleAiConfigChange =
-    (key: keyof AiConfig) => (event: ChangeEvent<HTMLInputElement>) => {
-      const next = { ...aiConfig, [key]: event.target.value }
-      setAiConfig(next)
-      window.localStorage.setItem(aiConfigStorageKey, JSON.stringify(next))
-    }
-
-  const handleWebDavConfigChange =
-    (key: WebDavTextConfigKey) => (event: ChangeEvent<HTMLInputElement>) => {
-      const next = { ...webDavConfig, [key]: event.target.value }
-      setWebDavConfig(next)
-      window.localStorage.setItem(webDavConfigStorageKey, JSON.stringify(next))
-    }
-
-  const handleWebDavAutoSyncChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const next = { ...webDavConfig, autoSyncDaily: event.target.checked }
-    setWebDavConfig(next)
-    window.localStorage.setItem(webDavConfigStorageKey, JSON.stringify(next))
   }
 
   const handleTestWebDavConnection = async () => {
@@ -964,7 +654,6 @@ function App() {
     if (isExportingSyncBundle) return
 
     setIsExportingSyncBundle(true)
-    setWriteError('')
 
     try {
       const result = await exportSyncBundle()
@@ -975,7 +664,6 @@ function App() {
     } catch (error) {
       const message = getErrorMessage(error, '生成本地同步包失败。')
 
-      setWriteError(message)
       showToast(message, 'error')
       setDiagnosticDialog({
         title: '本地同步包诊断',
@@ -987,40 +675,12 @@ function App() {
     }
   }
 
-  const handleThemeModeChange = (next: ThemeMode) => {
-    setThemeMode(next)
-    window.localStorage.setItem(themeModeStorageKey, next)
-  }
-
-  const persistGameEngineSettings = (next: GameEngineSettings) => {
-    setGameEngineSettings(next)
-    window.localStorage.setItem(gameEngineSettingsStorageKey, JSON.stringify(next))
-  }
-
-  const handleSnapshotDaysChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const snapshotDays = Math.min(365, Math.max(7, Number(event.target.value) || defaultGameEngineSettings.snapshotDays))
-
-    persistGameEngineSettings({ ...gameEngineSettings, snapshotDays })
-  }
-
-  const persistDashboardCards = (next: DashboardCardConfig[]) => {
-    setDashboardCards(next)
-    window.localStorage.setItem(dashboardCardsStorageKey, JSON.stringify(next))
-  }
-
-  const toggleDashboardCard = (cardId: DashboardCardId) => {
-    persistDashboardCards(
-      dashboardCards.map((card) => (card.id === cardId ? { ...card, enabled: !card.enabled } : card)),
-    )
-  }
-
   const handleWebDavSync = useCallback(async (source: 'manual' | 'startup' = 'manual') => {
     if (isWebDavSyncing) return
 
     if (!isWebDavConfigured) {
       if (source === 'manual') {
         const message = '请先配置 WebDAV'
-        setWriteError(message)
         showToast(message, 'error')
         setSettingsSection('webdav')
         setActiveView('settings')
@@ -1032,7 +692,6 @@ function App() {
     }
 
     setIsWebDavSyncing(true)
-    setWriteError('')
 
     try {
       const shouldPush = pendingChangeCount > 0
@@ -1055,7 +714,6 @@ function App() {
         } catch (fallbackError) {
           const fallbackMessage = getErrorMessage(fallbackError, '初始化远端同步目录失败。')
 
-          setWriteError(fallbackMessage)
           showToast(fallbackMessage, 'error')
           setDiagnosticDialog({
             title: 'WebDAV 初始化诊断',
@@ -1073,7 +731,6 @@ function App() {
       }
 
       if (source === 'manual') {
-        setWriteError(message)
         showToast(message, 'error')
         setDiagnosticDialog({
           title: 'WebDAV 同步诊断',
@@ -1096,6 +753,7 @@ function App() {
     isWebDavSyncing,
     pendingChangeCount,
     reload,
+    setIsNavOpen,
     showToast,
     todayKey,
     webDavConfig,
@@ -1106,7 +764,6 @@ function App() {
 
     if (!isWebDavConfigured) {
       const message = '请先配置 WebDAV'
-      setWriteError(message)
       showToast(message, 'error')
       setSettingsSection('webdav')
       setActiveView('settings')
@@ -1117,7 +774,6 @@ function App() {
     if (!confirmed) return
 
     setIsWebDavSyncing(true)
-    setWriteError('')
 
     try {
       const result = await pullWebDavSnapshot(webDavConfig)
@@ -1127,7 +783,6 @@ function App() {
       await reload()
     } catch (error) {
       const message = getErrorMessage(error, '从云端恢复失败。')
-      setWriteError(message)
       showToast(message, 'error')
       setDiagnosticDialog({
         title: 'WebDAV 恢复诊断',
@@ -1270,10 +925,7 @@ function App() {
         <div
           className="content-shell"
           ref={contentShellRef}
-          onTouchStart={handlePullRefreshStart}
-          onTouchMove={handlePullRefreshMove}
-          onTouchEnd={handlePullRefreshEnd}
-          onTouchCancel={handlePullRefreshEnd}
+          {...pullRefreshHandlers}
         >
           <div
             className={`pull-refresh-indicator ${pullRefreshDistance > 0 || isPullRefreshing ? 'pull-refresh-indicator-visible' : ''}`}
@@ -1294,146 +946,149 @@ function App() {
             />
 
             {activeView === 'dashboard' ? (
-          <DashboardView
-            selectedDate={selectedDate}
-            selectedDateLabel={formatDateLabel(selectedDate)}
-            isToday={selectedDate === todayKey}
-            visibleDashboardCards={visibleDashboardCards}
-            selectedEntry={selectedEntry}
-            draft={draft}
-            pendingFiles={pendingFiles}
-            selectedAttachments={selectedAttachments}
-            canSave={canSave}
-            isSaving={isSaving}
-            dayTodos={dayTodos}
-            todoTitle={todoTitle}
-            lastSevenAverage={lastSevenAverage}
-            lastSevenEntryCount={lastSevenEntries.length}
-            moodBreakdownItems={moodBreakdownItems}
-            moodTrendPoints={moodTrendPoints}
-            selectedMoodTrendIndex={selectedMoodTrendIndex}
-            trendStartLabel={trendDateKeys[0]}
-            trendEndLabel={trendDateKeys[trendDateKeys.length - 1]}
-            moodWindowAverage={moodWindowAverage}
-            onDateChange={(dateKey) => focusDate(dateKey, 'dashboard')}
-            onGoToday={() => focusDate(todayKey, 'dashboard')}
-            onDraftChange={handleDraftChange}
-            onFilesChange={handleFilesChange}
-            onSave={handleSave}
-            onTodoTitleChange={setTodoTitle}
-            onAddTodo={handleAddTodo}
-            onToggleTodo={(todo) => void handleToggleTodo(todo)}
-            onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
-            onDeleteAttachment={(attachment) => void handleDeleteAttachment(attachment)}
-            onRemovePendingFile={handleRemovePendingFile}
-            getCompletionRate={getCompletionRate}
-          />
+              <DashboardView
+                selectedDate={selectedDate}
+                selectedDateLabel={formatDateLabel(selectedDate)}
+                isToday={selectedDate === todayKey}
+                visibleDashboardCards={visibleDashboardCards}
+                selectedEntry={selectedEntry}
+                draft={draft}
+                pendingFiles={pendingFiles}
+                selectedAttachments={selectedAttachments}
+                canSave={canSave}
+                isSaving={isSaving}
+                dayTodos={dayTodos}
+                todoTitle={todoTitle}
+                lastSevenAverage={lastSevenAverage}
+                lastSevenEntryCount={lastSevenEntries.length}
+                moodBreakdownItems={moodBreakdownItems}
+                moodTrendPoints={moodTrendPoints}
+                selectedMoodTrendIndex={selectedMoodTrendIndex}
+                trendStartLabel={trendDateKeys[0]}
+                trendEndLabel={trendDateKeys[trendDateKeys.length - 1]}
+                moodWindowAverage={moodWindowAverage}
+                onDateChange={(dateKey) => focusDate(dateKey, 'dashboard')}
+                onGoToday={() => focusDate(todayKey, 'dashboard')}
+                onDraftChange={handleDraftChange}
+                onFilesChange={handleFilesChange}
+                onSave={handleSave}
+                onTodoTitleChange={setTodoTitle}
+                onAddTodo={handleAddTodo}
+                onToggleTodo={(todo) => void handleToggleTodo(todo)}
+                onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
+                onDeleteAttachment={(attachment) => void handleDeleteAttachment(attachment)}
+                onRemovePendingFile={handleRemovePendingFile}
+                getCompletionRate={getCompletionRate}
+              />
             ) : activeView === 'journal' ? (
-          <JournalView
-            entries={entries}
-            todos={todos}
-            currentStreak={currentStreak}
-            pendingChangeCount={pendingChangeCount}
-            attachmentCountByEntryId={attachmentCountByEntryId}
-            onFocusDate={focusDate}
-            onDeleteEntry={(entry) => void handleDeleteJournalEntry(entry)}
-          />
+              <JournalView
+                entries={entries}
+                todos={todos}
+                currentStreak={currentStreak}
+                pendingChangeCount={pendingChangeCount}
+                attachmentCountByEntryId={attachmentCountByEntryId}
+                onFocusDate={focusDate}
+                onDeleteEntry={(entry) => void handleDeleteJournalEntry(entry)}
+              />
             ) : activeView === 'board' ? (
-          <BoardView
-            todos={todos}
-            filteredBoardTodos={filteredBoardTodos}
-            boardLanes={boardLanes}
-            entryByDate={entryByDate}
-            selectedDate={selectedDate}
-            todoTitle={todoTitle}
-            onFocusDate={focusDate}
-            onTodoTitleChange={setTodoTitle}
-            onAddTodoWithDetails={(dateKey, title, details) => void handleAddTodoWithDetails(dateKey, title, details)}
-            onUpdateTodoDetails={(todo, details) => void handleUpdateTodoDetails(todo, details)}
-            onAddBoardLane={(label, colorId) => void handleAddBoardLane(label, colorId)}
-            onDeleteBoardLane={(lane) => void handleDeleteBoardLane(lane)}
-            onToggleTodo={(todo) => void handleToggleTodo(todo)}
-            onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
-          />
+              <BoardView
+                todos={todos}
+                filteredBoardTodos={filteredBoardTodos}
+                boardLanes={boardLanes}
+                entryByDate={entryByDate}
+                selectedDate={selectedDate}
+                todoTitle={todoTitle}
+                onFocusDate={focusDate}
+                onTodoTitleChange={setTodoTitle}
+                onAddTodoWithDetails={(dateKey, title, details) => void handleAddTodoWithDetails(dateKey, title, details)}
+                onUpdateTodoDetails={(todo, details) => void handleUpdateTodoDetails(todo, details)}
+                onAddBoardLane={(label, colorId) => void handleAddBoardLane(label, colorId)}
+                onDeleteBoardLane={(lane) => void handleDeleteBoardLane(lane)}
+                onToggleTodo={(todo) => void handleToggleTodo(todo)}
+                onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
+              />
             ) : activeView === 'summary' ? (
-          <SummaryView
-            visibleMonthLabel={formatMonthLabel(visibleMonth)}
-            monthScore={monthScore}
-            monthCheckinRate={monthCheckinRate}
-            monthCompletionRate={monthCompletionRate}
-            currentStreak={currentStreak}
-            longestStreak={longestStreak}
-            monthEntriesCount={monthEntries.length}
-            calendarCells={calendarCells}
-            selectedDate={selectedDate}
-            selectedWeek={selectedWeek}
-            selectedWeekScore={selectedWeekScore}
-            selectedWeekEntryCount={selectedWeekEntries.length}
-            selectedWeekCompletionRate={selectedWeekCompletionRate}
-            selectedWeekDays={selectedWeekDays}
-            entries={entries}
-            todos={todos}
-            aiConfigured={Boolean(aiConfig.apiKey)}
-            aiModel={aiConfig.model}
-            canGenerateSummary={canGenerateSummary}
-            isGeneratingSummary={isGeneratingSummary}
-            summaryDraft={summaryDraft}
-            summaryError={summaryError}
-            todoTitle={todoTitle}
-            onPreviousMonth={() => setVisibleMonth(shiftMonth(visibleMonth, -1))}
-            onNextMonth={() => setVisibleMonth(shiftMonth(visibleMonth, 1))}
-            onFocusDate={(dateKey) => focusDate(dateKey, 'summary')}
-            onSelectedWeekChange={(dateKey) => setSelectedWeek(getWeekKey(dateKey))}
-            onOpenAiSettings={() => openSettingsSection('ai')}
-            onGenerateSummary={() => void handleGenerateSummary()}
-            onSummaryDraftChange={setSummaryDraft}
-            onSaveSummary={() => void handleSaveSummaryDraft()}
-            onTodoTitleChange={setTodoTitle}
-            onAddTodo={handleAddTodo}
-            onToggleTodo={(todo) => void handleToggleTodo(todo)}
-            onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
-            getCompletionRate={getCompletionRate}
-            getHeatLevel={getHeatLevel}
-          />
+              <SummaryView
+                visibleMonthLabel={formatMonthLabel(visibleMonth)}
+                monthScore={monthScore}
+                monthCheckinRate={monthCheckinRate}
+                monthCompletionRate={monthCompletionRate}
+                currentStreak={currentStreak}
+                longestStreak={longestStreak}
+                monthEntriesCount={monthEntries.length}
+                calendarCells={calendarCells}
+                selectedDate={selectedDate}
+                selectedWeek={selectedWeek}
+                selectedWeekScore={selectedWeekScore}
+                selectedWeekEntryCount={selectedWeekEntries.length}
+                selectedWeekCompletionRate={selectedWeekCompletionRate}
+                selectedWeekDays={selectedWeekDays}
+                entries={entries}
+                todos={todos}
+                aiConfigured={Boolean(aiConfig.apiKey)}
+                aiModel={aiConfig.model}
+                canGenerateSummary={canGenerateSummary}
+                isGeneratingSummary={isGeneratingSummary}
+                summaryDraft={summaryDraft}
+                summaryError={summaryError}
+                todoTitle={todoTitle}
+                onPreviousMonth={() => setVisibleMonth(shiftMonth(visibleMonth, -1))}
+                onNextMonth={() => setVisibleMonth(shiftMonth(visibleMonth, 1))}
+                onFocusDate={(dateKey) => focusDate(dateKey, 'summary')}
+                onSelectedWeekChange={(dateKey) => setSelectedWeek(getWeekKey(dateKey))}
+                onOpenAiSettings={() => openSettingsSection('ai')}
+                onGenerateSummary={() => void handleGenerateSummary()}
+                onSummaryDraftChange={setSummaryDraft}
+                onSaveSummary={() => void handleSaveSummaryDraft()}
+                onTodoTitleChange={setTodoTitle}
+                onAddTodo={handleAddTodo}
+                onToggleTodo={(todo) => void handleToggleTodo(todo)}
+                onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
+                getCompletionRate={getCompletionRate}
+                getHeatLevel={getHeatLevel}
+              />
             ) : (
-          <SettingsView
-            settingsSection={settingsSection}
-            settingsSections={settingsSections}
-            settingsSectionGroups={settingsSectionGroups}
-            isDesktopNav={isDesktopNav}
-            settingsMenuKey={settingsMenuKey}
-            databaseStatus={databaseStatus}
-            entriesCount={entries.length}
-            todosCount={todos.length}
-            attachmentsCount={attachments.length}
-            weeklySummariesCount={weeklySummaries.length}
-            changesCount={changes.length}
-            pendingChangeCount={pendingChangeCount}
-            gameEngineSnapshot={gameEngineSnapshot}
-            gameEngineSettings={gameEngineSettings}
-            dashboardCards={dashboardCards}
-            dashboardCardMetrics={dashboardCardMetrics}
-            visibleDashboardCards={visibleDashboardCards}
-            aiConfig={aiConfig}
-            webDavConfig={webDavConfig}
-            isTestingWebDav={isTestingWebDav}
-            isWebDavSyncing={isWebDavSyncing}
-            isExportingSyncBundle={isExportingSyncBundle}
-            webDavTestResult={webDavTestResult}
-            themeMode={themeMode}
-            resolvedThemeMode={resolvedThemeMode}
-            onSettingsSectionChange={setSettingsSection}
-            onReload={() => void reload()}
-            onToggleDashboardCard={toggleDashboardCard}
-            onAiConfigChange={handleAiConfigChange}
-            onWebDavConfigChange={handleWebDavConfigChange}
-            onWebDavAutoSyncChange={handleWebDavAutoSyncChange}
-            onTestWebDavConnection={() => void handleTestWebDavConnection()}
-            onExportSyncBundle={() => void handleExportSyncBundle()}
-            onRestoreWebDavSnapshot={() => void handleWebDavRestoreFromCloud()}
-            onThemeModeChange={handleThemeModeChange}
-            onSnapshotDaysChange={handleSnapshotDaysChange}
-          />
+              <SettingsView
+                settingsSection={settingsSection}
+                settingsSections={settingsSections}
+                settingsSectionGroups={settingsSectionGroups}
+                isDesktopNav={isDesktopNav}
+                settingsMenuKey={settingsMenuKey}
+                databaseStatus={databaseStatus}
+                entriesCount={entries.length}
+                todosCount={todos.length}
+                attachmentsCount={attachments.length}
+                weeklySummariesCount={weeklySummaries.length}
+                changesCount={changes.length}
+                pendingChangeCount={pendingChangeCount}
+                gameEngineSnapshot={gameEngineSnapshot}
+                gameEngineSettings={gameEngineSettings}
+                dashboardCards={dashboardCards}
+                dashboardCardMetrics={dashboardCardMetrics}
+                visibleDashboardCards={visibleDashboardCards}
+                countdownTodoOptions={countdownTodoOptions}
+                selectedCountdownTodoId={selectedCountdownTodo?.id ?? ''}
+                aiConfig={aiConfig}
+                webDavConfig={webDavConfig}
+                isTestingWebDav={isTestingWebDav}
+                isWebDavSyncing={isWebDavSyncing}
+                isExportingSyncBundle={isExportingSyncBundle}
+                webDavTestResult={webDavTestResult}
+                themeMode={themeMode}
+                resolvedThemeMode={resolvedThemeMode}
+                onSettingsSectionChange={setSettingsSection}
+                onReload={() => void reload()}
+                onToggleDashboardCard={toggleDashboardCard}
+                onAiConfigChange={handleAiConfigChange}
+                onWebDavConfigChange={handleWebDavConfigChange}
+                onWebDavAutoSyncChange={handleWebDavAutoSyncChange}
+                onCountdownTodoSelect={setSelectedCountdownTodoId}
+                onTestWebDavConnection={() => void handleTestWebDavConnection()}
+                onExportSyncBundle={() => void handleExportSyncBundle()}
+                onRestoreWebDavSnapshot={() => void handleWebDavRestoreFromCloud()}
+                onThemeModeChange={handleThemeModeChange}
+                onSnapshotDaysChange={handleSnapshotDaysChange}
+              />
             )}
           </div>
         </div>

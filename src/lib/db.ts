@@ -46,6 +46,7 @@ export type TodoItem = {
   description: string
   priority: TodoPriority
   laneId: string
+  countdownEnabled: boolean
   done: boolean
   createdAt: string
   updatedAt: string
@@ -59,6 +60,7 @@ export type TodoDetailUpdate = {
   description?: string
   priority?: TodoPriority
   laneId?: string
+  countdownEnabled?: boolean
 }
 
 export type AttachmentRecord = {
@@ -304,7 +306,10 @@ const ensureArray = <T>(value: unknown): T[] => (Array.isArray(value) ? value : 
 
 const normalizeLocalStatePayload = (payload: Partial<LocalStatePayload>): LocalState => ({
   entries: ensureArray<JournalEntry>(payload.entries),
-  todos: ensureArray<TodoItem>(payload.todos),
+  todos: ensureArray<Partial<TodoItem>>(payload.todos).map((todo) => ({
+    ...todo,
+    countdownEnabled: Boolean(todo.countdownEnabled),
+  })) as TodoItem[],
   attachments: ensureArray<AttachmentPayload>(payload.attachments).map(mapAttachment),
   boardLanes: ensureArray<BoardLaneRecord>(payload.boardLanes),
   changes: ensureArray<ChangeLogRecord>(payload.changes),

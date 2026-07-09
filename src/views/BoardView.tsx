@@ -4,6 +4,7 @@ import { Check, Plus, Search, Trash2, X } from 'lucide-react'
 import { DatePickerButton } from '../components/ui/date-picker-button'
 import type { BoardLaneRecord, JournalEntry, TodoDetailUpdate, TodoItem, TodoPriority } from '../lib/db'
 import type { ActiveView } from '../types/app'
+import { getCountdownDaysRemaining, getCountdownTone } from '../utils/countdown'
 
 type LaneColor = {
   id: string
@@ -115,6 +116,7 @@ export function BoardView({
   const [dialogTodoDate, setDialogTodoDate] = useState(selectedDate)
   const [todoDraftPriority, setTodoDraftPriority] = useState<TodoPriority>('normal')
   const [todoDraftDescription, setTodoDraftDescription] = useState('')
+  const [todoDraftCountdownEnabled, setTodoDraftCountdownEnabled] = useState(false)
   const [laneDraftTitle, setLaneDraftTitle] = useState('')
   const [laneDraftColorId, setLaneDraftColorId] = useState(laneColors[0].id)
   const [focusedLaneId, setFocusedLaneId] = useState('inbox')
@@ -125,6 +127,7 @@ export function BoardView({
   const [detailDescription, setDetailDescription] = useState('')
   const [detailPriority, setDetailPriority] = useState<TodoPriority>('normal')
   const [detailLaneId, setDetailLaneId] = useState('inbox')
+  const [detailCountdownEnabled, setDetailCountdownEnabled] = useState(false)
   const activeTodoCount = filteredBoardTodos.filter((todo) => !todo.done).length
 
   useEffect(() => {
@@ -233,6 +236,7 @@ export function BoardView({
     setDetailDescription(todo.description)
     setDetailPriority(todo.priority)
     setDetailLaneId(todo.laneId || 'inbox')
+    setDetailCountdownEnabled(todo.countdownEnabled)
   }
 
   const closeTodoDetail = () => {
@@ -247,6 +251,7 @@ export function BoardView({
       description: detailDescription.trim(),
       priority: detailPriority,
       laneId: detailLaneId,
+      countdownEnabled: detailCountdownEnabled,
     })
     closeTodoDetail()
   }
@@ -271,6 +276,7 @@ export function BoardView({
     setDialogTodoDate(selectedDate)
     setTodoDraftPriority('normal')
     setTodoDraftDescription('')
+    setTodoDraftCountdownEnabled(false)
     setIsTodoDialogOpen(true)
   }
 
@@ -291,6 +297,7 @@ export function BoardView({
         description: todoDraftDescription.trim(),
         priority: todoDraftPriority,
         laneId: 'inbox',
+        countdownEnabled: todoDraftCountdownEnabled,
       })
     }
     if (title) {
@@ -369,6 +376,7 @@ export function BoardView({
                   const priority = todo.priority
                   const priorityOption = priorityOptions.find((option) => option.id === priority) ?? priorityOptions[0]
                   const description = todo.description
+                  const countdownDays = todo.countdownEnabled ? getCountdownDaysRemaining(todo.dateKey) : null
 
                   return (
                     <article
@@ -411,6 +419,12 @@ export function BoardView({
                       <h3 className={`m-0 text-base font-black text-ink-950 ${todo.done ? 'todo-done' : ''}`}>{todo.title}</h3>
                       {description && <p className="board-card-description">{description}</p>}
                       {entry && <p className="m-0 text-sm font-bold text-ink-600">{entry.title}</p>}
+                      {countdownDays != null && !todo.done && (
+                        <div className={`board-countdown-figure ${getCountdownTone(countdownDays)}`} aria-label={`倒计时 ${countdownDays} 天`}>
+                          <strong>{countdownDays}</strong>
+                          <span>天</span>
+                        </div>
+                      )}
 
                       <div className="board-card-actions">
                         <span className={`board-priority board-priority-${priority}`}>{priorityOption.shortLabel}</span>
@@ -525,6 +539,17 @@ export function BoardView({
                   ))}
                 </select>
               </label>
+              <label className="countdown-toggle">
+                <input
+                  type="checkbox"
+                  checked={detailCountdownEnabled}
+                  onChange={(event) => setDetailCountdownEnabled(event.target.checked)}
+                />
+                <span>
+                  <strong>开启倒计时</strong>
+                  <small>按 Todo 日期计算剩余天数</small>
+                </span>
+              </label>
               <fieldset className="todo-priority-field">
                 <legend>重要级</legend>
                 <div className="todo-priority-options">
@@ -601,6 +626,17 @@ export function BoardView({
                   placeholder="可选：补充背景、下一步或验收标准"
                   rows={3}
                 />
+              </label>
+              <label className="countdown-toggle">
+                <input
+                  type="checkbox"
+                  checked={todoDraftCountdownEnabled}
+                  onChange={(event) => setTodoDraftCountdownEnabled(event.target.checked)}
+                />
+                <span>
+                  <strong>开启倒计时</strong>
+                  <small>按上方 Todo 日期计算剩余天数</small>
+                </span>
               </label>
               <fieldset className="todo-priority-field">
                 <legend>重要级</legend>

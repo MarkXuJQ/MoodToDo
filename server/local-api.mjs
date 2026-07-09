@@ -19,7 +19,7 @@ const syncBundleRootDir = process.env.XINXIANGYI_SYNC_BUNDLE_DIR
 const syncBundleDir = resolve(syncBundleRootDir, syncBundleName)
 const port = Number(process.env.XINXIANGYI_API_PORT ?? 8787)
 const host = process.env.XINXIANGYI_API_HOST ?? '127.0.0.1'
-const schemaVersion = 5
+const schemaVersion = 6
 const portableSnapshotFile = 'xinxiangyi-native-snapshot.json'
 const portableManifestFile = 'manifest-native.json'
 const syncBundleGuideFile = 'README.txt'
@@ -85,6 +85,7 @@ db.exec(`
     description TEXT NOT NULL DEFAULT '',
     priority TEXT NOT NULL DEFAULT 'normal',
     lane_id TEXT NOT NULL DEFAULT 'inbox',
+    countdown_enabled INTEGER NOT NULL DEFAULT 0,
     done INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -181,6 +182,7 @@ ensureColumn('entries', 'location_text', `location_text TEXT NOT NULL DEFAULT ''
 ensureColumn('todos', 'description', `description TEXT NOT NULL DEFAULT ''`)
 ensureColumn('todos', 'priority', `priority TEXT NOT NULL DEFAULT 'normal'`)
 ensureColumn('todos', 'lane_id', `lane_id TEXT NOT NULL DEFAULT 'inbox'`)
+ensureColumn('todos', 'countdown_enabled', `countdown_enabled INTEGER NOT NULL DEFAULT 0`)
 
 db.exec(`PRAGMA user_version = ${schemaVersion}`)
 
@@ -220,6 +222,7 @@ const rowToTodo = (row) => ({
   description: row.description ?? '',
   priority: row.priority ?? 'normal',
   laneId: row.lane_id ?? 'inbox',
+  countdownEnabled: Boolean(row.countdown_enabled),
   done: Boolean(row.done),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -780,8 +783,8 @@ const importPortableSnapshot = (snapshot) => {
     }
 
     const insertTodo = db.prepare(`
-      INSERT INTO todos (id, date_key, title, description, priority, lane_id, done, created_at, updated_at, completed_at, sync_state)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+      INSERT INTO todos (id, date_key, title, description, priority, lane_id, countdown_enabled, done, created_at, updated_at, completed_at, sync_state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
     `)
     for (const row of snapshot.todos) {
       insertTodo.run(
@@ -791,6 +794,7 @@ const importPortableSnapshot = (snapshot) => {
         readString(row, 'description', ''),
         readString(row, 'priority', 'normal'),
         readString(row, 'lane_id', 'inbox'),
+        readNumber(row, 'countdown_enabled', readNumber(row, 'countdownEnabled')),
         readNumber(row, 'done'),
         readString(row, 'created_at', timestamp),
         readString(row, 'updated_at', timestamp),
@@ -1662,6 +1666,7 @@ const addTodo = async (request, response) => {
     description: typeof payload.description === 'string' ? payload.description : '',
     priority: typeof payload.priority === 'string' ? payload.priority : 'normal',
     laneId: typeof payload.laneId === 'string' ? payload.laneId : 'inbox',
+    countdownEnabled: Boolean(payload.countdownEnabled),
     done: false,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -1671,8 +1676,8 @@ const addTodo = async (request, response) => {
 
   transaction(() => {
     db.prepare(`
-      INSERT INTO todos (id, date_key, title, description, priority, lane_id, done, created_at, updated_at, sync_state)
-      VALUES ($id, $dateKey, $title, $description, $priority, $laneId, 0, $createdAt, $updatedAt, $syncState)
+      INSERT INTO todos (id, date_key, title, description, priority, lane_id, countdown_enabled, done, created_at, updated_at, sync_state)
+      VALUES ($id, $dateKey, $title, $description, $priority, $laneId, $countdownEnabled, 0, $createdAt, $updatedAt, $syncState)
     `).run({
       $id: todo.id,
       $dateKey: todo.dateKey,
@@ -1680,6 +1685,7 @@ const addTodo = async (request, response) => {
       $description: todo.description,
       $priority: todo.priority,
       $laneId: todo.laneId,
+      $countdownEnabled: todo.countdownEnabled ? 1 : 0,
       $createdAt: todo.createdAt,
       $updatedAt: todo.updatedAt,
       $syncState: todo.syncState,
@@ -1707,6 +1713,7 @@ const updateTodo = async (request, response, id) => {
     description: typeof payload.description === 'string' ? payload.description : existingTodo.description,
     priority: typeof payload.priority === 'string' ? payload.priority : existingTodo.priority,
     laneId: typeof payload.laneId === 'string' ? payload.laneId : existingTodo.laneId,
+    countdownEnabled: Object.hasOwn(payload, 'countdownEnabled') ? Boolean(payload.countdownEnabled) : existingTodo.countdownEnabled,
     done: nextDone,
     completedAt: Object.hasOwn(payload, 'done') ? (nextDone ? timestamp : undefined) : existingTodo.completedAt,
     updatedAt: timestamp,
@@ -1717,7 +1724,7 @@ const updateTodo = async (request, response, id) => {
   transaction(() => {
     db.prepare(`
       UPDATE todos
-      SET description = $description, priority = $priority, lane_id = $laneId,
+      SET description = $description, priority = $priority, lane_id = $laneId, countdown_enabled = $countdownEnabled,
           done = $done, completed_at = $completedAt, updated_at = $updatedAt, sync_state = 'pending'
       WHERE id = $id
     `).run({
@@ -1725,6 +1732,7 @@ const updateTodo = async (request, response, id) => {
       $description: todo.description,
       $priority: todo.priority,
       $laneId: todo.laneId,
+      $countdownEnabled: todo.countdownEnabled ? 1 : 0,
       $done: todo.done ? 1 : 0,
       $completedAt: todo.completedAt ?? null,
       $updatedAt: todo.updatedAt,

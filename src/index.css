@@ -499,7 +499,7 @@
   }
 
   .metric-label {
-    @apply text-xs font-bold text-ink-400;
+    @apply truncate text-xs font-bold text-ink-400;
   }
 
   .metric-value {
@@ -922,11 +922,19 @@
   }
 
   .todo-copy small {
-    @apply truncate text-xs font-bold text-ink-400;
+    @apply flex min-w-0 flex-wrap items-center gap-1.5 text-xs font-bold text-ink-400;
   }
 
   .todo-done {
     @apply text-ink-400 line-through;
+  }
+
+  .todo-inline-countdown {
+    @apply inline-flex min-h-6 w-fit items-center gap-1 rounded-full border border-field-200 bg-field-50 px-2 text-xs font-black no-underline;
+  }
+
+  .todo-inline-countdown svg {
+    @apply shrink-0;
   }
 
   .empty-state {
@@ -1530,6 +1538,19 @@
     @apply m-0 line-clamp-3 text-sm font-bold leading-6 text-ink-600;
   }
 
+  .board-countdown-figure {
+    @apply flex min-h-16 items-end justify-end gap-1 justify-self-end text-right;
+  }
+
+  .board-countdown-figure strong {
+    @apply text-6xl font-black leading-none tracking-normal;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .board-countdown-figure span {
+    @apply pb-1 text-xl font-black leading-none;
+  }
+
   .board-card-actions {
     @apply flex items-center justify-between gap-2;
   }
@@ -1540,6 +1561,26 @@
 
   .board-detail-select {
     @apply min-h-11 rounded-md border border-field-200 bg-field-50 px-3 text-base font-black text-ink-950 outline-none transition-colors focus:border-xin-700;
+  }
+
+  .countdown-toggle {
+    @apply grid min-h-14 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md border border-field-200 bg-field-50 px-3 py-2 text-left;
+  }
+
+  .countdown-toggle input {
+    @apply size-5 accent-xin-700;
+  }
+
+  .countdown-toggle span {
+    @apply grid min-w-0 gap-0.5;
+  }
+
+  .countdown-toggle strong {
+    @apply text-sm font-black text-ink-950;
+  }
+
+  .countdown-toggle small {
+    @apply text-xs font-bold text-ink-400;
   }
 
   .board-priority {
@@ -2121,6 +2162,7 @@
   :root[data-theme='dark'] .settings-group,
   :root[data-theme='dark'] .settings-link,
   :root[data-theme='dark'] .config-row,
+  :root[data-theme='dark'] .countdown-toggle,
   :root[data-theme='dark'] .webdav-test-row,
   :root[data-theme='dark'] .journal-entry-row,
   :root[data-theme='dark'] .todo-dialog,
@@ -2297,7 +2339,8 @@
   :root[data-theme='dark'] .board-check,
   :root[data-theme='dark'] .board-search,
   :root[data-theme='dark'] .board-detail-select,
-  :root[data-theme='dark'] .board-drop-empty {
+  :root[data-theme='dark'] .board-drop-empty,
+  :root[data-theme='dark'] .todo-inline-countdown {
     border-color: rgba(126, 151, 142, 0.3);
     background-color: rgba(12, 20, 18, 0.56);
   }

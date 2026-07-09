@@ -66,9 +66,18 @@ export type DatabaseStatus = {
   lastLoadedAt: string
 }
 
-export type DashboardCardId = 'streak' | 'monthCheckin' | 'todoCompletion' | 'pendingSync' | 'attachments'
+export type DashboardCardId = 'streak' | 'monthCheckin' | 'todoCompletion' | 'pendingSync' | 'attachments' | 'countdown'
 
 export type DashboardCardConfig = {
   id: DashboardCardId
   enabled: boolean
+}
+
+export type CountdownTodoOption = {
+  id: string
+  title: string
+  dateKey: string
+  daysRemaining: number
+  label: string
+  value: string
 }
