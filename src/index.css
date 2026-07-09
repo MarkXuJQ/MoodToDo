@@ -991,11 +991,11 @@
   }
 
   .mood-breakdown-list {
-    @apply mt-4 grid gap-3;
+    @apply mt-4 grid gap-0 overflow-hidden rounded-md border border-field-200 bg-field-50 p-1;
   }
 
   .mood-breakdown-row {
-    @apply grid grid-cols-[10px_minmax(0,1fr)_minmax(78px,0.32fr)_36px] items-center gap-2 rounded-md border border-field-200 bg-field-50 px-3 py-2;
+    @apply grid grid-cols-[10px_minmax(0,1fr)_minmax(78px,0.32fr)_36px] items-center gap-2 border-b border-field-200 bg-transparent px-2 py-2.5 last:border-b-0;
   }
 
   .mood-breakdown-swatch {
@@ -1015,7 +1015,7 @@
   }
 
   .mood-breakdown-meter {
-    @apply h-2 overflow-hidden rounded-full bg-field-200;
+    @apply h-2 overflow-hidden rounded-full bg-white;
   }
 
   .mood-breakdown-meter i {
@@ -1381,12 +1381,41 @@
     scroll-snap-type: x proximity;
   }
 
+  .board-search-row {
+    @apply mb-4 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2;
+  }
+
   .board-search {
-    @apply mb-4 flex min-h-11 w-full max-w-xl items-center gap-2 rounded-full border border-white/75 bg-[rgba(255,255,255,0.72)] px-3 text-ink-400 shadow-[0_10px_28px_rgba(17,24,22,0.04)] backdrop-blur-md;
+    @apply flex min-h-11 w-full items-center gap-2 rounded-full border border-white/75 bg-[rgba(255,255,255,0.72)] px-3 text-ink-400 shadow-[0_10px_28px_rgba(17,24,22,0.04)] backdrop-blur-md;
   }
 
   .board-search input {
     @apply min-w-0 flex-1 border-0 bg-transparent p-0 text-sm font-bold text-ink-950 outline-none placeholder:text-ink-400;
+  }
+
+  .board-trash-drop {
+    @apply grid min-h-11 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-full border border-white/75 bg-[rgba(255,255,255,0.72)] px-3 text-xs font-black text-ink-400 shadow-[0_10px_28px_rgba(17,24,22,0.04)] backdrop-blur-md;
+    min-width: 116px;
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease,
+      color 160ms ease,
+      transform 160ms ease,
+      opacity 160ms ease;
+  }
+
+  .board-trash-drop svg {
+    @apply shrink-0;
+  }
+
+  .board-trash-drop-ready {
+    @apply border-coral-500/40 bg-[#fff1ee] text-coral-500;
+    transform: translateY(-1px);
+  }
+
+  .board-trash-drop-active {
+    @apply border-coral-500 bg-coral-500 text-white;
+    transform: translateY(-2px) scale(1.02);
   }
 
   .board-grid::-webkit-scrollbar {
@@ -1513,6 +1542,16 @@
       box-shadow 180ms ease,
       border-color 180ms ease,
       background-color 180ms ease;
+    isolation: isolate;
+  }
+
+  .board-card-countdown {
+    background-color: rgba(255, 255, 255, 0.92);
+  }
+
+  .board-card > :not(.board-countdown-figure) {
+    @apply relative;
+    z-index: 2;
   }
 
   .board-card-meta {
@@ -1523,10 +1562,12 @@
     @apply absolute left-0 top-0 inline-flex min-h-8 items-center rounded-br-md border-0 px-3 text-sm font-black transition-opacity hover:opacity-85;
     background-color: var(--lane-color);
     color: var(--lane-label-text);
+    z-index: 3;
   }
 
   .board-check {
     @apply absolute right-2 top-2 inline-grid size-8 shrink-0 place-items-center rounded-md border-2 border-field-300 bg-white/90 text-white transition-colors hover:border-xin-700;
+    z-index: 3;
   }
 
   .board-check-done {
@@ -1539,28 +1580,39 @@
   }
 
   .board-countdown-figure {
-    @apply flex min-h-16 items-end justify-end gap-1 justify-self-end text-right;
+    @apply pointer-events-none absolute bottom-[-0.45rem] right-2 flex items-end justify-end gap-1 text-right;
+    z-index: 0;
+    opacity: 0.28;
+    text-shadow: 0 10px 24px color-mix(in srgb, var(--lane-color) 18%, transparent);
+  }
+
+  .board-countdown-figure strong,
+  .board-countdown-figure span {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--lane-color) 96%, #111827 4%) 0%, color-mix(in srgb, var(--lane-color) 42%, transparent) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 
   .board-countdown-figure strong {
-    @apply text-6xl font-black leading-none tracking-normal;
+    @apply text-7xl font-black leading-none tracking-normal;
     font-variant-numeric: tabular-nums;
   }
 
   .board-countdown-figure span {
-    @apply pb-1 text-xl font-black leading-none;
+    @apply pb-2 text-2xl font-black leading-none;
   }
 
   .board-card-actions {
     @apply flex items-center justify-between gap-2;
   }
 
-  .board-card-controls {
-    @apply flex min-w-0 items-center gap-2;
-  }
-
   .board-detail-select {
     @apply min-h-11 rounded-md border border-field-200 bg-field-50 px-3 text-base font-black text-ink-950 outline-none transition-colors focus:border-xin-700;
+  }
+
+  .todo-detail-delete-button {
+    @apply border-coral-500/30 bg-[#fff1ee] text-coral-500 hover:border-coral-500/50 hover:bg-[#ffe1da];
   }
 
   .countdown-toggle {
@@ -2081,23 +2133,28 @@
   }
 
   .heat-low {
-    @apply bg-[#f4d6d0];
+    @apply bg-[#dceee7];
   }
 
   .heat-stress {
-    @apply bg-[#f2dfb7];
+    @apply bg-[#bfe0d4];
   }
 
   .heat-steady {
-    @apply bg-[#d8e3f2];
+    @apply bg-[#8fcabb];
   }
 
   .heat-good {
-    @apply bg-[#cbe6df];
+    @apply bg-[#4fa897];
   }
 
   .heat-bright {
-    @apply bg-[#ded5ef];
+    @apply bg-[#176f66];
+  }
+
+  .calendar-heat-cell.heat-good,
+  .calendar-heat-cell.heat-bright {
+    @apply text-white;
   }
 
   .year-heatmap-cell.heat-empty {
@@ -2105,23 +2162,23 @@
   }
 
   .year-heatmap-cell.heat-low {
-    background-color: #ebb8af;
+    background-color: #d6ebe3;
   }
 
   .year-heatmap-cell.heat-stress {
-    background-color: #e9ca85;
+    background-color: #b8dbcf;
   }
 
   .year-heatmap-cell.heat-steady {
-    background-color: #bad2ed;
+    background-color: #83c2b3;
   }
 
   .year-heatmap-cell.heat-good {
-    background-color: #9ed5ca;
+    background-color: #4fa897;
   }
 
   .year-heatmap-cell.heat-bright {
-    background-color: #c5b2e5;
+    background-color: #176f66;
   }
 
   .score-低谷 {
@@ -2204,7 +2261,7 @@
   :root[data-theme='dark'] .context-strip,
   :root[data-theme='dark'] .week-day-card,
   :root[data-theme='dark'] .mood-score-summary,
-  :root[data-theme='dark'] .mood-breakdown-row,
+  :root[data-theme='dark'] .mood-breakdown-list,
   :root[data-theme='dark'] .empty-state,
   :root[data-theme='dark'] .note,
   :root[data-theme='dark'] .table-key,
@@ -2221,6 +2278,15 @@
   :root[data-theme='dark'] .text-area:focus,
   :root[data-theme='dark'] .select-input:focus {
     background-color: rgba(21, 33, 30, 0.96);
+  }
+
+  :root[data-theme='dark'] .mood-breakdown-row {
+    border-color: rgba(126, 151, 142, 0.22);
+    background-color: transparent;
+  }
+
+  :root[data-theme='dark'] .mood-breakdown-meter {
+    background-color: rgba(12, 20, 18, 0.58);
   }
 
   :root[data-theme='dark'] .date-picker-button:hover,
@@ -2290,23 +2356,23 @@
   }
 
   :root[data-theme='dark'] .heat-low {
-    background-color: rgba(112, 45, 38, 0.74);
+    background-color: rgba(45, 74, 65, 0.92);
   }
 
   :root[data-theme='dark'] .heat-stress {
-    background-color: rgba(120, 84, 28, 0.74);
+    background-color: rgba(38, 94, 79, 0.92);
   }
 
   :root[data-theme='dark'] .heat-steady {
-    background-color: rgba(41, 72, 118, 0.74);
+    background-color: rgba(30, 117, 99, 0.92);
   }
 
   :root[data-theme='dark'] .heat-good {
-    background-color: rgba(30, 91, 82, 0.78);
+    background-color: rgba(32, 142, 122, 0.94);
   }
 
   :root[data-theme='dark'] .heat-bright {
-    background-color: rgba(77, 58, 126, 0.78);
+    background-color: rgba(45, 180, 153, 0.96);
   }
 
   :root[data-theme='dark'] .year-heatmap-shell {
@@ -2326,6 +2392,15 @@
       0 12px 30px rgba(0, 0, 0, 0.2);
   }
 
+  :root[data-theme='dark'] .board-card-countdown {
+    background-color: rgba(18, 28, 26, 0.9);
+  }
+
+  :root[data-theme='dark'] .board-countdown-figure {
+    opacity: 0.3;
+    text-shadow: 0 12px 26px rgba(0, 0, 0, 0.2);
+  }
+
   :root[data-theme='dark'] .board-add-column,
   :root[data-theme='dark'] .board-column-dialog {
     border-color: rgba(126, 151, 142, 0.3);
@@ -2338,6 +2413,7 @@
 
   :root[data-theme='dark'] .board-check,
   :root[data-theme='dark'] .board-search,
+  :root[data-theme='dark'] .board-trash-drop,
   :root[data-theme='dark'] .board-detail-select,
   :root[data-theme='dark'] .board-drop-empty,
   :root[data-theme='dark'] .todo-inline-countdown {
@@ -2347,6 +2423,24 @@
 
   :root[data-theme='dark'] .board-search input {
     color: var(--color-ink-900);
+  }
+
+  :root[data-theme='dark'] .board-trash-drop-ready {
+    border-color: rgba(240, 92, 70, 0.44);
+    background-color: rgba(82, 35, 28, 0.64);
+    color: #ffb7a9;
+  }
+
+  :root[data-theme='dark'] .board-trash-drop-active {
+    border-color: rgba(240, 92, 70, 0.92);
+    background-color: rgba(174, 63, 45, 0.9);
+    color: #fff7f4;
+  }
+
+  :root[data-theme='dark'] .todo-detail-delete-button {
+    border-color: rgba(240, 92, 70, 0.42);
+    background-color: rgba(82, 35, 28, 0.64);
+    color: #ffb7a9;
   }
 
   :root[data-theme='dark'] .todo-priority-option {
@@ -2364,23 +2458,23 @@
   }
 
   :root[data-theme='dark'] .year-heatmap-cell.heat-low {
-    background-color: rgba(142, 58, 49, 0.82);
+    background-color: rgba(45, 74, 65, 0.92);
   }
 
   :root[data-theme='dark'] .year-heatmap-cell.heat-stress {
-    background-color: rgba(148, 103, 35, 0.82);
+    background-color: rgba(38, 94, 79, 0.92);
   }
 
   :root[data-theme='dark'] .year-heatmap-cell.heat-steady {
-    background-color: rgba(50, 88, 143, 0.84);
+    background-color: rgba(30, 117, 99, 0.92);
   }
 
   :root[data-theme='dark'] .year-heatmap-cell.heat-good {
-    background-color: rgba(36, 112, 101, 0.86);
+    background-color: rgba(32, 142, 122, 0.94);
   }
 
   :root[data-theme='dark'] .year-heatmap-cell.heat-bright {
-    background-color: rgba(93, 70, 151, 0.86);
+    background-color: rgba(45, 180, 153, 0.96);
   }
 
   :root[data-theme='dark'] .calendar-heat-cell {

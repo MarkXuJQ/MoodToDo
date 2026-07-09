@@ -224,9 +224,10 @@ export function JournalView({
             <span className="pill min-h-8 text-xs">均分 {yearAverageMood || 0}</span>
           </div>
           <div className="flex items-center gap-1.5 text-xs font-black text-ink-400" aria-label="年度热力图图例">
-            <span>低</span>
+            <span>未打卡</span>
             <i className="size-4 rounded border border-field-200 heat-empty" />
             <i className="size-4 rounded border border-field-200 heat-low" />
+            <i className="size-4 rounded border border-field-200 heat-stress" />
             <i className="size-4 rounded border border-field-200 heat-steady" />
             <i className="size-4 rounded border border-field-200 heat-good" />
             <i className="size-4 rounded border border-field-200 heat-bright" />

@@ -122,6 +122,7 @@ export function BoardView({
   const [focusedLaneId, setFocusedLaneId] = useState('inbox')
   const [visibleLaneLimit, setVisibleLaneLimit] = useState(getVisibleLaneLimit)
   const [draggingTodoId, setDraggingTodoId] = useState<string | null>(null)
+  const [isTrashActive, setIsTrashActive] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null)
   const [detailDescription, setDetailDescription] = useState('')
@@ -272,6 +273,17 @@ export function BoardView({
     assignTodoToLane(todo, lane.id)
   }
 
+  const handleDropOnTrash = () => {
+    if (!draggingTodoId) return
+
+    const todo = filteredBoardTodos.find((item) => item.id === draggingTodoId)
+    setDraggingTodoId(null)
+    setIsTrashActive(false)
+    if (!todo) return
+
+    onDeleteTodo(todo)
+  }
+
   const openTodoDialog = () => {
     setDialogTodoDate(selectedDate)
     setTodoDraftPriority('normal')
@@ -324,10 +336,32 @@ export function BoardView({
         </button>
       </div>
 
-      <label className="board-search">
-        <Search size={17} aria-hidden="true" />
-        <input value={searchKeyword} onChange={(event) => setSearchKeyword(event.target.value)} placeholder="搜索 Todo、描述或日记" />
-      </label>
+      <div className="board-search-row">
+        <label className="board-search">
+          <Search size={17} aria-hidden="true" />
+          <input value={searchKeyword} onChange={(event) => setSearchKeyword(event.target.value)} placeholder="搜索 Todo、描述或日记" />
+        </label>
+        <div
+          className={`board-trash-drop ${draggingTodoId ? 'board-trash-drop-ready' : ''} ${isTrashActive ? 'board-trash-drop-active' : ''}`}
+          aria-label="拖拽 Todo 到这里删除"
+          onDragEnter={(event) => {
+            event.preventDefault()
+            setIsTrashActive(true)
+          }}
+          onDragOver={(event) => {
+            event.preventDefault()
+            setIsTrashActive(true)
+          }}
+          onDragLeave={() => setIsTrashActive(false)}
+          onDrop={(event) => {
+            event.preventDefault()
+            handleDropOnTrash()
+          }}
+        >
+          <Trash2 size={18} aria-hidden="true" />
+          <span>{draggingTodoId ? '松开删除' : '拖入删除'}</span>
+        </div>
+      </div>
 
       <div className="board-grid">
         {boardLanes.map((lane) => (
@@ -380,14 +414,17 @@ export function BoardView({
 
                   return (
                     <article
-                      className="board-card"
+                      className={`board-card ${countdownDays != null && !todo.done ? 'board-card-countdown' : ''}`}
                       key={todo.id}
                       role="button"
                       tabIndex={0}
-                      draggable={!todo.done}
+                      draggable
                       onClick={() => openTodoDetail(todo)}
                       onDragStart={() => setDraggingTodoId(todo.id)}
-                      onDragEnd={() => setDraggingTodoId(null)}
+                      onDragEnd={() => {
+                        setDraggingTodoId(null)
+                        setIsTrashActive(false)
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault()
@@ -428,14 +465,6 @@ export function BoardView({
 
                       <div className="board-card-actions">
                         <span className={`board-priority board-priority-${priority}`}>{priorityOption.shortLabel}</span>
-                        <div className="board-card-controls">
-                          <button className="icon-button" type="button" aria-label={`删除 ${todo.title}`} onClick={(event) => {
-                            event.stopPropagation()
-                            onDeleteTodo(todo)
-                          }}>
-                            <Trash2 size={16} aria-hidden="true" />
-                          </button>
-                        </div>
                       </div>
                     </article>
                   )
@@ -569,13 +598,26 @@ export function BoardView({
               </fieldset>
             </div>
 
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-4 flex flex-wrap justify-between gap-2">
+              <button
+                className="button-secondary todo-detail-delete-button"
+                type="button"
+                onClick={() => {
+                  onDeleteTodo(editingTodo)
+                  closeTodoDetail()
+                }}
+              >
+                <Trash2 size={16} aria-hidden="true" />
+                删除
+              </button>
+              <div className="flex gap-2">
               <button className="button-secondary" type="button" onClick={closeTodoDetail}>
                 取消
               </button>
               <button className="button-primary" type="submit">
                 保存
               </button>
+              </div>
             </div>
           </form>
         </div>

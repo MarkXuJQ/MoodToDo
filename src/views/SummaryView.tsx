@@ -172,7 +172,7 @@ export function SummaryView({
             <i className="size-5 rounded border border-field-200 heat-steady" />
             <i className="size-5 rounded border border-field-200 heat-good" />
             <i className="size-5 rounded border border-field-200 heat-bright" />
-            <span>高亮</span>
+            <span>高</span>
           </div>
 
           <div className="calendar-day-todos" aria-labelledby="calendar-day-todos-title">

@@ -84,6 +84,16 @@ import { SettingsView } from './views/SettingsView'
 import { SummaryView } from './views/SummaryView'
 import type { TrendPoint } from './components/ui/data-viz'
 
+const getInitialDateState = () => {
+  const dateKey = getTodayKey()
+
+  return {
+    dateKey,
+    monthKey: dateKey.slice(0, 7),
+    weekKey: getWeekKey(dateKey),
+  }
+}
+
 function App() {
   useViewportMetrics()
 
@@ -117,12 +127,13 @@ function App() {
   } = useAppPreferences()
   const { resolvedThemeMode, setThemeMode: handleThemeModeChange, themeMode } = useThemeMode()
   const { isDesktopNav, isNavCollapsed, isNavOpen, setIsNavCollapsed, setIsNavOpen } = useResponsiveNav()
+  const initialDateState = useMemo(() => getInitialDateState(), [])
   const [activeView, setActiveView] = useState<ActiveView>('dashboard')
   const [settingsMenuKey, setSettingsMenuKey] = useState(0)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('overview')
-  const [selectedDate, setSelectedDate] = useState(getTodayKey)
-  const [visibleMonth, setVisibleMonth] = useState(getTodayKey().slice(0, 7))
-  const [selectedWeek, setSelectedWeek] = useState(getWeekKey(getTodayKey()))
+  const [selectedDate, setSelectedDate] = useState(initialDateState.dateKey)
+  const [visibleMonth, setVisibleMonth] = useState(initialDateState.monthKey)
+  const [selectedWeek, setSelectedWeek] = useState(initialDateState.weekKey)
   const [draft, setDraft] = useState<DraftState>(emptyDraft)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [todoTitle, setTodoTitle] = useState('')
