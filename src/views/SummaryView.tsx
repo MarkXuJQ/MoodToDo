@@ -232,7 +232,7 @@ export function SummaryView({
               ))}
             </ul>
 
-            {selectedDateTodos.length === 0 && <p className="empty-state">这一天还没有 Todo，可以直接在这里补一条。</p>}
+            {selectedDateTodos.length === 0 && <p className="empty-state">这一天还没有 Todo。</p>}
           </div>
         </section>
 
@@ -281,7 +281,7 @@ export function SummaryView({
               className="text-area summary-week-textarea min-h-56"
               value={summaryDraft}
               onChange={(event) => onSummaryDraftChange(event.target.value)}
-              placeholder={selectedWeekEntryCount ? '生成后可继续手动修改。' : '本周还没有打卡记录。'}
+              placeholder={selectedWeekEntryCount ? 'AI 周总结' : '本周还没有打卡记录。'}
               rows={10}
             />
           </label>

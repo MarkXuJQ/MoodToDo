@@ -166,7 +166,6 @@ export function JournalView({
           <h2 className="section-title" id="journal-browser-title">
             日记浏览
           </h2>
-          <p className="mt-1 hidden text-sm font-bold text-ink-400 md:block">用年度热力图回看长期节奏，并回到任意一天继续编辑。</p>
         </div>
       </div>
 

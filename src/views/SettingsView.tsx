@@ -105,10 +105,10 @@ export function SettingsView({
   onSnapshotDaysChange,
 }: SettingsViewProps) {
   const activeSettingsItem = settingsSections.find((item) => item.id === settingsSection)
-  const themeOptions: Array<{ id: ThemeMode; label: string; note: string; icon: typeof Monitor }> = [
-    { id: 'system', label: '跟随系统', note: '随设备外观自动切换', icon: Monitor },
-    { id: 'light', label: '日间', note: '明亮、轻量的记录环境', icon: SunMedium },
-    { id: 'dark', label: '夜间', note: '低亮度，适合夜间整理', icon: Moon },
+  const themeOptions: Array<{ id: ThemeMode; label: string; icon: typeof Monitor }> = [
+    { id: 'system', label: '跟随系统', icon: Monitor },
+    { id: 'light', label: '日间', icon: SunMedium },
+    { id: 'dark', label: '夜间', icon: Moon },
   ]
   const activeGroupId = useMemo(
     () => settingsSectionGroups.find((group) => group.items.some((item) => item.id === settingsSection))?.id ?? settingsSectionGroups[0]?.id ?? '',
@@ -147,7 +147,6 @@ export function SettingsView({
   }
 
   const showMobileMenu = !isDesktopNav && mobileSettingsLevel === 'menu'
-  const settingsIntro = showMobileMenu ? '选择一个设置项继续调整。' : activeSettingsItem?.note
 
   return (
     <section className="py-3 sm:py-5" aria-labelledby="settings-title">
@@ -163,7 +162,6 @@ export function SettingsView({
           <h2 className="section-title" id="settings-title">
             设置
           </h2>
-          <p className="mt-1 text-sm font-bold text-ink-400">{settingsIntro}</p>
         </div>
         {!showMobileMenu && <span className="pill">{activeSettingsItem?.label}</span>}
       </div>
@@ -178,7 +176,6 @@ export function SettingsView({
                   <button className="settings-mobile-menu-item" type="button" key={item.id} onClick={() => handleSettingsSectionChange(item.id)}>
                     <span>
                       <strong>{item.label}</strong>
-                      <small>{item.note}</small>
                     </span>
                     <ChevronDown className="-rotate-90 text-ink-400" size={18} aria-hidden="true" />
                   </button>
@@ -215,7 +212,6 @@ export function SettingsView({
                         onClick={() => handleSettingsSectionChange(item.id)}
                       >
                         <strong className="block text-sm font-black text-ink-950">{item.label}</strong>
-                        <small className="block text-xs font-bold text-ink-400">{item.note}</small>
                       </button>
                     ))}
                   </div>
@@ -371,10 +367,6 @@ export function SettingsView({
                     )
                   })}
                 </div>
-
-                <p className="note mt-3">
-                  这里先保留卡片显隐。后面加拖拽排序、自定义统计块时，不需要再推翻现有结构。
-                </p>
               </section>
 
               <section className="section" aria-labelledby="card-preview-title">
@@ -431,16 +423,11 @@ export function SettingsView({
                       </span>
                       <span>
                         <strong>{option.label}</strong>
-                        <small>{option.note}</small>
                       </span>
                     </button>
                   )
                 })}
               </div>
-
-              <p className="note mt-3">
-                外观设置只保存在本机，用于调整界面和动态背景。数据内容、SQLite 文件和 WebDAV 同步不受外观模式影响。
-              </p>
             </section>
           )}
 

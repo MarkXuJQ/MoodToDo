@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { BookOpenText, Check, CloudSun, LockKeyhole, Sparkles, Sprout, Trophy } from 'lucide-react'
+import { BookOpenText, Check, CloudSun, LockKeyhole, Sprout, Trophy } from 'lucide-react'
 
 import type { GardenPlant, GameEngineSnapshot } from '../lib/gameEngine'
 
 type GardenViewProps = {
   snapshot: GameEngineSnapshot
-  todayKey: string
   onCheckIn: () => void
   onOpenJournalDate: (dateKey: string) => void
 }
@@ -42,7 +41,7 @@ function PlantFigure({ plant, compact = false }: { plant: GardenPlant; compact?:
   )
 }
 
-export function GardenView({ snapshot, todayKey, onCheckIn, onOpenJournalDate }: GardenViewProps) {
+export function GardenView({ snapshot, onCheckIn, onOpenJournalDate }: GardenViewProps) {
   const [selectedPlantId, setSelectedPlantId] = useState(snapshot.plants[0]?.id ?? '')
   const selectedPlant = useMemo(
     () => snapshot.plants.find((plant) => plant.id === selectedPlantId) ?? snapshot.plants[0],
@@ -62,7 +61,6 @@ export function GardenView({ snapshot, todayKey, onCheckIn, onOpenJournalDate }:
         <div className="garden-hero-copy">
           <p className="eyebrow">Mind Garden</p>
           <h1 id="garden-title">心象花园</h1>
-          <p>{snapshot.garden.climateNote}</p>
 
           <div className="garden-hero-actions">
             <button className="button-primary" type="button" onClick={onCheckIn}>
@@ -102,22 +100,19 @@ export function GardenView({ snapshot, todayKey, onCheckIn, onOpenJournalDate }:
         <article role="listitem">
           <span>花园生命力</span>
           <strong>{snapshot.garden.vitality}</strong>
-          <small>最近打卡和连续记录共同滋养</small>
         </article>
         <article role="listitem">
           <span>已种心花</span>
           <strong>{snapshot.garden.plantCount}</strong>
-          <small>每篇日记都会留下一株植物</small>
         </article>
         <article role="listitem">
           <span>连续打卡</span>
           <strong>{snapshot.metrics.currentStreak} 天</strong>
-          <small>最长 {snapshot.metrics.longestStreak} 天</small>
         </article>
         <article role="listitem">
           <span>已获成就</span>
           <strong>{snapshot.garden.unlockedAchievementCount}</strong>
-          <small>{nextAchievement ? `下一项：${nextAchievement.title}` : '成就已全部点亮'}</small>
+          <small>{nextAchievement ? nextAchievement.title : '全部点亮'}</small>
         </article>
       </div>
 
@@ -165,7 +160,6 @@ export function GardenView({ snapshot, todayKey, onCheckIn, onOpenJournalDate }:
           <div className="garden-empty">
             <Sprout size={42} aria-hidden="true" />
             <h3>花园还在等待第一粒心种</h3>
-            <p>不需要写得完美，记录今天发生的事就可以开始。</p>
             <button className="button-primary" type="button" onClick={onCheckIn}>写第一篇日记</button>
           </div>
         )}
@@ -188,14 +182,6 @@ export function GardenView({ snapshot, todayKey, onCheckIn, onOpenJournalDate }:
                 <BookOpenText size={16} aria-hidden="true" />
                 查看这一天
               </button>
-            </div>
-          </article>
-
-          <article className="section garden-rule-card">
-            <Sparkles size={22} aria-hidden="true" />
-            <div>
-              <h2>心情不决定你是否值得奖励</h2>
-              <p>每次诚实记录都获得基础成长。心象分只改变植物与天气：低落会长出守夜蕨，修复会长出晨露芽，紧绷与舒展也各有自己的花。</p>
             </div>
           </article>
         </section>
@@ -225,12 +211,6 @@ export function GardenView({ snapshot, todayKey, onCheckIn, onOpenJournalDate }:
           ))}
         </div>
       </section>
-
-      <p className="garden-today-note">
-        {snapshot.garden.todayCheckedIn
-          ? `${todayKey} 的心种已经在花园中。继续修改日记会重新计算心象，但不会重复种植。`
-          : `今天是 ${todayKey}。写下日记后，今天会只生成一株属于这一天的植物。`}
-      </p>
     </section>
   )
 }

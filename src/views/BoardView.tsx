@@ -721,7 +721,7 @@ export function BoardView({
                     data-dialog-initial-focus
                     value={detailDescription}
                     onChange={(event) => setDetailDescription(event.target.value)}
-                    placeholder="补充背景、下一步、验收标准"
+                    placeholder="描述"
                     rows={4}
                   />
                 </label>
@@ -750,7 +750,7 @@ export function BoardView({
                 />
                 <span>
                   <strong>开启倒计时</strong>
-                  <small>按 Todo 日期计算剩余天数</small>
+                  <small>{detailCountdownEnabled ? '开启' : '关闭'}</small>
                 </span>
               </label>
               <fieldset className="todo-repeat-field">
@@ -861,7 +861,6 @@ export function BoardView({
             aria-modal="true"
             id="todo-add-dialog"
             aria-labelledby="todo-dialog-title"
-            aria-describedby="todo-dialog-description"
             tabIndex={-1}
             onSubmit={handleDialogTodoSubmit}
           >
@@ -876,13 +875,6 @@ export function BoardView({
                 <h3 className="section-title text-lg" id="todo-dialog-title">
                   {todoDialogStep === 'description' ? '添加详情描述' : todoDialogStep === 'options' ? '事项设置' : '添加事项'}
                 </h3>
-                <p className="todo-dialog-description" id="todo-dialog-description">
-                  {todoDialogStep === 'description'
-                    ? '只记录必要背景、下一步或验收标准；留空也可以。'
-                    : todoDialogStep === 'options'
-                      ? '把低频选项集中在这里，设置完成后回到一级菜单添加。'
-                      : '先写事项和日期，其他内容需要时再进入二级弹窗。'}
-                </p>
               </div>
               <button className="icon-button" type="button" aria-label="关闭添加 Todo" onClick={closeTodoDialog}>
                 <X size={18} aria-hidden="true" />
@@ -898,7 +890,7 @@ export function BoardView({
                       className="text-input"
                       value={todoTitle}
                       onChange={(event) => onTodoTitleChange(event.target.value)}
-                      placeholder="写下要推进的一件事"
+                      placeholder="事项名称"
                       data-dialog-initial-focus
                     />
                   </label>
@@ -913,11 +905,10 @@ export function BoardView({
                     />
                   </div>
 
-                  <div className="todo-settings-list" aria-label="补充设置">
+                  <div className="todo-settings-list" aria-label="设置入口">
                     <button className="todo-setting-row" type="button" onClick={() => setTodoDialogStep('description')}>
                       <span className="todo-setting-row-copy">
                         <strong>详情描述</strong>
-                        <small>补充背景、下一步或验收标准</small>
                       </span>
                       <span className="todo-setting-row-value">
                         {todoDraftDescription.trim() ? '已填写' : '未添加'}
@@ -927,7 +918,6 @@ export function BoardView({
                     <button className="todo-setting-row" type="button" onClick={() => setTodoDialogStep('options')}>
                       <span className="todo-setting-row-copy">
                         <strong>高级设置</strong>
-                        <small>重要级、看板显示、倒计时、重复、提醒</small>
                       </span>
                       <span className="todo-setting-row-value">
                         {todoDraftOptionSummary}
@@ -956,7 +946,7 @@ export function BoardView({
                       className="text-area min-h-44"
                       value={todoDraftDescription}
                       onChange={(event) => setTodoDraftDescription(event.target.value)}
-                      placeholder="可选：补充背景、下一步或验收标准"
+                      placeholder="描述"
                       rows={6}
                       data-dialog-initial-focus
                     />
@@ -1001,7 +991,7 @@ export function BoardView({
                     <label className="todo-form-row">
                       <span className="todo-form-row-copy">
                         <strong>显示在看板</strong>
-                        <small>{todoDraftBoardVisible ? '会出现在 Todo 看板' : '仅保存在对应日期里'}</small>
+                        <small>{todoDraftBoardVisible ? '显示' : '隐藏'}</small>
                       </span>
                       <input
                         type="checkbox"
@@ -1016,7 +1006,7 @@ export function BoardView({
                     <label className="todo-form-row">
                       <span className="todo-form-row-copy">
                         <strong>倒计时</strong>
-                        <small>{todoDraftCountdownEnabled ? '会按 Todo 日期显示剩余天数' : '不开启倒计时标记'}</small>
+                        <small>{todoDraftCountdownEnabled ? '开启' : '关闭'}</small>
                       </span>
                       <input
                         type="checkbox"
@@ -1028,7 +1018,7 @@ export function BoardView({
                     <label className="todo-form-row todo-form-row-stacked">
                       <span className="todo-form-row-copy">
                         <strong>重复</strong>
-                        <small>重复事项默认可从看板隐藏，避免每天刷屏</small>
+                        <small>{getTodoRepeatLabel(todoDraftRepeatFrequency)}</small>
                       </span>
                       <select
                         className="select-input"

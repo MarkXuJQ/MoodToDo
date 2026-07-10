@@ -369,7 +369,6 @@ function App() {
       ) : activeView === 'garden' ? (
         <GardenView
           snapshot={gameEngineSnapshot}
-          todayKey={todayKey}
           onCheckIn={() => focusDate(todayKey, 'dashboard')}
           onOpenJournalDate={(dateKey) => focusDate(dateKey, 'dashboard')}
         />

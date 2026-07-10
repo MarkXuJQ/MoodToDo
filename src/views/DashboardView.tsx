@@ -209,7 +209,7 @@ export function DashboardView({
                 />
                 <div className="mood-ring-caption">
                   <span>{selectedEntry ? '当日心象' : '最近均分'}</span>
-                  <strong>{heroMoodScore >= 70 ? '状态舒展，适合推进重点事项。' : heroMoodScore >= 55 ? '状态平稳，可以保持节奏。' : '状态偏紧，适合降低负荷。'}</strong>
+                  <strong>{selectedEntry?.mood.level ?? '最近趋势'}</strong>
                   <small>{selectedEntry ? selectedDateLabel : `来自最近 ${lastSevenEntryCount} 条心情记录`}</small>
                 </div>
               </div>
@@ -262,7 +262,6 @@ export function DashboardView({
                       <span className="mood-breakdown-swatch" style={{ backgroundColor: getMoodBreakdownColor(item.id) }} aria-hidden="true" />
                       <div className="mood-breakdown-copy">
                         <span>{item.label}</span>
-                        <small>{item.note}</small>
                       </div>
                       <div className="mood-breakdown-meter" aria-label={`${item.label} ${item.value}`}>
                         <i
@@ -305,7 +304,7 @@ export function DashboardView({
               </div>
             </>
           ) : (
-            <p className="empty-state">继续记录后，这里会展示最近心象分析和折线。</p>
+            <p className="empty-state">暂无心象分析。</p>
           )}
         </section>
 
@@ -407,7 +406,7 @@ export function DashboardView({
                   className="text-area min-h-64"
                   value={draft.journal}
                   onChange={onDraftChange('journal')}
-                  placeholder="写下今天发生的事、你的感受或任何想记住的内容。心象仪会从完整日记中寻找情绪线索，普通叙述不会干扰评分。"
+                  placeholder="今天发生了什么？"
                   rows={11}
                 />
                 {journalMoodPreview ? (
@@ -418,9 +417,7 @@ export function DashboardView({
                     <span>{journalMoodPreview.quadrant}</span>
                     <small>线索可信度 {journalMoodPreview.confidence}%</small>
                   </span>
-                ) : (
-                  <small className="text-xs font-bold text-ink-400">心象将在这里随日记内容更新。</small>
-                )}
+                ) : null}
               </label>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">

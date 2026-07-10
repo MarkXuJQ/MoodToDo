@@ -398,10 +398,6 @@
     @apply mt-1 text-3xl font-black tracking-tight text-ink-950 sm:text-4xl;
   }
 
-  .garden-hero-copy > p:not(.eyebrow) {
-    @apply mt-3 max-w-xl text-sm font-bold leading-7 text-ink-600 sm:text-base;
-  }
-
   .garden-hero-actions {
     @apply mt-5 flex flex-wrap items-center gap-3;
   }
@@ -619,10 +615,6 @@
     @apply text-xl font-black text-ink-950;
   }
 
-  .garden-empty p {
-    @apply text-sm font-bold text-ink-600;
-  }
-
   .garden-detail-grid {
     @apply grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)];
   }
@@ -631,13 +623,11 @@
     @apply grid items-center gap-4 sm:grid-cols-[180px_minmax(0,1fr)];
   }
 
-  .garden-selected-plant h2,
-  .garden-rule-card h2 {
+  .garden-selected-plant h2 {
     @apply text-xl font-black text-ink-950;
   }
 
-  .garden-selected-plant p,
-  .garden-rule-card p {
+  .garden-selected-plant p {
     @apply mt-1 text-sm font-bold leading-6 text-ink-600;
   }
 
@@ -651,14 +641,6 @@
 
   .garden-detail-tags span {
     @apply rounded-full bg-field-100 px-3 py-1 text-xs font-black text-ink-600;
-  }
-
-  .garden-rule-card {
-    @apply grid grid-cols-[auto_minmax(0,1fr)] gap-4 bg-[linear-gradient(135deg,rgba(244,239,255,0.78),rgba(235,250,243,0.85))];
-  }
-
-  .garden-rule-card > svg {
-    @apply mt-1 text-[#8a68c7];
   }
 
   .garden-achievement-grid {
@@ -688,10 +670,6 @@
   .garden-achievement p,
   .garden-achievement small {
     @apply mt-1 text-xs font-bold leading-5 text-ink-400;
-  }
-
-  .garden-today-note {
-    @apply text-center text-xs font-bold text-ink-400;
   }
 
   .bottom-nav-item {
@@ -2216,10 +2194,6 @@
     @apply mb-1 inline-flex w-fit items-center gap-1 rounded-md border-0 bg-transparent px-0 py-0 text-xs font-black text-xin-700 transition-colors hover:text-xin-800;
   }
 
-  .todo-dialog-description {
-    @apply m-0 text-xs font-bold leading-5 text-ink-400;
-  }
-
   .todo-dialog-secondary {
     @apply max-w-lg;
   }
@@ -2953,8 +2927,7 @@
     background-color: rgba(17, 26, 24, 0.86);
   }
 
-  :root[data-theme='dark'] .garden-hero,
-  :root[data-theme='dark'] .garden-rule-card {
+  :root[data-theme='dark'] .garden-hero {
     border-color: rgba(126, 151, 142, 0.28);
     background: linear-gradient(135deg, rgba(19, 45, 39, 0.95), rgba(42, 31, 60, 0.9));
   }

@@ -86,7 +86,6 @@ export function NavDrawer({
                 {!compact && (
                   <span className="min-w-0">
                     <strong className="block truncate text-sm font-black text-ink-950">{item.label}</strong>
-                    <small className="block truncate text-xs font-bold text-ink-400">{item.note}</small>
                   </span>
                 )}
               </button>
