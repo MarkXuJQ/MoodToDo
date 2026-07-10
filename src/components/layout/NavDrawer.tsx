@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, ListTodo, PanelLeftClose, PanelLeftOpen, Settings, TrendingUp } from 'lucide-react'
+import { BarChart3, BookOpen, Flower2, ListTodo, PanelLeftClose, PanelLeftOpen, Settings, TrendingUp } from 'lucide-react'
 
 import type { ActiveView, NavItem } from '../../types/app'
 
@@ -64,6 +64,8 @@ export function NavDrawer({
                 <BookOpen size={18} aria-hidden="true" />
               ) : item.id === 'board' ? (
                 <ListTodo size={18} aria-hidden="true" />
+              ) : item.id === 'garden' ? (
+                <Flower2 size={18} aria-hidden="true" />
               ) : item.id === 'summary' ? (
                 <TrendingUp size={18} aria-hidden="true" />
               ) : (

@@ -1,4 +1,11 @@
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import {
+  useEffect,
+  useState,
+  type ChangeEvent,
+  type Dispatch,
+  type FormEvent,
+  type SetStateAction,
+} from 'react'
 
 import { emptyDraft } from '../config/app-shell'
 import {
@@ -12,19 +19,24 @@ import { formatDateLabel } from '../lib/calendar'
 import { parseTags } from '../lib/insights'
 import type { DraftState } from '../types/app'
 import { getErrorMessage } from '../utils/errors'
+import { getJournalText } from '../utils/journal'
 import type { ToastState } from './use-toast'
 
 type UseJournalActionsOptions = {
-  reload: () => Promise<unknown>
+  refreshCore: () => Promise<unknown>
   selectedDate: string
   selectedEntry?: JournalEntry
+  setAttachments: Dispatch<SetStateAction<AttachmentRecord[]>>
+  setEntries: Dispatch<SetStateAction<JournalEntry[]>>
   showToast: (message: string, tone?: ToastState['tone']) => void
 }
 
 export const useJournalActions = ({
-  reload,
+  refreshCore,
   selectedDate,
   selectedEntry,
+  setAttachments,
+  setEntries,
   showToast,
 }: UseJournalActionsOptions) => {
   const [draft, setDraft] = useState<DraftState>(emptyDraft)
@@ -35,8 +47,7 @@ export const useJournalActions = ({
     if (selectedEntry) {
       setDraft({
         title: selectedEntry.title,
-        body: selectedEntry.body,
-        moodText: selectedEntry.moodText,
+        journal: getJournalText(selectedEntry),
         tags: selectedEntry.tags.join(' '),
       })
       return
@@ -45,7 +56,7 @@ export const useJournalActions = ({
     setDraft(emptyDraft)
   }, [selectedEntry])
 
-  const canSave = Boolean(draft.body.trim() || draft.moodText.trim() || draft.title.trim() || pendingFiles.length > 0)
+  const canSave = Boolean(draft.journal.trim() || pendingFiles.length > 0)
 
   const handleDraftChange =
     (key: keyof DraftState) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -73,18 +84,30 @@ export const useJournalActions = ({
     setIsSaving(true)
 
     try {
-      await upsertJournalEntry(
+      const result = await upsertJournalEntry(
         {
           dateKey: selectedDate,
           title: draft.title.trim() || formatDateLabel(selectedDate),
-          body: draft.body.trim(),
-          moodText: draft.moodText.trim(),
+          body: draft.journal.trim(),
+          moodText: '',
           tags: parseTags(draft.tags),
         },
         pendingFiles,
       )
       setPendingFiles([])
-      await reload()
+      setEntries((current) => {
+        const withoutEntry = current.filter((entry) => entry.id !== result.entry.id)
+
+        return [result.entry, ...withoutEntry].sort((left, right) =>
+          right.dateKey.localeCompare(left.dateKey),
+        )
+      })
+      setAttachments((current) => {
+        const knownIds = new Set(current.map((attachment) => attachment.id))
+
+        return [...result.attachments.filter((attachment) => !knownIds.has(attachment.id)), ...current]
+      })
+      await refreshCore()
       showToast('日记已保存', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '保存日记失败。')
@@ -97,7 +120,8 @@ export const useJournalActions = ({
   const handleDeleteAttachment = async (attachment: AttachmentRecord) => {
     try {
       await deleteAttachment(attachment)
-      await reload()
+      setAttachments((current) => current.filter((item) => item.id !== attachment.id))
+      await refreshCore()
       showToast('图片已删除', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '删除附件失败。')
@@ -111,7 +135,9 @@ export const useJournalActions = ({
 
     try {
       await deleteJournalEntry(entry)
-      await reload()
+      setEntries((current) => current.filter((item) => item.id !== entry.id))
+      setAttachments((current) => current.filter((item) => item.entryId !== entry.id))
+      await refreshCore()
       showToast('日记已删除', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '删除日记失败。')

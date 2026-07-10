@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
@@ -15,6 +15,7 @@ const dataDir = process.env.XINXIANGYI_DATA_DIR
 const databaseName = 'xinxiangyi.sqlite'
 const databasePath = resolve(dataDir, databaseName)
 const syncDir = resolve(dataDir, '.sync')
+const webDavRecoveryMarkerPath = resolve(syncDir, 'webdav-recovery-required')
 const syncBundleName = 'xinxiangyi-sync'
 const syncBundleRootDir = process.env.XINXIANGYI_SYNC_BUNDLE_DIR
   ? resolve(process.env.XINXIANGYI_SYNC_BUNDLE_DIR)
@@ -22,7 +23,14 @@ const syncBundleRootDir = process.env.XINXIANGYI_SYNC_BUNDLE_DIR
 const syncBundleDir = resolve(syncBundleRootDir, syncBundleName)
 const port = Number(process.env.XINXIANGYI_API_PORT ?? localApiDefaults.browserPort)
 const host = process.env.XINXIANGYI_API_HOST ?? localApiDefaults.host
-const schemaVersion = 6
+const apiToken = process.env.XINXIANGYI_API_TOKEN?.trim() ?? ''
+const allowedOrigins = new Set(
+  (process.env.XINXIANGYI_ALLOWED_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,null')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+)
+const schemaVersion = 7
 const portableSnapshotFile = 'xinxiangyi-native-snapshot.json'
 const portableManifestFile = 'manifest-native.json'
 const syncBundleGuideFile = 'README.txt'
@@ -34,6 +42,33 @@ const changeLogRetentionMs = changeLogRetentionDays * 24 * 60 * 60 * 1000
 const getChangeLogRetentionCutoffIso = () => new Date(Date.now() - changeLogRetentionMs).toISOString()
 const defaultTodoReminderTime = '09:00'
 const todoRepeatFrequencies = new Set(['none', 'daily', 'weekly', 'monthly'])
+
+if (!apiToken) {
+  throw new Error('XINXIANGYI_API_TOKEN 未配置。请通过 npm run dev、npm run api 或 Electron 启动本地 API。')
+}
+
+const hasValidApiToken = (request) => {
+  const suppliedToken = String(request.headers['x-xinxiangyi-api-token'] ?? '')
+  const expected = Buffer.from(apiToken)
+  const supplied = Buffer.from(suppliedToken)
+
+  return expected.length === supplied.length && timingSafeEqual(expected, supplied)
+}
+
+const applyCorsHeaders = (request, response) => {
+  const origin = request.headers.origin
+
+  if (origin && allowedOrigins.has(origin)) {
+    response.setHeader('Access-Control-Allow-Origin', origin)
+    response.setHeader('Vary', 'Origin')
+  }
+
+  response.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, X-Xinxiangyi-Device-Id, X-Xinxiangyi-API-Token',
+  )
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+}
 
 const ensureDirectory = (dir) => {
   try {
@@ -56,7 +91,17 @@ const ensureDirectory = (dir) => {
   }
 }
 
-ensureDirectory(dataDir)
+const ensureLocalDataDirectory = (dir) => {
+  ensureDirectory(dir)
+
+  if (lstatSync(dir).isSymbolicLink()) {
+    throw new Error(
+      `SQLite 数据目录不能是符号链接：${dir}。请先把数据库复制到本机普通目录，再启动心象仪。`,
+    )
+  }
+}
+
+ensureLocalDataDirectory(dataDir)
 ensureDirectory(syncDir)
 ensureDirectory(syncBundleDir)
 
@@ -106,6 +151,7 @@ db.exec(`
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     completed_at TEXT,
+    archived_at TEXT,
     sync_state TEXT NOT NULL
   );
 
@@ -214,6 +260,7 @@ ensureColumn('todos', 'repeat_group_id', `repeat_group_id TEXT NOT NULL DEFAULT 
 ensureColumn('todos', 'board_visible', `board_visible INTEGER NOT NULL DEFAULT 1`)
 ensureColumn('todos', 'reminder_enabled', `reminder_enabled INTEGER NOT NULL DEFAULT 0`)
 ensureColumn('todos', 'reminder_time', `reminder_time TEXT NOT NULL DEFAULT '09:00'`)
+ensureColumn('todos', 'archived_at', `archived_at TEXT`)
 ensureColumn('changes', 'payload_json', `payload_json TEXT NOT NULL DEFAULT 'null'`)
 createIndexes()
 db.prepare(`UPDATE changes SET payload_json = ? WHERE payload_json <> ?`).run(
@@ -272,6 +319,7 @@ const rowToTodo = (row) => ({
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   completedAt: row.completed_at ?? undefined,
+  archivedAt: row.archived_at ?? undefined,
   syncState: row.sync_state,
 })
 
@@ -285,7 +333,6 @@ const rowToAttachment = (row) => ({
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   syncState: row.sync_state,
-  dataBase64: Buffer.from(row.blob).toString('base64'),
 })
 
 const rowToBoardLane = (row) => ({
@@ -346,7 +393,17 @@ const getMeta = () => ({
   syncBundlePath: syncBundleDir,
   apiBaseUrl: `http://${host}:${port}`,
   schemaVersion,
+  webDavRecoveryRequired: existsSync(webDavRecoveryMarkerPath),
 })
+
+const rejectUnsafeWebDavMerge = (response) => {
+  if (!existsSync(webDavRecoveryMarkerPath)) return false
+
+  sendJson(response, 409, {
+    error: '云端快照需要先由本机数据重建。为避免受污染数据回流，普通同步和云端恢复已暂时停用。',
+  })
+  return true
+}
 
 const normalizeRemotePath = (value) => {
   const raw = typeof value === 'string' ? value.trim() : ''
@@ -580,6 +637,7 @@ const createRecurringTodoInstance = (template, nextDateKey, timestamp = nowIso()
   dateKey: nextDateKey,
   done: false,
   completedAt: undefined,
+  archivedAt: undefined,
   laneId: 'inbox',
   boardVisible: false,
   createdAt: timestamp,
@@ -591,12 +649,12 @@ const insertTodoRecord = db.prepare(`
   INSERT INTO todos (
     id, date_key, title, description, priority, lane_id, countdown_enabled,
     repeat_frequency, repeat_group_id, board_visible, reminder_enabled, reminder_time,
-    done, created_at, updated_at, completed_at, sync_state
+    done, created_at, updated_at, completed_at, archived_at, sync_state
   )
   VALUES (
     $id, $dateKey, $title, $description, $priority, $laneId, $countdownEnabled,
     $repeatFrequency, $repeatGroupId, $boardVisible, $reminderEnabled, $reminderTime,
-    $done, $createdAt, $updatedAt, $completedAt, $syncState
+    $done, $createdAt, $updatedAt, $completedAt, $archivedAt, $syncState
   )
 `)
 
@@ -618,6 +676,7 @@ const runInsertTodo = (todo) =>
     $createdAt: todo.createdAt,
     $updatedAt: todo.updatedAt,
     $completedAt: todo.completedAt ?? null,
+    $archivedAt: todo.archivedAt ?? null,
     $syncState: todo.syncState,
   })
 
@@ -705,6 +764,7 @@ const toPortableTodoRow = (row) =>
     reminder_time: defaultTodoReminderTime,
     done: 0,
     completed_at: null,
+    archived_at: null,
   })
 
 const toPortableChangeRow = (row) => ({
@@ -1288,9 +1348,9 @@ const importPortableSnapshot = async (snapshot, options = {}) => {
       INSERT INTO todos (
         id, date_key, title, description, priority, lane_id, countdown_enabled,
         repeat_frequency, repeat_group_id, board_visible, reminder_enabled, reminder_time,
-        done, created_at, updated_at, completed_at, sync_state
+        done, created_at, updated_at, completed_at, archived_at, sync_state
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
     `)
     for (const row of snapshot.todos) {
       insertTodo.run(
@@ -1310,6 +1370,7 @@ const importPortableSnapshot = async (snapshot, options = {}) => {
         readString(row, 'created_at', timestamp),
         readString(row, 'updated_at', timestamp),
         readOptionalString(row, 'completed_at'),
+        readStringAny(row, ['archived_at', 'archivedAt']) || null,
       )
     }
 
@@ -1460,6 +1521,8 @@ const pushWebDavSnapshot = async (request, response) => {
     return
   }
 
+  if (rejectUnsafeWebDavMerge(response)) return
+
   try {
     await ensureWebDavCollection(config)
     const localSnapshot = createPortableSnapshot()
@@ -1494,6 +1557,43 @@ const pushWebDavSnapshot = async (request, response) => {
   }
 }
 
+const replaceWebDavSnapshot = async (request, response) => {
+  let config
+
+  try {
+    config = getWebDavConfig(await readJson(request))
+  } catch (error) {
+    sendJson(response, 400, { error: error instanceof Error ? error.message : 'WebDAV 配置无效。' })
+    return
+  }
+
+  try {
+    await ensureWebDavCollection(config)
+    const snapshot = createPortableSnapshot()
+    const manifest = await uploadPortableSnapshot(config, snapshot, [snapshot])
+
+    rmSync(webDavRecoveryMarkerPath, { force: true })
+    markLocalContentSynced()
+    compactLocalChangeLog()
+    createLocalSyncBundle({
+      remotePath: config.remotePath,
+      source: 'webdav-local-replace',
+      mirroredAt: nowIso(),
+    })
+
+    sendJson(response, 200, {
+      ok: true,
+      direction: 'push',
+      remotePath: config.remotePath,
+      file: portableSnapshotFile,
+      size: manifest.size,
+      syncedAt: manifest.pushedAt,
+    })
+  } catch (error) {
+    sendJson(response, 502, { error: error instanceof Error ? error.message : '用本机数据重建云端失败。' })
+  }
+}
+
 const exportSyncBundle = async (_request, response) => {
   try {
     const { manifest } = createLocalSyncBundle({
@@ -1522,6 +1622,8 @@ const pullWebDavSnapshot = async (request, response) => {
     sendJson(response, 400, { error: error instanceof Error ? error.message : 'WebDAV 配置无效。' })
     return
   }
+
+  if (rejectUnsafeWebDavMerge(response)) return
 
   const incomingPath = resolve(syncDir, `incoming-${Date.now()}.sqlite`)
   const backupPath = resolve(syncDir, `local-backup-${Date.now()}.sqlite`)
@@ -1957,9 +2059,6 @@ const readJson = async (request) => {
 
 const sendJson = (response, status, payload) => {
   response.writeHead(status, {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Xinxiangyi-Device-Id',
-    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'Content-Type': 'application/json; charset=utf-8',
   })
   response.end(JSON.stringify(payload))
@@ -1971,10 +2070,7 @@ const getState = () => {
   materializeDueRecurringTodos()
 
   return {
-    entries: db.prepare('SELECT * FROM entries ORDER BY date_key DESC').all().map(rowToEntry),
-    todos: db.prepare('SELECT * FROM todos ORDER BY created_at DESC').all().map(rowToTodo),
     boardLanes: db.prepare('SELECT * FROM board_lanes ORDER BY created_at ASC').all().map(rowToBoardLane),
-    attachments: db.prepare('SELECT * FROM attachments ORDER BY created_at DESC').all().map(rowToAttachment),
     metricDefinitions: db
       .prepare('SELECT * FROM metric_definitions ORDER BY created_at ASC')
       .all()
@@ -1988,8 +2084,83 @@ const getState = () => {
       .prepare('SELECT * FROM weekly_summaries ORDER BY updated_at DESC')
       .all()
       .map(rowToWeeklySummary),
+    counts: {
+      entries: Number(db.prepare('SELECT COUNT(*) AS count FROM entries').get()?.count ?? 0),
+      todos: Number(db.prepare('SELECT COUNT(*) AS count FROM todos').get()?.count ?? 0),
+      archivedTodos: Number(db.prepare('SELECT COUNT(*) AS count FROM todos WHERE archived_at IS NOT NULL').get()?.count ?? 0),
+      attachments: Number(db.prepare('SELECT COUNT(*) AS count FROM attachments').get()?.count ?? 0),
+    },
     meta: getMeta(),
   }
+}
+
+const readPagination = (url, defaults) => {
+  const requestedLimit = Number(url.searchParams.get('limit'))
+  const requestedOffset = Number(url.searchParams.get('offset'))
+
+  return {
+    limit: Number.isFinite(requestedLimit)
+      ? Math.min(defaults.max, Math.max(1, Math.round(requestedLimit)))
+      : defaults.limit,
+    offset: Number.isFinite(requestedOffset) ? Math.max(0, Math.round(requestedOffset)) : 0,
+  }
+}
+
+const createPage = (items, total, limit, offset) => ({
+  items,
+  total,
+  limit,
+  offset,
+  hasMore: offset + items.length < total,
+})
+
+const getEntriesPage = (url) => {
+  const { limit, offset } = readPagination(url, { limit: 366, max: 500 })
+  const total = Number(db.prepare('SELECT COUNT(*) AS count FROM entries').get()?.count ?? 0)
+  const items = db.prepare('SELECT * FROM entries ORDER BY date_key DESC LIMIT ? OFFSET ?').all(limit, offset).map(rowToEntry)
+
+  return createPage(items, total, limit, offset)
+}
+
+const getTodosPage = (url) => {
+  materializeDueRecurringTodos()
+  const { limit, offset } = readPagination(url, { limit: 500, max: 1000 })
+  const total = Number(db.prepare('SELECT COUNT(*) AS count FROM todos').get()?.count ?? 0)
+  const items = db.prepare('SELECT * FROM todos ORDER BY created_at DESC LIMIT ? OFFSET ?').all(limit, offset).map(rowToTodo)
+
+  return createPage(items, total, limit, offset)
+}
+
+const getAttachmentsPage = (url) => {
+  const { limit, offset } = readPagination(url, { limit: 500, max: 1000 })
+  const total = Number(db.prepare('SELECT COUNT(*) AS count FROM attachments').get()?.count ?? 0)
+  const entryId = url.searchParams.get('entryId')?.trim() ?? ''
+  const rows = entryId
+    ? db.prepare('SELECT * FROM attachments WHERE entry_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(entryId, limit, offset)
+    : db.prepare('SELECT * FROM attachments ORDER BY created_at DESC LIMIT ? OFFSET ?').all(limit, offset)
+  const scopedTotal = entryId
+    ? Number(db.prepare('SELECT COUNT(*) AS count FROM attachments WHERE entry_id = ?').get(entryId)?.count ?? 0)
+    : total
+
+  return createPage(rows.map(rowToAttachment), scopedTotal, limit, offset)
+}
+
+const sendAttachmentContent = (response, id) => {
+  const attachment = db.prepare('SELECT name, type, size, blob FROM attachments WHERE id = ?').get(id)
+
+  if (!attachment) {
+    sendJson(response, 404, { error: 'Attachment not found.' })
+    return
+  }
+
+  const body = Buffer.from(attachment.blob)
+  response.writeHead(200, {
+    'Content-Type': attachment.type || 'application/octet-stream',
+    'Content-Length': body.length,
+    'Cache-Control': 'private, max-age=300',
+    'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(attachment.name || id)}`,
+  })
+  response.end(body)
 }
 
 const upsertEntry = async (request, response) => {
@@ -2012,6 +2183,7 @@ const upsertEntry = async (request, response) => {
     syncState: 'pending',
   }
   const deviceId = getDeviceId(request)
+  const createdAttachments = []
 
   transaction(() => {
     db.prepare(`
@@ -2060,6 +2232,7 @@ const upsertEntry = async (request, response) => {
         updatedAt: timestamp,
         syncState: 'pending',
       }
+      createdAttachments.push(attachment)
 
       db.prepare(`
         INSERT INTO attachments (
@@ -2096,7 +2269,7 @@ const upsertEntry = async (request, response) => {
     }
   })
 
-  sendJson(response, 200, { entry })
+  sendJson(response, 200, { entry, attachments: createdAttachments })
 }
 
 const deleteEntryRows = (entryRows, deviceId) => {
@@ -2195,6 +2368,7 @@ const addTodo = async (request, response) => {
     createdAt: timestamp,
     updatedAt: timestamp,
     completedAt: undefined,
+    archivedAt: undefined,
     syncState: 'pending',
   }
   const deviceId = getDeviceId(request)
@@ -2244,10 +2418,16 @@ const updateTodo = async (request, response, id) => {
     reminderTime: Object.hasOwn(payload, 'reminderTime') ? normalizeReminderTime(payload.reminderTime) : existingTodo.reminderTime,
     done: nextDone,
     completedAt: Object.hasOwn(payload, 'done') ? (nextDone ? timestamp : undefined) : existingTodo.completedAt,
+    archivedAt: Object.hasOwn(payload, 'archived')
+      ? payload.archived
+        ? timestamp
+        : undefined
+      : existingTodo.archivedAt,
     updatedAt: timestamp,
     syncState: 'pending',
   }
   const deviceId = getDeviceId(request)
+  const createdTodos = []
 
   transaction(() => {
     db.prepare(`
@@ -2255,7 +2435,8 @@ const updateTodo = async (request, response, id) => {
       SET description = $description, priority = $priority, lane_id = $laneId, countdown_enabled = $countdownEnabled,
           repeat_frequency = $repeatFrequency, repeat_group_id = $repeatGroupId, board_visible = $boardVisible,
           reminder_enabled = $reminderEnabled, reminder_time = $reminderTime,
-          done = $done, completed_at = $completedAt, updated_at = $updatedAt, sync_state = 'pending'
+          done = $done, completed_at = $completedAt, archived_at = $archivedAt,
+          updated_at = $updatedAt, sync_state = 'pending'
       WHERE id = $id
     `).run({
       $id: todo.id,
@@ -2270,6 +2451,7 @@ const updateTodo = async (request, response, id) => {
       $reminderTime: todo.reminderTime,
       $done: todo.done ? 1 : 0,
       $completedAt: todo.completedAt ?? null,
+      $archivedAt: todo.archivedAt ?? null,
       $updatedAt: todo.updatedAt,
     })
     appendChange('todo', todo.id, 'upsert', todo, deviceId)
@@ -2284,11 +2466,12 @@ const updateTodo = async (request, response, id) => {
         const nextTodo = createRecurringTodoInstance(todo, nextDateKey, timestamp)
         runInsertTodo(nextTodo)
         appendChange('todo', nextTodo.id, 'upsert', nextTodo, deviceId)
+        createdTodos.push(nextTodo)
       }
     }
   })
 
-  sendJson(response, 200, { todo })
+  sendJson(response, 200, { todo, createdTodos })
 }
 
 const deleteTodo = async (request, response, id) => {
@@ -2371,7 +2554,7 @@ const deleteBoardLane = async (request, response, id) => {
     appendChange('boardLane', lane.id, 'delete', lane, deviceId)
   })
 
-  sendJson(response, 200, { ok: true })
+  sendJson(response, 200, { ok: true, movedTodos })
 }
 
 const deleteAttachment = async (request, response, id) => {
@@ -2583,6 +2766,11 @@ const route = async (request, response) => {
     return
   }
 
+  if (!hasValidApiToken(request)) {
+    sendJson(response, 401, { error: '本地 API 鉴权失败。请从心象仪应用内访问。' })
+    return
+  }
+
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? `${host}:${port}`}`)
   const pathname = url.pathname
 
@@ -2596,6 +2784,27 @@ const route = async (request, response) => {
     return
   }
 
+  if (request.method === 'GET' && pathname === '/api/entries') {
+    sendJson(response, 200, getEntriesPage(url))
+    return
+  }
+
+  if (request.method === 'GET' && pathname === '/api/todos') {
+    sendJson(response, 200, getTodosPage(url))
+    return
+  }
+
+  if (request.method === 'GET' && pathname === '/api/attachments') {
+    sendJson(response, 200, getAttachmentsPage(url))
+    return
+  }
+
+  const attachmentContentMatch = pathname.match(/^\/api\/attachments\/([^/]+)\/content$/)
+  if (attachmentContentMatch && request.method === 'GET') {
+    sendAttachmentContent(response, decodeURIComponent(attachmentContentMatch[1]))
+    return
+  }
+
   if (request.method === 'POST' && pathname === '/api/ai/weekly-summary') {
     await requestWeeklySummary(request, response)
     return
@@ -2603,6 +2812,11 @@ const route = async (request, response) => {
 
   if (request.method === 'POST' && pathname === '/api/webdav/push') {
     await pushWebDavSnapshot(request, response)
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/api/webdav/replace') {
+    await replaceWebDavSnapshot(request, response)
     return
   }
 
@@ -2695,6 +2909,7 @@ const route = async (request, response) => {
 }
 
 const server = createServer((request, response) => {
+  applyCorsHeaders(request, response)
   route(request, response).catch((error) => {
     console.error(error)
     sendJson(response, 500, { error: error instanceof Error ? error.message : 'Local API failed.' })

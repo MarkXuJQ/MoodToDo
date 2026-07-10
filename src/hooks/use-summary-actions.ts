@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { getApiUrl, upsertWeeklySummary, type JournalEntry, type TodoItem, type WeeklySummary } from '../lib/db'
+import { getApiRequestHeaders, getApiUrl, upsertWeeklySummary, type JournalEntry, type TodoItem, type WeeklySummary } from '../lib/db'
 import { buildWeeklyPrompt } from '../lib/insights'
 import type { AiConfig } from '../types/app'
 import { getErrorMessage } from '../utils/errors'
@@ -8,7 +8,7 @@ import type { ToastState } from './use-toast'
 
 type UseSummaryActionsOptions = {
   aiConfig: AiConfig
-  reload: () => Promise<unknown>
+  refreshCore: () => Promise<unknown>
   selectedWeek: string
   selectedWeekEntries: JournalEntry[]
   selectedWeekSummary?: WeeklySummary
@@ -18,7 +18,7 @@ type UseSummaryActionsOptions = {
 
 export const useSummaryActions = ({
   aiConfig,
-  reload,
+  refreshCore,
   selectedWeek,
   selectedWeekEntries,
   selectedWeekSummary,
@@ -43,9 +43,7 @@ export const useSummaryActions = ({
     try {
       const response = await fetch(getApiUrl('/api/ai/weekly-summary'), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getApiRequestHeaders(),
         body: JSON.stringify({
           endpoint: aiConfig.endpoint.trim(),
           apiKey: aiConfig.apiKey.trim(),
@@ -76,7 +74,7 @@ export const useSummaryActions = ({
 
       const summary = await upsertWeeklySummary(selectedWeek, content, aiConfig.model.trim())
       setSummaryDraft(summary.content)
-      await reload()
+      await refreshCore()
       showToast('周总结已生成', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '生成周总结失败。')
@@ -95,7 +93,7 @@ export const useSummaryActions = ({
 
     try {
       await upsertWeeklySummary(selectedWeek, content, 'manual', 'local')
-      await reload()
+      await refreshCore()
       showToast('周总结已保存', 'success')
     } catch (error) {
       const message = getErrorMessage(error, '保存周总结失败。')

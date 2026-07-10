@@ -12,6 +12,7 @@ import type {
   EntryDraft,
   JournalEntry,
   LocalState,
+  PageResult,
   TodoItem,
   TodoDetailUpdate,
   TodoRepeatFrequency,
@@ -20,6 +21,7 @@ import type {
   WebDavSyncResult,
   WeeklySummary,
 } from './db'
+import { getJournalText } from '../utils/journal'
 
 type DbRow = Record<string, unknown>
 type SqlValue = string | number | null
@@ -47,7 +49,7 @@ type NativeSnapshot = {
   metricRecords?: DbRow[]
 }
 
-const schemaVersion = 6
+const schemaVersion = 7
 const nativeDatabaseId = 'xinxiangyi'
 const nativeDatabaseName = 'xinxiangyi.sqlite'
 const nativeSnapshotFile = 'xinxiangyi-native-snapshot.json'
@@ -196,6 +198,7 @@ const toPortableTodoRow = (row: DbRow) =>
     reminder_time: defaultTodoReminderTime,
     done: 0,
     completed_at: null,
+    archived_at: null,
   })
 
 const toPortableChangeRow = (row: DbRow): DbRow => ({
@@ -336,7 +339,10 @@ const rowToEntry = (row: DbRow): JournalEntry => {
     moodText,
     weatherText: readString(row, 'weather_text'),
     locationText: readString(row, 'location_text'),
-    mood: parseJson<MoodAnalysis>(row.mood_json, analyzeMood(moodText)),
+    mood: parseJson<MoodAnalysis>(
+      row.mood_json,
+      analyzeMood(getJournalText({ body: readString(row, 'body'), moodText })),
+    ),
     tags: parseJson<string[]>(row.tags_json, []),
     createdAt: readString(row, 'created_at'),
     updatedAt: readString(row, 'updated_at'),
@@ -361,6 +367,7 @@ const rowToTodo = (row: DbRow): TodoItem => ({
   createdAt: readString(row, 'created_at'),
   updatedAt: readString(row, 'updated_at'),
   completedAt: readOptionalString(row, 'completed_at'),
+  archivedAt: readOptionalString(row, 'archived_at'),
   syncState: readString(row, 'sync_state', 'pending') as TodoItem['syncState'],
 })
 
@@ -381,6 +388,18 @@ const rowToAttachment = (row: DbRow): AttachmentRecord => ({
   type: readString(row, 'type', 'application/octet-stream'),
   size: readNumber(row, 'size'),
   blob: base64ToBlob(readString(row, 'data_base64'), readString(row, 'type', 'application/octet-stream')),
+  createdAt: readString(row, 'created_at'),
+  updatedAt: readString(row, 'updated_at'),
+  syncState: readString(row, 'sync_state', 'pending') as AttachmentRecord['syncState'],
+})
+
+const rowToAttachmentMetadata = (row: DbRow): AttachmentRecord => ({
+  id: readString(row, 'id'),
+  entryId: readString(row, 'entry_id'),
+  dateKey: readString(row, 'date_key'),
+  name: readString(row, 'name'),
+  type: readString(row, 'type', 'application/octet-stream'),
+  size: readNumber(row, 'size'),
   createdAt: readString(row, 'created_at'),
   updatedAt: readString(row, 'updated_at'),
   syncState: readString(row, 'sync_state', 'pending') as AttachmentRecord['syncState'],
@@ -627,6 +646,7 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       completed_at TEXT,
+      archived_at TEXT,
       sync_state TEXT NOT NULL
     );
 
@@ -711,6 +731,7 @@ const ensureSchema = async (db: SQLiteDBConnection) => {
   await ensureColumn(db, 'todos', 'board_visible', `board_visible INTEGER NOT NULL DEFAULT 1`)
   await ensureColumn(db, 'todos', 'reminder_enabled', `reminder_enabled INTEGER NOT NULL DEFAULT 0`)
   await ensureColumn(db, 'todos', 'reminder_time', `reminder_time TEXT NOT NULL DEFAULT '09:00'`)
+  await ensureColumn(db, 'todos', 'archived_at', `archived_at TEXT`)
   await ensureColumn(db, 'attachments', 'data_base64', `data_base64 TEXT NOT NULL DEFAULT ''`)
   await ensureColumn(db, 'changes', 'payload_json', `payload_json TEXT NOT NULL DEFAULT 'null'`)
   await runStatement(db, `UPDATE changes SET payload_json = ? WHERE payload_json <> ?`, [
@@ -901,6 +922,7 @@ const createRecurringTodoInstance = (template: TodoItem, nextDateKey: string, ti
   dateKey: nextDateKey,
   done: false,
   completedAt: undefined,
+  archivedAt: undefined,
   laneId: 'inbox',
   boardVisible: false,
   createdAt: timestamp,
@@ -915,9 +937,9 @@ const runInsertNativeTodo = (db: SQLiteDBConnection, todo: TodoItem, transaction
       INSERT INTO todos (
         id, date_key, title, description, priority, lane_id, countdown_enabled,
         repeat_frequency, repeat_group_id, board_visible, reminder_enabled, reminder_time,
-        done, created_at, updated_at, completed_at, sync_state
+        done, created_at, updated_at, completed_at, archived_at, sync_state
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       todo.id,
@@ -936,6 +958,7 @@ const runInsertNativeTodo = (db: SQLiteDBConnection, todo: TodoItem, transaction
       todo.createdAt,
       todo.updatedAt,
       todo.completedAt ?? null,
+      todo.archivedAt ?? null,
       todo.syncState,
     ],
     transaction,
@@ -1012,14 +1035,138 @@ export const getNativeLocalState = async (): Promise<LocalState> => {
     changes,
     weeklySummaries,
     meta,
+    counts: {
+      entries: entries.length,
+      todos: todos.length,
+      archivedTodos: todos.filter((todo) => Boolean(todo.archivedAt)).length,
+      attachments: attachments.length,
+    },
+    pagination: {
+      entries: { total: entries.length, limit: entries.length, offset: entries.length, hasMore: false },
+      todos: { total: todos.length, limit: todos.length, offset: todos.length, hasMore: false },
+      attachments: {
+        total: attachments.length,
+        limit: attachments.length,
+        offset: attachments.length,
+        hasMore: false,
+      },
+    },
   }
+}
+
+const normalizePageBounds = (offset: number, limit: number) => ({
+  offset: Math.max(0, Math.round(offset)),
+  limit: Math.max(1, Math.round(limit)),
+})
+
+export const getNativeLocalCoreState = async () => {
+  const db = await getDatabase()
+
+  const [boardLanes, changes, weeklySummaries, entryCount, todoCount, archivedTodoCount, attachmentCount, meta] =
+    await Promise.all([
+      queryRows(db, 'SELECT * FROM board_lanes ORDER BY created_at ASC').then((rows) =>
+        rows.map(rowToBoardLane),
+      ),
+      queryRows(db, 'SELECT * FROM changes ORDER BY changed_at DESC').then((rows) => rows.map(rowToChange)),
+      queryRows(db, 'SELECT * FROM weekly_summaries ORDER BY updated_at DESC').then((rows) =>
+        rows.map(rowToWeeklySummary),
+      ),
+      queryFirst(db, 'SELECT COUNT(*) AS count FROM entries'),
+      queryFirst(db, 'SELECT COUNT(*) AS count FROM todos'),
+      queryFirst(db, 'SELECT COUNT(*) AS count FROM todos WHERE archived_at IS NOT NULL'),
+      queryFirst(db, 'SELECT COUNT(*) AS count FROM attachments'),
+      getNativeMeta(db),
+    ])
+
+  return {
+    boardLanes,
+    changes,
+    weeklySummaries,
+    counts: {
+      entries: entryCount ? readNumber(entryCount, 'count') : 0,
+      todos: todoCount ? readNumber(todoCount, 'count') : 0,
+      archivedTodos: archivedTodoCount ? readNumber(archivedTodoCount, 'count') : 0,
+      attachments: attachmentCount ? readNumber(attachmentCount, 'count') : 0,
+    },
+    meta,
+  }
+}
+
+export const getNativeEntriesPage = async (
+  offset = 0,
+  limit = 366,
+): Promise<PageResult<JournalEntry>> => {
+  const db = await getDatabase()
+  const bounds = normalizePageBounds(offset, limit)
+  const [rows, countRow] = await Promise.all([
+    queryRows(db, 'SELECT * FROM entries ORDER BY date_key DESC LIMIT ? OFFSET ?', [bounds.limit, bounds.offset]),
+    queryFirst(db, 'SELECT COUNT(*) AS count FROM entries'),
+  ])
+  const items = rows.map(rowToEntry)
+  const total = countRow ? readNumber(countRow, 'count') : 0
+
+  return { ...bounds, items, total, hasMore: bounds.offset + items.length < total }
+}
+
+export const getNativeTodosPage = async (
+  offset = 0,
+  limit = 500,
+): Promise<PageResult<TodoItem>> => {
+  const db = await getDatabase()
+  await materializeDueNativeRecurringTodos(db)
+  const bounds = normalizePageBounds(offset, limit)
+  const [rows, countRow] = await Promise.all([
+    queryRows(db, 'SELECT * FROM todos ORDER BY created_at DESC LIMIT ? OFFSET ?', [bounds.limit, bounds.offset]),
+    queryFirst(db, 'SELECT COUNT(*) AS count FROM todos'),
+  ])
+  const items = rows.map(rowToTodo)
+  const total = countRow ? readNumber(countRow, 'count') : 0
+
+  return { ...bounds, items, total, hasMore: bounds.offset + items.length < total }
+}
+
+export const getNativeAttachmentsPage = async (
+  offset = 0,
+  limit = 500,
+  entryId = '',
+): Promise<PageResult<AttachmentRecord>> => {
+  const db = await getDatabase()
+  const bounds = normalizePageBounds(offset, limit)
+  const rows = entryId
+    ? await queryRows(
+        db,
+        'SELECT id, entry_id, date_key, name, type, size, created_at, updated_at, sync_state FROM attachments WHERE entry_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+        [entryId, bounds.limit, bounds.offset],
+      )
+    : await queryRows(
+        db,
+        'SELECT id, entry_id, date_key, name, type, size, created_at, updated_at, sync_state FROM attachments ORDER BY created_at DESC LIMIT ? OFFSET ?',
+        [bounds.limit, bounds.offset],
+      )
+  const countRow = entryId
+    ? await queryFirst(db, 'SELECT COUNT(*) AS count FROM attachments WHERE entry_id = ?', [entryId])
+    : await queryFirst(db, 'SELECT COUNT(*) AS count FROM attachments')
+  const items = rows.map(rowToAttachmentMetadata)
+  const total = countRow ? readNumber(countRow, 'count') : 0
+
+  return { ...bounds, items, total, hasMore: bounds.offset + items.length < total }
+}
+
+export const getNativeAttachmentContent = async (attachment: AttachmentRecord) => {
+  if (attachment.blob) return attachment.blob
+
+  const db = await getDatabase()
+  const row = await queryFirst(db, 'SELECT type, data_base64 FROM attachments WHERE id = ?', [attachment.id])
+  if (!row) throw new Error('Attachment not found.')
+
+  return base64ToBlob(readString(row, 'data_base64'), readString(row, 'type', attachment.type))
 }
 
 export const upsertNativeJournalEntry = async (draft: EntryDraft, files: File[]) => {
   const db = await getDatabase()
   const timestamp = nowIso()
   const existing = await queryFirst(db, 'SELECT * FROM entries WHERE date_key = ?', [draft.dateKey])
-  const mood = analyzeMood(draft.moodText)
+  const mood = analyzeMood(draft.body)
   const entry: JournalEntry = {
     id: existing ? readString(existing, 'id') : createId('entry'),
     dateKey: draft.dateKey,
@@ -1035,6 +1182,7 @@ export const upsertNativeJournalEntry = async (draft: EntryDraft, files: File[])
     syncState: 'pending',
   }
   const filePayloads = await Promise.all(files.map(fileToPayload))
+  const createdAttachments: AttachmentRecord[] = []
   const deviceId = getDeviceId()
 
   await withTransaction(db, async () => {
@@ -1088,6 +1236,10 @@ export const upsertNativeJournalEntry = async (draft: EntryDraft, files: File[])
         updatedAt: timestamp,
         syncState: 'pending' as const,
       }
+      createdAttachments.push({
+        ...attachment,
+        blob: base64ToBlob(file.dataBase64, attachment.type),
+      })
 
       await runStatement(
         db,
@@ -1129,7 +1281,7 @@ export const upsertNativeJournalEntry = async (draft: EntryDraft, files: File[])
     }
   })
 
-  return entry
+  return { entry, attachments: createdAttachments }
 }
 
 const deleteNativeEntryRows = async (db: SQLiteDBConnection, entryRows: DbRow[], deviceId: string) => {
@@ -1209,6 +1361,7 @@ export const addNativeTodo = async (dateKey: string, title: string, details: Tod
     reminderEnabled: Boolean(details.reminderEnabled),
     reminderTime: normalizeReminderTime(details.reminderTime),
     done: false,
+    archivedAt: undefined,
     createdAt: timestamp,
     updatedAt: timestamp,
     syncState: 'pending',
@@ -1248,6 +1401,7 @@ export const updateNativeTodoDetails = async (todo: TodoItem, details: TodoDetai
     boardVisible,
     reminderEnabled: details.reminderEnabled ?? existingTodo.reminderEnabled,
     reminderTime: details.reminderTime == null ? existingTodo.reminderTime : normalizeReminderTime(details.reminderTime),
+    archivedAt: details.archived == null ? existingTodo.archivedAt : details.archived ? timestamp : undefined,
     updatedAt: timestamp,
     syncState: 'pending',
   }
@@ -1260,7 +1414,7 @@ export const updateNativeTodoDetails = async (todo: TodoItem, details: TodoDetai
         UPDATE todos
         SET description = ?, priority = ?, lane_id = ?, countdown_enabled = ?,
             repeat_frequency = ?, repeat_group_id = ?, board_visible = ?, reminder_enabled = ?, reminder_time = ?,
-            updated_at = ?, sync_state = 'pending'
+            archived_at = ?, updated_at = ?, sync_state = 'pending'
         WHERE id = ?
       `,
       [
@@ -1273,6 +1427,7 @@ export const updateNativeTodoDetails = async (todo: TodoItem, details: TodoDetai
         next.boardVisible ? 1 : 0,
         next.reminderEnabled ? 1 : 0,
         next.reminderTime,
+        next.archivedAt ?? null,
         next.updatedAt,
         next.id,
       ],
@@ -1339,6 +1494,8 @@ export const deleteNativeBoardLane = async (lane: BoardLaneRecord) => {
     }
     await appendChange(db, 'boardLane', existingLane.id, 'delete', existingLane, deviceId, false)
   })
+
+  return movedTodos
 }
 
 export const setNativeTodoDone = async (todo: TodoItem, done: boolean) => {
@@ -1359,6 +1516,7 @@ export const setNativeTodoDone = async (todo: TodoItem, done: boolean) => {
     syncState: 'pending',
   }
   const deviceId = getDeviceId()
+  const createdTodos: TodoItem[] = []
 
   await withTransaction(db, async () => {
     await runStatement(
@@ -1386,11 +1544,12 @@ export const setNativeTodoDone = async (todo: TodoItem, done: boolean) => {
         const nextTodo = createRecurringTodoInstance(next, nextDateKey, timestamp)
         await runInsertNativeTodo(db, nextTodo, false)
         await appendChange(db, 'todo', nextTodo.id, 'upsert', nextTodo, deviceId, false)
+        createdTodos.push(nextTodo)
       }
     }
   })
 
-  return next
+  return { todo: next, createdTodos }
 }
 
 export const deleteNativeTodo = async (todo: TodoItem) => {
@@ -1976,9 +2135,9 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot, resolveDetachedAtt
           INSERT INTO todos (
             id, date_key, title, description, priority, lane_id, countdown_enabled,
             repeat_frequency, repeat_group_id, board_visible, reminder_enabled, reminder_time,
-            done, created_at, updated_at, completed_at, sync_state
+            done, created_at, updated_at, completed_at, archived_at, sync_state
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
         `,
         [
           readString(row, 'id', createId('todo')),
@@ -1997,6 +2156,7 @@ const importNativeSnapshot = async (snapshot: NativeSnapshot, resolveDetachedAtt
           readString(row, 'created_at', timestamp),
           readString(row, 'updated_at', timestamp),
           readOptionalString(row, 'completed_at') ?? null,
+          readStringAny(row, ['archived_at', 'archivedAt']) || null,
         ],
         false,
       )
@@ -2225,6 +2385,39 @@ export const pushNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promi
     await markNativeContentSynced()
     await compactNativeChangeLog()
   }
+
+  return {
+    ok: true,
+    direction: 'push',
+    remotePath: config.remotePath,
+    file: nativeSnapshotFile,
+    size: manifest.size,
+    syncedAt,
+  }
+}
+
+export const replaceNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promise<WebDavSyncResult> => {
+  const config = getWebDavConfig(payload)
+  await ensureNativeWebDavCollection(config)
+  const snapshot = await createNativeSnapshot()
+  const uploadedAttachments = await uploadNativeAttachmentFiles(config, snapshot, [snapshot])
+  const snapshotBody = JSON.stringify(snapshot)
+  const syncedAt = nowIso()
+  const manifest = {
+    app: 'xinxiangyi',
+    format: 'xinxiangyi-native-json',
+    schemaVersion,
+    file: nativeSnapshotFile,
+    pushedAt: syncedAt,
+    size: getUtf8Size(snapshotBody),
+    totalSize: getUtf8Size(snapshotBody) + uploadedAttachments.size,
+    attachmentFiles: uploadedAttachments,
+  }
+
+  await putWebDavText(config, nativeSnapshotFile, snapshotBody, 'application/json; charset=utf-8')
+  await putWebDavText(config, nativeManifestFile, JSON.stringify(manifest, null, 2), 'application/json; charset=utf-8')
+  await markNativeContentSynced()
+  await compactNativeChangeLog()
 
   return {
     ok: true,

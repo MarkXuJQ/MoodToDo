@@ -30,6 +30,7 @@ import {
   getCompletionRate,
   getHeatLevel,
 } from './lib/insights'
+import { getAttachmentContent } from './lib/db'
 import type {
   ActiveView,
   SettingsSection,
@@ -38,6 +39,7 @@ import type { DiagnosticDialogState } from './utils/diagnostics'
 import { BoardView } from './views/BoardView'
 import { DashboardView } from './views/DashboardView'
 import { JournalView } from './views/JournalView'
+import { GardenView } from './views/GardenView'
 import { SettingsView } from './views/SettingsView'
 import { SummaryView } from './views/SummaryView'
 
@@ -60,10 +62,20 @@ function App() {
     attachments,
     boardLanes,
     changes,
+    counts,
     databaseStatus,
     entries,
     hasLoadedLocalState,
+    loadAttachmentsForEntry,
+    loadMoreEntries,
+    loadMoreTodos,
+    loadingMore,
+    pagination,
+    refreshCore,
     reload,
+    setAttachments,
+    setBoardLanes,
+    setEntries,
     setTodos,
     todos,
     weeklySummaries,
@@ -109,6 +121,12 @@ function App() {
     [entries, selectedDate],
   )
 
+  useEffect(() => {
+    if (selectedEntry?.id) {
+      void loadAttachmentsForEntry(selectedEntry.id)
+    }
+  }, [loadAttachmentsForEntry, selectedEntry?.id])
+
   const {
     canSave,
     draft,
@@ -121,9 +139,11 @@ function App() {
     isSaving,
     pendingFiles,
   } = useJournalActions({
-    reload,
+    refreshCore,
     selectedDate,
     selectedEntry,
+    setAttachments,
+    setEntries,
     showToast,
   })
 
@@ -131,14 +151,16 @@ function App() {
     handleAddBoardLane,
     handleAddTodo,
     handleAddTodoWithDetails,
+    handleArchiveTodo,
     handleDeleteBoardLane,
     handleDeleteTodo,
     handleToggleTodo,
     handleUpdateTodoDetails,
   } = useTodoBoardActions({
     hasLoadedLocalState,
-    reload,
+    refreshCore,
     selectedDate,
+    setBoardLanes,
     setTodoTitle,
     setTodos,
     showToast,
@@ -226,6 +248,7 @@ function App() {
   const {
     handleExportSyncBundle,
     handleTestWebDavConnection,
+    handleWebDavReplaceCloud,
     handleWebDavRestoreFromCloud,
     handleWebDavSync,
     isExportingSyncBundle,
@@ -242,6 +265,7 @@ function App() {
     showToast,
     todayKey,
     webDavConfig,
+    webDavRecoveryRequired: databaseStatus.webDavRecoveryRequired,
   })
 
   const {
@@ -254,7 +278,7 @@ function App() {
     summaryError,
   } = useSummaryActions({
     aiConfig,
-    reload,
+    refreshCore,
     selectedWeek,
     selectedWeekEntries,
     selectedWeekSummary,
@@ -330,22 +354,37 @@ function App() {
           onToggleTodo={(todo) => void handleToggleTodo(todo)}
           onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
           onDeleteAttachment={(attachment) => void handleDeleteAttachment(attachment)}
+          onLoadAttachmentContent={getAttachmentContent}
           onRemovePendingFile={handleRemovePendingFile}
           getCompletionRate={getCompletionRate}
         />
       ) : activeView === 'journal' ? (
         <JournalView
           entries={entries}
+          entriesTotal={counts.entries}
+          hasMoreEntries={pagination.entries.hasMore}
+          isLoadingMoreEntries={loadingMore.entries}
           todos={todos}
           currentStreak={currentStreak}
           pendingChangeCount={pendingChangeCount}
           attachmentCountByEntryId={attachmentCountByEntryId}
+          onLoadMoreEntries={() => void loadMoreEntries()}
           onFocusDate={focusDate}
           onDeleteEntry={(entry) => void handleDeleteJournalEntry(entry)}
+        />
+      ) : activeView === 'garden' ? (
+        <GardenView
+          snapshot={gameEngineSnapshot}
+          todayKey={todayKey}
+          onCheckIn={() => focusDate(todayKey, 'dashboard')}
+          onOpenJournalDate={(dateKey) => focusDate(dateKey, 'dashboard')}
         />
       ) : activeView === 'board' ? (
         <BoardView
           todos={todos}
+          todosTotal={counts.todos}
+          hasMoreTodos={pagination.todos.hasMore}
+          isLoadingMoreTodos={loadingMore.todos}
           filteredBoardTodos={filteredBoardTodos}
           boardLanes={boardLanes}
           entryByDate={entryByDate}
@@ -357,8 +396,10 @@ function App() {
           onUpdateTodoDetails={(todo, details) => void handleUpdateTodoDetails(todo, details)}
           onAddBoardLane={(label, colorId) => void handleAddBoardLane(label, colorId)}
           onDeleteBoardLane={(lane) => void handleDeleteBoardLane(lane)}
+          onArchiveTodo={(todo, archived) => void handleArchiveTodo(todo, archived)}
           onToggleTodo={(todo) => void handleToggleTodo(todo)}
           onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
+          onLoadMoreTodos={() => void loadMoreTodos()}
         />
       ) : activeView === 'summary' ? (
         <SummaryView
@@ -408,9 +449,9 @@ function App() {
           isDesktopNav={isDesktopNav}
           settingsMenuKey={settingsMenuKey}
           databaseStatus={databaseStatus}
-          entriesCount={entries.length}
-          todosCount={todos.length}
-          attachmentsCount={attachments.length}
+          entriesCount={counts.entries}
+          todosCount={counts.todos}
+          attachmentsCount={counts.attachments}
           weeklySummariesCount={weeklySummaries.length}
           changesCount={changes.length}
           pendingChangeCount={pendingChangeCount}
@@ -439,6 +480,7 @@ function App() {
           onTestWebDavConnection={() => void handleTestWebDavConnection()}
           onExportSyncBundle={() => void handleExportSyncBundle()}
           onRestoreWebDavSnapshot={() => void handleWebDavRestoreFromCloud()}
+          onReplaceWebDavSnapshot={() => void handleWebDavReplaceCloud()}
           onThemeModeChange={handleThemeModeChange}
           onSnapshotDaysChange={handleSnapshotDaysChange}
         />

@@ -12,8 +12,7 @@ import type {
 
 export const emptyDraft: DraftState = {
   title: '',
-  body: '',
-  moodText: '',
+  journal: '',
   tags: '',
 }
 
@@ -51,6 +50,7 @@ export const defaultDashboardCards: DashboardCardConfig[] = [
 export const navigationItems: NavItem[] = [
   { id: 'dashboard', label: '仪表盘', note: '今日记录、心象与事项' },
   { id: 'board', label: 'Todo', note: '事项看板与推进状态' },
+  { id: 'garden', label: '心象花园', note: '让每日打卡长成一座花园' },
   { id: 'journal', label: '记录', note: '历史日记与年度热力图' },
   { id: 'summary', label: '回顾', note: '热力图、周回顾与 AI 总结' },
   { id: 'settings', label: '设置', note: '系统总览、同步与接口配置' },

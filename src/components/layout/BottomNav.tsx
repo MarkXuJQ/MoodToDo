@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, ListTodo, TrendingUp } from 'lucide-react'
+import { BarChart3, BookOpen, Flower2, ListTodo, TrendingUp } from 'lucide-react'
 
 import type { ActiveView, NavItem } from '../../types/app'
 
@@ -12,7 +12,7 @@ export function BottomNav({ activeView, navigationItems, onNavigate }: BottomNav
   const primaryItems = navigationItems.filter((item) => item.id !== 'settings')
 
   return (
-    <nav className="bottom-nav" aria-label="底部主导航">
+    <nav className="bottom-nav" aria-label="底部主导航" style={{ gridTemplateColumns: `repeat(${primaryItems.length}, minmax(0, 1fr))` }}>
       {primaryItems.map((item) => {
         const isActive = activeView === item.id
         const icon =
@@ -22,6 +22,8 @@ export function BottomNav({ activeView, navigationItems, onNavigate }: BottomNav
             <BookOpen size={20} aria-hidden="true" />
           ) : item.id === 'board' ? (
             <ListTodo size={20} aria-hidden="true" />
+          ) : item.id === 'garden' ? (
+            <Flower2 size={20} aria-hidden="true" />
           ) : (
             <TrendingUp size={20} aria-hidden="true" />
           )

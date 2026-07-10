@@ -112,7 +112,7 @@ export const useAppDerivedState = ({
   )
 
   const filteredBoardTodos = useMemo(() => {
-    return todos.filter((todo) => todo.boardVisible !== false).sort((left, right) => {
+    return todos.filter((todo) => !todo.archivedAt && todo.boardVisible !== false).sort((left, right) => {
       if (left.done !== right.done) return Number(left.done) - Number(right.done)
       if (!left.done && left.dateKey !== right.dateKey) return left.dateKey.localeCompare(right.dateKey)
 
@@ -129,7 +129,7 @@ export const useAppDerivedState = ({
   const countdownTodoOptions = useMemo<CountdownTodoOption[]>(
     () =>
       todos
-        .filter((todo) => todo.countdownEnabled && !todo.done)
+        .filter((todo) => todo.countdownEnabled && !todo.done && !todo.archivedAt)
         .sort(sortCountdownTodos)
         .map((todo) => {
           const daysRemaining = getCountdownDaysRemaining(todo.dateKey)

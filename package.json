@@ -5,7 +5,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "api": "node --disable-warning=ExperimentalWarning server/local-api.mjs",
+    "api": "node --disable-warning=ExperimentalWarning scripts/api-local.mjs",
     "dev": "node scripts/dev-local.mjs",
     "electron": "npm run build && env -u ELECTRON_RUN_AS_NODE electron .",
     "electron:dev": "env -u ELECTRON_RUN_AS_NODE ELECTRON_DEV_SERVER_URL=http://localhost:5173 electron .",

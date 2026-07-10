@@ -4,6 +4,7 @@ import { RefreshCw } from 'lucide-react'
 import DynamicBackground from '../ui/dynamic-background'
 import type { ToastState } from '../../hooks/use-toast'
 import type { DiagnosticDialogState } from '../../utils/diagnostics'
+import { useDialogA11y } from '../../hooks/use-dialog-a11y'
 import type { ActiveView, NavItem } from '../../types/app'
 import { AppHeader } from './AppHeader'
 import { BottomNav } from './BottomNav'
@@ -172,9 +173,18 @@ type DiagnosticDialogProps = {
 }
 
 function DiagnosticDialog({ dialog, onClose, onCopyDetails }: DiagnosticDialogProps) {
+  const dialogRef = useDialogA11y<HTMLElement>(true, onClose)
+
   return (
     <div className="diagnostic-backdrop" role="presentation">
-      <section className="diagnostic-dialog" role="dialog" aria-modal="true" aria-labelledby="diagnostic-title">
+      <section
+        className="diagnostic-dialog"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="diagnostic-title"
+        tabIndex={-1}
+      >
         <div className="section-head mb-3">
           <div>
             <p className="eyebrow">Diagnostics</p>
@@ -182,7 +192,13 @@ function DiagnosticDialog({ dialog, onClose, onCopyDetails }: DiagnosticDialogPr
               {dialog.title}
             </h2>
           </div>
-          <button className="icon-button" type="button" aria-label="关闭诊断" onClick={onClose}>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="关闭诊断"
+            data-dialog-initial-focus
+            onClick={onClose}
+          >
             X
           </button>
         </div>

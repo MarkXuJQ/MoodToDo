@@ -1,4 +1,5 @@
 const { app, BrowserWindow, shell } = require('electron')
+const { randomUUID } = require('node:crypto')
 const { appendFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
@@ -8,6 +9,7 @@ const { getLocalApiBaseUrl, localApiDefaults } = require('../config/local-api.cj
 const apiHost = localApiDefaults.host
 const apiPort = process.env.XINXIANGYI_API_PORT ?? localApiDefaults.desktopPort
 const apiBaseUrl = getLocalApiBaseUrl({ host: apiHost, port: apiPort })
+const apiToken = process.env.XINXIANGYI_API_TOKEN ?? randomUUID()
 
 const getLogPath = () => {
   try {
@@ -37,6 +39,7 @@ const configureLocalApi = () => {
 
   process.env.XINXIANGYI_API_HOST = apiHost
   process.env.XINXIANGYI_API_PORT = apiPort
+  process.env.XINXIANGYI_API_TOKEN = apiToken
   process.env.XINXIANGYI_DATA_DIR = process.env.XINXIANGYI_DATA_DIR ?? join(userDataDir, 'data')
   process.env.XINXIANGYI_SYNC_BUNDLE_DIR = process.env.XINXIANGYI_SYNC_BUNDLE_DIR ?? join(userDataDir, 'sync')
 }
@@ -65,7 +68,10 @@ const createWindow = async () => {
       nodeIntegration: false,
       preload: join(__dirname, 'preload.cjs'),
       sandbox: false,
-      additionalArguments: [`--xinxiangyi-api-base-url=${apiBaseUrl}`],
+      additionalArguments: [
+        `--xinxiangyi-api-base-url=${apiBaseUrl}`,
+        `--xinxiangyi-api-token=${apiToken}`,
+      ],
     },
   })
 

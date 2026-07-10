@@ -2,6 +2,7 @@ import type { MoodSignals } from './mood'
 import type { CalendarCell } from '../types/app'
 import type { JournalEntry, TodoItem } from './db'
 import { addDays, getCalendarDates, getMonthDays, getTodayKey, getWeekDays } from './calendar'
+import { getJournalText } from '../utils/journal'
 
 export const average = (values: number[]) => {
   if (values.length === 0) return 0
@@ -131,8 +132,7 @@ export const buildWeeklyPrompt = (weekKey: string, entries: JournalEntry[], todo
     return [
       `${dateKey}: ${entry.title}`,
       `心象分 ${entry.mood.score}，象限 ${entry.mood.quadrant ?? '未知'}`,
-      `心情：${entry.moodText || '未填写'}`,
-      `记录：${entry.body || '未填写'}`,
+      `日记：${getJournalText(entry) || '未填写'}`,
       `事项：${todoText}`,
       `标签：${entry.tags.join(' ') || '无'}`,
     ].join('\n')

@@ -5,6 +5,7 @@ import {
   exportSyncBundle,
   pullWebDavSnapshot,
   pushWebDavSnapshot,
+  replaceWebDavSnapshot,
   testWebDavConnection,
   type WebDavConnectionTestResult,
 } from '../lib/db'
@@ -24,6 +25,7 @@ type UseWebDavActionsOptions = {
   showToast: (message: string, tone?: ToastState['tone']) => void
   todayKey: string
   webDavConfig: WebDavConfig
+  webDavRecoveryRequired: boolean
 }
 
 export const useWebDavActions = ({
@@ -36,6 +38,7 @@ export const useWebDavActions = ({
   showToast,
   todayKey,
   webDavConfig,
+  webDavRecoveryRequired,
 }: UseWebDavActionsOptions) => {
   const [isWebDavSyncing, setIsWebDavSyncing] = useState(false)
   const [isTestingWebDav, setIsTestingWebDav] = useState(false)
@@ -134,6 +137,14 @@ export const useWebDavActions = ({
       return
     }
 
+    if (webDavRecoveryRequired) {
+      if (source === 'manual') {
+        showToast('普通同步已暂停。请先在 WebDAV 设置中用本机数据重建云端。', 'error')
+        onConfigureWebDav()
+      }
+      return
+    }
+
     setIsWebDavSyncing(true)
 
     try {
@@ -200,6 +211,7 @@ export const useWebDavActions = ({
     showToast,
     todayKey,
     webDavConfig,
+    webDavRecoveryRequired,
   ])
 
   const handleWebDavRestoreFromCloud = useCallback(async () => {
@@ -207,6 +219,12 @@ export const useWebDavActions = ({
 
     if (!isWebDavConfigured) {
       showToast('请先配置 WebDAV', 'error')
+      onConfigureWebDav()
+      return
+    }
+
+    if (webDavRecoveryRequired) {
+      showToast('云端恢复已暂停。请先用本机数据重建云端，避免受污染数据回流。', 'error')
       onConfigureWebDav()
       return
     }
@@ -248,6 +266,55 @@ export const useWebDavActions = ({
     showToast,
     todayKey,
     webDavConfig,
+    webDavRecoveryRequired,
+  ])
+
+  const handleWebDavReplaceCloud = useCallback(async () => {
+    if (isWebDavSyncing) return
+
+    if (!isWebDavConfigured) {
+      showToast('请先配置 WebDAV', 'error')
+      onConfigureWebDav()
+      return
+    }
+
+    const confirmed = window.confirm(
+      '这会用当前本机数据库完整覆盖云端同步快照，用于修复错误或受污染的远端数据。其他设备尚未同步的内容不会保留，确定继续吗？',
+    )
+    if (!confirmed) return
+
+    setIsWebDavSyncing(true)
+
+    try {
+      const result = await replaceWebDavSnapshot(webDavConfig)
+
+      window.localStorage.setItem(webDavLastAutoSyncStorageKey, todayKey)
+      showToast(`云端已按本机数据重建；${formatWebDavSyncMessage(result)}`, 'success')
+      await reload()
+    } catch (error) {
+      const message = getErrorMessage(error, '用本机数据重建云端失败。')
+      showToast(message, 'error')
+      setDiagnosticDialog({
+        title: '云端重建诊断',
+        message,
+        details: formatDiagnosticDetails('webdav.replace', error, {
+          url: webDavConfig.url,
+          remotePath: webDavConfig.remotePath,
+          usernameLength: webDavConfig.username.length,
+        }),
+      })
+    } finally {
+      setIsWebDavSyncing(false)
+    }
+  }, [
+    isWebDavConfigured,
+    isWebDavSyncing,
+    onConfigureWebDav,
+    reload,
+    setDiagnosticDialog,
+    showToast,
+    todayKey,
+    webDavConfig,
   ])
 
   useEffect(() => {
@@ -260,6 +327,7 @@ export const useWebDavActions = ({
   return {
     handleExportSyncBundle,
     handleTestWebDavConnection,
+    handleWebDavReplaceCloud,
     handleWebDavRestoreFromCloud,
     handleWebDavSync,
     isExportingSyncBundle,

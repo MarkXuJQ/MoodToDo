@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Bell, CheckCircle2, Circle, Clock3, ImagePlus, LocateFixed, Plus, Repeat2, Save, Trash2 } from 'lucide-react'
 
 import { AttachmentThumb } from '../components/ui/attachment-thumb'
@@ -8,6 +8,7 @@ import { ProgressRing, TrendChart, type TrendPoint } from '../components/ui/data
 import { Metric } from '../components/ui/stat-primitives'
 import { addDays } from '../lib/calendar'
 import type { AttachmentRecord, JournalEntry, TodoItem } from '../lib/db'
+import { analyzeMood } from '../lib/mood'
 import type { DashboardMetricCard, DraftState, MoodBreakdownItem } from '../types/app'
 import { formatCountdownDays, getCountdownDaysRemaining, getCountdownTone } from '../utils/countdown'
 import { getTodoRepeatLabel } from '../utils/todo'
@@ -62,6 +63,7 @@ type DashboardViewProps = {
   onToggleTodo: (todo: TodoItem) => void
   onDeleteTodo: (todo: TodoItem) => void
   onDeleteAttachment: (attachment: AttachmentRecord) => void
+  onLoadAttachmentContent: (attachment: AttachmentRecord) => Promise<Blob>
   onRemovePendingFile: (index: number) => void
   getCompletionRate: (items: TodoItem[]) => number
 }
@@ -95,11 +97,16 @@ export function DashboardView({
   onToggleTodo,
   onDeleteTodo,
   onDeleteAttachment,
+  onLoadAttachmentContent,
   onRemovePendingFile,
   getCompletionRate,
 }: DashboardViewProps) {
   const [previewImage, setPreviewImage] = useState<{ name: string; sourceUrl: string } | null>(null)
   const activeDateRef = useRef<HTMLButtonElement | null>(null)
+  const journalMoodPreview = useMemo(
+    () => (draft.journal.trim() ? analyzeMood(draft.journal) : null),
+    [draft.journal],
+  )
   const heroMoodScore = selectedEntry?.mood.score ?? lastSevenAverage
   const heroMoodColor =
     heroMoodScore >= 82
@@ -395,24 +402,25 @@ export function DashboardView({
                 <input className="text-input" value={draft.title} onChange={onDraftChange('title')} placeholder="今天的主线" />
               </label>
               <label className="input-label">
-                <span>心情描述</span>
+                <span>日记</span>
                 <textarea
-                  className="text-area"
-                  value={draft.moodText}
-                  onChange={onDraftChange('moodText')}
-                  placeholder="比如：上午焦虑但有推进，下午散步后恢复专注"
-                  rows={4}
+                  className="text-area min-h-64"
+                  value={draft.journal}
+                  onChange={onDraftChange('journal')}
+                  placeholder="写下今天发生的事、你的感受或任何想记住的内容。心象仪会从完整日记中寻找情绪线索，普通叙述不会干扰评分。"
+                  rows={11}
                 />
-              </label>
-              <label className="input-label">
-                <span>打卡日记</span>
-                <textarea
-                  className="text-area min-h-44"
-                  value={draft.body}
-                  onChange={onDraftChange('body')}
-                  placeholder="完成了什么，卡在哪里，下一步是什么"
-                  rows={7}
-                />
+                {journalMoodPreview ? (
+                  <span className="journal-mood-preview" aria-live="polite">
+                    <span>预计心象</span>
+                    <strong className={`score-${journalMoodPreview.level}`}>{journalMoodPreview.score}</strong>
+                    <span>{journalMoodPreview.level}</span>
+                    <span>{journalMoodPreview.quadrant}</span>
+                    <small>线索可信度 {journalMoodPreview.confidence}%</small>
+                  </span>
+                ) : (
+                  <small className="text-xs font-bold text-ink-400">心象将在这里随日记内容更新。</small>
+                )}
               </label>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
@@ -445,7 +453,7 @@ export function DashboardView({
                       type={file.type}
                       source={file}
                       badge="待保存"
-                      onPreview={file.type.startsWith('image/') ? () => openImagePreview(file.name, file) : undefined}
+                      onPreview={file.type.startsWith('image/') ? (source) => openImagePreview(file.name, source) : undefined}
                       onDelete={() => onRemovePendingFile(index)}
                     />
                   ))}
@@ -456,10 +464,11 @@ export function DashboardView({
                       size={attachment.size}
                       type={attachment.type}
                       source={attachment.blob}
+                      loadSource={() => onLoadAttachmentContent(attachment)}
                       badge="已保存"
                       onPreview={
                         attachment.type.startsWith('image/')
-                          ? () => openImagePreview(attachment.name, attachment.blob)
+                          ? (source) => openImagePreview(attachment.name, source)
                           : undefined
                       }
                       onDelete={() => onDeleteAttachment(attachment)}

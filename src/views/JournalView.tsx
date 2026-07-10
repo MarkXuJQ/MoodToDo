@@ -4,6 +4,7 @@ import { Trash2, X } from 'lucide-react'
 import { Metric } from '../components/ui/stat-primitives'
 import type { JournalEntry, TodoItem } from '../lib/db'
 import type { ActiveView } from '../types/app'
+import { getJournalText } from '../utils/journal'
 
 type YearHeatmapCell = {
   dateKey: string
@@ -110,20 +111,28 @@ const groupEntriesByMonth = (
 
 type JournalViewProps = {
   entries: JournalEntry[]
+  entriesTotal: number
+  hasMoreEntries: boolean
+  isLoadingMoreEntries: boolean
   todos: TodoItem[]
   currentStreak: number
   pendingChangeCount: number
   attachmentCountByEntryId: Map<string, number>
+  onLoadMoreEntries: () => void
   onFocusDate: (dateKey: string, nextView: ActiveView) => void
   onDeleteEntry: (entry: JournalEntry) => void
 }
 
 export function JournalView({
   entries,
+  entriesTotal,
+  hasMoreEntries,
+  isLoadingMoreEntries,
   todos,
   currentStreak,
   pendingChangeCount,
   attachmentCountByEntryId,
+  onLoadMoreEntries,
   onFocusDate,
   onDeleteEntry,
 }: JournalViewProps) {
@@ -162,7 +171,7 @@ export function JournalView({
       </div>
 
       <div className="secondary-metrics mb-5 md:grid-cols-5">
-        <Metric label="日记总数" value={`${entries.length}`} />
+        <Metric label="日记总数" value={`${entriesTotal}`} />
         <Metric label={`${activeYear} 记录`} value={`${yearEntries.length}`} />
         <Metric label="年度均分" value={`${yearAverageMood || 0}`} />
         <Metric label="连续打卡" value={`${currentStreak} 天`} />
@@ -258,7 +267,7 @@ export function JournalView({
                         <h4 className="m-0 min-w-0 truncate text-base font-black text-ink-950">{entry.title}</h4>
                         <strong className={`journal-entry-score score-${entry.mood.level}`}>{entry.mood.score}</strong>
                       </div>
-                      <p className="m-0 line-clamp-2 text-sm font-bold text-ink-600">{entry.moodText || entry.body || '没有正文'}</p>
+                      <p className="m-0 line-clamp-2 text-sm font-bold text-ink-600">{getJournalText(entry) || '没有正文'}</p>
                     </button>
 
                     <div className="journal-entry-footer">
@@ -283,6 +292,19 @@ export function JournalView({
 
       {yearEntries.length === 0 && <p className="empty-state">这一年还没有日记记录。</p>}
 
+      {hasMoreEntries && (
+        <div className="mt-4 flex justify-center">
+          <button
+            className="button-secondary min-h-10 px-4"
+            type="button"
+            disabled={isLoadingMoreEntries}
+            onClick={onLoadMoreEntries}
+          >
+            {isLoadingMoreEntries ? '加载中…' : `加载更早日记（已加载 ${entries.length}/${entriesTotal}）`}
+          </button>
+        </div>
+      )}
+
       {previewEntry && (
         <div className="dialog-backdrop" role="presentation">
           <section className="journal-dialog" role="dialog" aria-modal="true" aria-labelledby="journal-dialog-title">
@@ -304,17 +326,10 @@ export function JournalView({
               {attachmentCountByEntryId.get(previewEntry.id) ? <small>{attachmentCountByEntryId.get(previewEntry.id)} 图</small> : null}
             </div>
 
-            {previewEntry.moodText && (
-              <section className="journal-dialog-section">
-                <h4>心情描述</h4>
-                <p>{previewEntry.moodText}</p>
-              </section>
-            )}
-
-            {previewEntry.body && (
+            {getJournalText(previewEntry) && (
               <section className="journal-dialog-section">
                 <h4>日记</h4>
-                <p>{previewEntry.body}</p>
+                <p>{getJournalText(previewEntry)}</p>
               </section>
             )}
           </section>

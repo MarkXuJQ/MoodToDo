@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
-import { Bell, Check, Plus, Repeat2, Search, SlidersHorizontal, Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Bell, Check, Plus, Repeat2, Search, SlidersHorizontal, Trash2, X } from 'lucide-react'
 
 import { DatePickerButton } from '../components/ui/date-picker-button'
+import { useDialogA11y } from '../hooks/use-dialog-a11y'
 import type { BoardLaneRecord, JournalEntry, TodoDetailUpdate, TodoItem, TodoPriority, TodoRepeatFrequency } from '../lib/db'
 import type { ActiveView } from '../types/app'
 import { getCountdownDaysRemaining, getCountdownTone } from '../utils/countdown'
 import { getTodoRepeatLabel } from '../utils/todo'
+import { getJournalText } from '../utils/journal'
 
 type LaneColor = {
   id: string
@@ -24,11 +26,15 @@ type BoardLane = {
   items: TodoItem[]
   custom?: boolean
   done?: boolean
+  archived?: boolean
   record?: BoardLaneRecord
 }
 
 type BoardViewProps = {
   todos: TodoItem[]
+  todosTotal: number
+  hasMoreTodos: boolean
+  isLoadingMoreTodos: boolean
   filteredBoardTodos: TodoItem[]
   boardLanes: BoardLaneRecord[]
   entryByDate: Map<string, JournalEntry>
@@ -40,8 +46,10 @@ type BoardViewProps = {
   onUpdateTodoDetails: (todo: TodoItem, details: TodoDetailUpdate) => void
   onAddBoardLane: (label: string, colorId: string) => void
   onDeleteBoardLane: (lane: BoardLaneRecord) => void
+  onArchiveTodo: (todo: TodoItem, archived: boolean) => void
   onToggleTodo: (todo: TodoItem) => void
   onDeleteTodo: (todo: TodoItem) => void
+  onLoadMoreTodos: () => void
 }
 
 const laneColors: LaneColor[] = [
@@ -105,6 +113,9 @@ const formatTodoDateLabel = (dateKey: string) => `${Number(dateKey.slice(5, 7))}
 
 export function BoardView({
   todos,
+  todosTotal,
+  hasMoreTodos,
+  isLoadingMoreTodos,
   filteredBoardTodos,
   boardLanes: customLanes,
   entryByDate,
@@ -116,8 +127,10 @@ export function BoardView({
   onUpdateTodoDetails,
   onAddBoardLane,
   onDeleteBoardLane,
+  onArchiveTodo,
   onToggleTodo,
   onDeleteTodo,
+  onLoadMoreTodos,
 }: BoardViewProps) {
   const [isTodoDialogOpen, setIsTodoDialogOpen] = useState(false)
   const [isTodoAdvancedOpen, setIsTodoAdvancedOpen] = useState(false)
@@ -137,6 +150,7 @@ export function BoardView({
   const [draggingTodoId, setDraggingTodoId] = useState<string | null>(null)
   const [isTrashActive, setIsTrashActive] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null)
   const [detailDescription, setDetailDescription] = useState('')
   const [detailPriority, setDetailPriority] = useState<TodoPriority>('normal')
@@ -147,6 +161,7 @@ export function BoardView({
   const [detailReminderEnabled, setDetailReminderEnabled] = useState(false)
   const [detailReminderTime, setDetailReminderTime] = useState('09:00')
   const activeTodoCount = filteredBoardTodos.filter((todo) => !todo.done).length
+  const archivedTodoCount = todos.filter((todo) => Boolean(todo.archivedAt)).length
   const todoDraftOptionSummary = useMemo(() => {
     const summary = [
       priorityOptions.find((option) => option.id === todoDraftPriority)?.label ?? '普通',
@@ -196,8 +211,7 @@ export function BoardView({
         todo.dateKey,
         todo.description,
         entry?.title ?? '',
-        entry?.body ?? '',
-        entry?.moodText ?? '',
+        getJournalText(entry ?? { body: '', moodText: '' }),
         laneLabelById.get(assignedLaneId) ?? '',
       ]
         .join(' ')
@@ -206,6 +220,28 @@ export function BoardView({
       return haystack.includes(keyword)
     })
   }, [entryByDate, filteredBoardTodos, laneLabelById, searchKeyword])
+
+  const visibleArchivedTodos = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase()
+
+    return todos.filter((todo) => {
+      if (!todo.archivedAt) return false
+      if (!keyword) return true
+
+      const entry = entryByDate.get(todo.dateKey)
+      const haystack = [
+        todo.title,
+        todo.dateKey,
+        todo.description,
+        entry?.title ?? '',
+        getJournalText(entry ?? { body: '', moodText: '' }),
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      return haystack.includes(keyword)
+    })
+  }, [entryByDate, searchKeyword, todos])
 
   const boardLanes = useMemo<BoardLane[]>(() => {
     const activeTodos = sortByDate(visibleBoardTodos.filter((todo) => !todo.done))
@@ -221,12 +257,24 @@ export function BoardView({
       items: activeTodos.filter((todo) => todo.laneId === lane.id),
     }))
 
-    return [
+    const lanes: BoardLane[] = [
       { id: 'inbox', label: '待做', color: defaultInboxColor, items: inboxItems },
       ...customLaneItems,
       { id: 'done', label: '已完成', color: defaultDoneColor, items: doneTodos, done: true },
     ]
-  }, [customLanes, visibleBoardTodos])
+
+    if (showArchived) {
+      lanes.push({
+        id: 'archived',
+        label: '已归档',
+        color: getLaneColor('slate'),
+        items: sortByDate(visibleArchivedTodos),
+        archived: true,
+      })
+    }
+
+    return lanes
+  }, [customLanes, showArchived, visibleArchivedTodos, visibleBoardTodos])
 
   const expandedLaneIds = useMemo(() => {
     const laneIds = boardLanes.map((lane) => lane.id)
@@ -334,6 +382,11 @@ export function BoardView({
       return
     }
 
+    if (lane.archived) {
+      onArchiveTodo(todo, true)
+      return
+    }
+
     assignTodoToLane(todo, lane.id)
   }
 
@@ -364,6 +417,10 @@ export function BoardView({
   const closeTodoDialog = () => {
     setIsTodoDialogOpen(false)
   }
+
+  const laneDialogRef = useDialogA11y<HTMLFormElement>(isLaneDialogOpen, closeLaneDialog)
+  const todoDetailDialogRef = useDialogA11y<HTMLFormElement>(Boolean(editingTodo), closeTodoDetail)
+  const todoDialogRef = useDialogA11y<HTMLFormElement>(isTodoDialogOpen, closeTodoDialog)
 
   const handleDialogDateChange = (dateKey: string) => {
     setDialogTodoDate(dateKey)
@@ -398,14 +455,25 @@ export function BoardView({
             Todo 看板
           </h2>
           <span className="hidden min-w-0 truncate text-sm font-bold text-ink-400 md:inline">
-            {activeTodoCount} 个待做 · 共 {todos.length} 个事项 · 按日期排列
+            {activeTodoCount} 个待做 · {filteredBoardTodos.length} 个看板事项 · {archivedTodoCount} 个已归档
           </span>
         </div>
 
-        <button className="button-primary min-h-10 shrink-0 px-3" type="button" onClick={openTodoDialog}>
-          <Plus size={18} aria-hidden="true" />
-          添加
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            className="button-secondary min-h-10 px-3"
+            type="button"
+            aria-pressed={showArchived}
+            onClick={() => setShowArchived((current) => !current)}
+          >
+            <Archive size={17} aria-hidden="true" />
+            归档 {archivedTodoCount}
+          </button>
+          <button className="button-primary min-h-10 px-3" type="button" onClick={openTodoDialog}>
+            <Plus size={18} aria-hidden="true" />
+            添加
+          </button>
+        </div>
       </div>
 
       <div className="board-search-row">
@@ -570,9 +638,30 @@ export function BoardView({
         </button>
       </div>
 
+      {hasMoreTodos && (
+        <div className="mt-4 flex justify-center">
+          <button
+            className="button-secondary min-h-10 px-4"
+            type="button"
+            disabled={isLoadingMoreTodos}
+            onClick={onLoadMoreTodos}
+          >
+            {isLoadingMoreTodos ? '加载中…' : `加载更多 Todo（已加载 ${todos.length}/${todosTotal}）`}
+          </button>
+        </div>
+      )}
+
       {isLaneDialogOpen && (
         <div className="dialog-backdrop" role="presentation">
-          <form className="board-column-dialog" aria-labelledby="board-column-dialog-title" onSubmit={handleAddLane}>
+          <form
+            className="board-column-dialog"
+            ref={laneDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="board-column-dialog-title"
+            tabIndex={-1}
+            onSubmit={handleAddLane}
+          >
             <div className="section-head mb-3">
               <div>
                 <p className="eyebrow">Column</p>
@@ -590,7 +679,7 @@ export function BoardView({
               value={laneDraftTitle}
               onChange={(event) => setLaneDraftTitle(event.target.value)}
               placeholder="命名栏目"
-              autoFocus
+              data-dialog-initial-focus
             />
 
             <div className="board-color-grid" aria-label="选择栏目主题色">
@@ -622,7 +711,15 @@ export function BoardView({
 
       {editingTodo && (
         <div className="dialog-backdrop" role="presentation">
-          <form className="todo-dialog todo-detail-dialog" aria-labelledby="todo-detail-title" onSubmit={handleSaveTodoDetail}>
+          <form
+            className="todo-dialog todo-detail-dialog"
+            ref={todoDetailDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="todo-detail-title"
+            tabIndex={-1}
+            onSubmit={handleSaveTodoDetail}
+          >
             <div className="section-head mb-3">
               <div>
                 <p className="eyebrow">{editingTodo.dateKey}</p>
@@ -640,6 +737,7 @@ export function BoardView({
                 <span>描述</span>
                 <textarea
                   className="text-area min-h-28"
+                  data-dialog-initial-focus
                   value={detailDescription}
                   onChange={(event) => setDetailDescription(event.target.value)}
                   placeholder="补充背景、下一步、验收标准"
@@ -648,7 +746,7 @@ export function BoardView({
               </label>
               <label className="input-label">
                 <span>分类</span>
-                <select className="board-detail-select" value={detailLaneId} onChange={(event) => setDetailLaneId(event.target.value)} disabled={editingTodo.done}>
+                <select className="board-detail-select" value={detailLaneId} onChange={(event) => setDetailLaneId(event.target.value)} disabled={editingTodo.done || Boolean(editingTodo.archivedAt)}>
                   <option value="inbox">待做</option>
                   {customLanes.map((customLane) => (
                     <option value={customLane.id} key={customLane.id}>
@@ -738,17 +836,30 @@ export function BoardView({
             </div>
 
             <div className="mt-4 flex flex-wrap justify-between gap-2">
-              <button
-                className="button-secondary todo-detail-delete-button"
-                type="button"
-                onClick={() => {
-                  onDeleteTodo(editingTodo)
-                  closeTodoDetail()
-                }}
-              >
-                <Trash2 size={16} aria-hidden="true" />
-                删除
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="button-secondary"
+                  type="button"
+                  onClick={() => {
+                    onArchiveTodo(editingTodo, !editingTodo.archivedAt)
+                    closeTodoDetail()
+                  }}
+                >
+                  {editingTodo.archivedAt ? <ArchiveRestore size={16} aria-hidden="true" /> : <Archive size={16} aria-hidden="true" />}
+                  {editingTodo.archivedAt ? '恢复' : '归档'}
+                </button>
+                <button
+                  className="button-secondary todo-detail-delete-button"
+                  type="button"
+                  onClick={() => {
+                    onDeleteTodo(editingTodo)
+                    closeTodoDetail()
+                  }}
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                  删除
+                </button>
+              </div>
               <div className="flex gap-2">
               <button className="button-secondary" type="button" onClick={closeTodoDetail}>
                 取消
@@ -764,7 +875,15 @@ export function BoardView({
 
       {isTodoDialogOpen && (
         <div className="dialog-backdrop" role="presentation">
-          <form className="todo-dialog" aria-labelledby="todo-dialog-title" onSubmit={handleDialogTodoSubmit}>
+          <form
+            className="todo-dialog"
+            ref={todoDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="todo-dialog-title"
+            tabIndex={-1}
+            onSubmit={handleDialogTodoSubmit}
+          >
             <div className="section-head mb-3">
               <div>
                 <h3 className="section-title text-lg" id="todo-dialog-title">
@@ -794,7 +913,7 @@ export function BoardView({
                   value={todoTitle}
                   onChange={(event) => onTodoTitleChange(event.target.value)}
                   placeholder="写下要推进的一件事"
-                  autoFocus
+                  data-dialog-initial-focus
                 />
               </label>
               <label className="input-label">

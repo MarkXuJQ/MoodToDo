@@ -57,6 +57,7 @@ type SettingsViewProps = {
   onTestWebDavConnection: () => void
   onExportSyncBundle: () => void
   onRestoreWebDavSnapshot: () => void
+  onReplaceWebDavSnapshot: () => void
   onThemeModeChange: (mode: ThemeMode) => void
   onSnapshotDaysChange: (event: ChangeEvent<HTMLInputElement>) => void
 }
@@ -99,6 +100,7 @@ export function SettingsView({
   onTestWebDavConnection,
   onExportSyncBundle,
   onRestoreWebDavSnapshot,
+  onReplaceWebDavSnapshot,
   onThemeModeChange,
   onSnapshotDaysChange,
 }: SettingsViewProps) {
@@ -303,7 +305,7 @@ export function SettingsView({
                   </div>
 
                   <p className="note mt-3">
-                    这里暴露的是给后续游戏引擎消费的稳定快照，网页本身不渲染世界场景，只负责把情绪与行动数据整理好。
+                    心象花园已经在应用内消费这份稳定快照；外部引擎仍可继续读取同一份数据契约。
                   </p>
 
                   <button className="button-secondary mt-3 min-h-9 px-3" type="button" onClick={() => handleSettingsSectionChange('engine')}>
@@ -338,7 +340,7 @@ export function SettingsView({
                           <small className="block text-xs font-bold text-ink-400">当前值 {card.value}</small>
                           {card.id === 'countdown' && (
                             <label className="grid gap-1">
-                              <span className="text-xs font-black text-ink-500">仪表盘展示</span>
+                              <span className="text-xs font-black text-ink-400">仪表盘展示</span>
                               <select
                                 className="board-detail-select min-h-10 text-sm"
                                 value={selectedCountdownTodoId}
@@ -552,6 +554,13 @@ export function SettingsView({
                 </span>
               </div>
 
+              {databaseStatus.webDavRecoveryRequired && (
+                <p className="webdav-test-result webdav-test-result-error mb-3" role="alert">
+                  <strong>云端同步保护已开启</strong>
+                  <span>普通同步和云端恢复已暂停。确认本机数据无误后，请使用“用本机数据重建云端”。</span>
+                </p>
+              )}
+
               <div className="grid gap-3 rounded-lg border border-field-200 bg-field-50 p-3">
                 <label className="input-label">
                   <span>Server URL</span>
@@ -616,6 +625,10 @@ export function SettingsView({
                     {isWebDavSyncing ? <RefreshCw className="animate-spin" size={16} aria-hidden="true" /> : <Cloud size={16} aria-hidden="true" />}
                     从云端恢复
                   </button>
+                  <button className="button-secondary todo-detail-delete-button min-h-9 px-3" type="button" disabled={isWebDavSyncing} onClick={onReplaceWebDavSnapshot}>
+                    {isWebDavSyncing ? <RefreshCw className="animate-spin" size={16} aria-hidden="true" /> : <Cloud size={16} aria-hidden="true" />}
+                    用本机数据重建云端
+                  </button>
                   {webDavTestResult && (
                     <p className={`webdav-test-result ${webDavTestResult.ok ? 'webdav-test-result-ok' : 'webdav-test-result-error'}`}>
                       <strong>{webDavTestResult.ok ? '连接可用' : '需要检查'}</strong>
@@ -646,9 +659,9 @@ export function SettingsView({
               </div>
 
               <div className="rounded-lg border border-field-200 bg-field-50 p-3">
-                <strong>网页端不渲染游戏场景。</strong>
+                <strong>心象花园已接入应用。</strong>
                 <p className="m-0 mt-1 text-sm font-bold text-ink-600">
-                  当前只维护一个稳定快照接口。后续接入 Phaser、Pixi、Three.js 或 WebAssembly/Godot 导出时，引擎层读取该快照并自行决定如何呈现成长关系。
+                  当前内置花园和未来 Phaser、Pixi、Three.js 或 WebAssembly/Godot 引擎共用同一份快照。游戏进度由日记和心象数据推导，不需要维护第二份云端存档。
                 </p>
               </div>
 

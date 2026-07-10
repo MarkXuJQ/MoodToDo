@@ -123,6 +123,8 @@ const getLatestReminderTodos = (todos: TodoItem[]) => {
   const singleTodos: TodoItem[] = []
 
   for (const todo of todos) {
+    if (todo.archivedAt) continue
+
     const repeatKey = todo.repeatGroupId || (todo.repeatFrequency !== 'none' ? todo.id : '')
 
     if (repeatKey) {

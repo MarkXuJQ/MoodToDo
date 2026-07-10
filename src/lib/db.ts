@@ -9,9 +9,14 @@ import {
   deleteNativeJournalEntries,
   deleteNativeJournalEntry,
   deleteNativeTodo,
-  getNativeLocalState,
+  getNativeAttachmentContent,
+  getNativeAttachmentsPage,
+  getNativeEntriesPage,
+  getNativeLocalCoreState,
+  getNativeTodosPage,
   pullNativeWebDavSnapshot,
   pushNativeWebDavSnapshot,
+  replaceNativeWebDavSnapshot,
   setNativeTodoDone,
   testNativeWebDavConnection,
   updateNativeTodoDetails,
@@ -56,6 +61,7 @@ export type TodoItem = {
   createdAt: string
   updatedAt: string
   completedAt?: string
+  archivedAt?: string
   syncState: SyncState
 }
 
@@ -71,6 +77,7 @@ export type TodoDetailUpdate = {
   boardVisible?: boolean
   reminderEnabled?: boolean
   reminderTime?: string
+  archived?: boolean
 }
 
 export type AttachmentRecord = {
@@ -80,7 +87,7 @@ export type AttachmentRecord = {
   name: string
   type: string
   size: number
-  blob: Blob
+  blob?: Blob
   createdAt: string
   updatedAt: string
   syncState: SyncState
@@ -180,6 +187,7 @@ export type LocalDatabaseMeta = {
   syncBundlePath?: string
   apiBaseUrl: string
   schemaVersion: number
+  webDavRecoveryRequired?: boolean
 }
 
 export type LocalState = {
@@ -190,15 +198,42 @@ export type LocalState = {
   changes: ChangeLogRecord[]
   weeklySummaries: WeeklySummary[]
   meta: LocalDatabaseMeta
+  counts: LocalStateCounts
+  pagination: LocalStatePagination
 }
 
-type AttachmentPayload = Omit<AttachmentRecord, 'blob'> & {
-  dataBase64: string
+export type LocalStateCounts = {
+  entries: number
+  todos: number
+  archivedTodos: number
+  attachments: number
 }
 
-type LocalStatePayload = Omit<LocalState, 'attachments'> & {
-  attachments: AttachmentPayload[]
+export type PageResult<T> = {
+  items: T[]
+  total: number
+  limit: number
+  offset: number
+  hasMore: boolean
 }
+
+export type LocalStatePagination = {
+  entries: Omit<PageResult<JournalEntry>, 'items'>
+  todos: Omit<PageResult<TodoItem>, 'items'>
+  attachments: Omit<PageResult<AttachmentRecord>, 'items'>
+}
+
+export type JournalEntryMutationResult = {
+  entry: JournalEntry
+  attachments: AttachmentRecord[]
+}
+
+export type TodoDoneMutationResult = {
+  todo: TodoItem
+  createdTodos: TodoItem[]
+}
+
+type LocalCorePayload = Pick<LocalState, 'boardLanes' | 'changes' | 'weeklySummaries' | 'meta' | 'counts'>
 
 type PendingFilePayload = {
   name: string
@@ -210,6 +245,7 @@ type PendingFilePayload = {
 type RuntimeWindow = Window & {
   xinxiangyiDesktop?: {
     apiBaseUrl?: string
+    apiToken?: string
   }
 }
 
@@ -223,6 +259,20 @@ const normalizeApiBaseUrl = (baseUrl: string) => baseUrl.replace(/\/$/, '')
 
 const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_LOCAL_API_URL || getRuntimeApiBaseUrl())
 export const getApiUrl = (path: string) => `${apiBaseUrl}${path}`
+const getRuntimeApiToken = () => {
+  if (typeof window === 'undefined') return ''
+
+  return (window as RuntimeWindow).xinxiangyiDesktop?.apiToken ?? ''
+}
+
+export const getApiRequestHeaders = (): Record<string, string> => {
+  const token = getRuntimeApiToken()
+
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'X-Xinxiangyi-API-Token': token } : {}),
+  }
+}
 const shouldUseNativeDatabase = () => Capacitor.isNativePlatform()
 
 const createId = (prefix: string) => {
@@ -248,7 +298,7 @@ const apiFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(getApiUrl(path), {
     ...init,
     headers: {
-      'Content-Type': 'application/json',
+      ...getApiRequestHeaders(),
       'X-Xinxiangyi-Device-Id': getDeviceId(),
       ...init?.headers,
     },
@@ -281,25 +331,6 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
   return globalThis.btoa(chunks.join(''))
 }
 
-const base64ToBlob = (dataBase64: string, type: string) => {
-  const binary = globalThis.atob(dataBase64)
-  const chunkSize = 0x8000
-  const chunks: ArrayBuffer[] = []
-
-  for (let index = 0; index < binary.length; index += chunkSize) {
-    const slice = binary.slice(index, index + chunkSize)
-    const bytes = new Uint8Array(slice.length)
-
-    for (let byteIndex = 0; byteIndex < slice.length; byteIndex += 1) {
-      bytes[byteIndex] = slice.charCodeAt(byteIndex)
-    }
-
-    chunks.push(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
-  }
-
-  return new Blob(chunks, { type })
-}
-
 const fileToPayload = async (file: File): Promise<PendingFilePayload> => ({
   name: file.name,
   type: file.type,
@@ -307,16 +338,10 @@ const fileToPayload = async (file: File): Promise<PendingFilePayload> => ({
   dataBase64: arrayBufferToBase64(await file.arrayBuffer()),
 })
 
-const mapAttachment = (attachment: AttachmentPayload): AttachmentRecord => ({
-  ...attachment,
-  blob: base64ToBlob(attachment.dataBase64, attachment.type),
-})
-
 const ensureArray = <T>(value: unknown): T[] => (Array.isArray(value) ? value : [])
 
-const normalizeLocalStatePayload = (payload: Partial<LocalStatePayload>): LocalState => ({
-  entries: ensureArray<JournalEntry>(payload.entries),
-  todos: ensureArray<Partial<TodoItem>>(payload.todos).map((todo) => ({
+const normalizeTodos = (items: Array<Partial<TodoItem>>) =>
+  items.map((todo) => ({
     ...todo,
     countdownEnabled: Boolean(todo.countdownEnabled),
     repeatFrequency: todo.repeatFrequency ?? 'none',
@@ -324,8 +349,9 @@ const normalizeLocalStatePayload = (payload: Partial<LocalStatePayload>): LocalS
     boardVisible: todo.boardVisible ?? true,
     reminderEnabled: Boolean(todo.reminderEnabled),
     reminderTime: todo.reminderTime ?? '09:00',
-  })) as TodoItem[],
-  attachments: ensureArray<AttachmentPayload>(payload.attachments).map(mapAttachment),
+  })) as TodoItem[]
+
+const normalizeCorePayload = (payload: Partial<LocalCorePayload>): LocalCorePayload => ({
   boardLanes: ensureArray<BoardLaneRecord>(payload.boardLanes),
   changes: ensureArray<ChangeLogRecord>(payload.changes),
   weeklySummaries: ensureArray<WeeklySummary>(payload.weeklySummaries),
@@ -337,17 +363,106 @@ const normalizeLocalStatePayload = (payload: Partial<LocalStatePayload>): LocalS
     syncBundlePath: payload.meta?.syncBundlePath ?? '',
     apiBaseUrl: payload.meta?.apiBaseUrl ?? apiBaseUrl,
     schemaVersion: payload.meta?.schemaVersion ?? 0,
+    webDavRecoveryRequired: Boolean(payload.meta?.webDavRecoveryRequired),
+  },
+  counts: {
+    entries: payload.counts?.entries ?? 0,
+    todos: payload.counts?.todos ?? 0,
+    archivedTodos: payload.counts?.archivedTodos ?? 0,
+    attachments: payload.counts?.attachments ?? 0,
   },
 })
 
-export const getLocalState = async (): Promise<LocalState> => {
+const getPageMeta = <T>(page: PageResult<T>): Omit<PageResult<T>, 'items'> => ({
+  total: page.total,
+  limit: page.limit,
+  offset: page.offset + page.items.length,
+  hasMore: page.hasMore,
+})
+
+export const getLocalCoreState = async (): Promise<LocalCorePayload> => {
   if (shouldUseNativeDatabase()) {
-    return getNativeLocalState()
+    return getNativeLocalCoreState()
   }
 
-  const payload = await apiFetch<LocalStatePayload>('/api/state')
+  return normalizeCorePayload(await apiFetch<LocalCorePayload>('/api/state'))
+}
 
-  return normalizeLocalStatePayload(payload)
+export const getEntriesPage = async (offset = 0, limit = 366): Promise<PageResult<JournalEntry>> => {
+  if (shouldUseNativeDatabase()) {
+    return getNativeEntriesPage(offset, limit)
+  }
+
+  return apiFetch<PageResult<JournalEntry>>(`/api/entries?offset=${offset}&limit=${limit}`)
+}
+
+export const getTodosPage = async (offset = 0, limit = 500): Promise<PageResult<TodoItem>> => {
+  if (shouldUseNativeDatabase()) {
+    return getNativeTodosPage(offset, limit)
+  }
+
+  const page = await apiFetch<PageResult<Partial<TodoItem>>>(`/api/todos?offset=${offset}&limit=${limit}`)
+
+  return { ...page, items: normalizeTodos(page.items) }
+}
+
+export const getAttachmentsPage = async (
+  offset = 0,
+  limit = 500,
+  entryId = '',
+): Promise<PageResult<AttachmentRecord>> => {
+  if (shouldUseNativeDatabase()) {
+    return getNativeAttachmentsPage(offset, limit, entryId)
+  }
+
+  const entryQuery = entryId ? `&entryId=${encodeURIComponent(entryId)}` : ''
+
+  return apiFetch<PageResult<AttachmentRecord>>(`/api/attachments?offset=${offset}&limit=${limit}${entryQuery}`)
+}
+
+export const getLocalState = async (): Promise<LocalState> => {
+  const [core, entriesPage, todosPage, attachmentsPage] = await Promise.all([
+    getLocalCoreState(),
+    getEntriesPage(),
+    getTodosPage(),
+    getAttachmentsPage(),
+  ])
+
+  return {
+    ...core,
+    counts: {
+      ...core.counts,
+      entries: entriesPage.total,
+      todos: todosPage.total,
+      attachments: attachmentsPage.total,
+    },
+    entries: entriesPage.items,
+    todos: todosPage.items,
+    attachments: attachmentsPage.items,
+    pagination: {
+      entries: getPageMeta(entriesPage),
+      todos: getPageMeta(todosPage),
+      attachments: getPageMeta(attachmentsPage),
+    },
+  }
+}
+
+export const getAttachmentContent = async (attachment: AttachmentRecord) => {
+  if (attachment.blob) return attachment.blob
+  if (shouldUseNativeDatabase()) return getNativeAttachmentContent(attachment)
+
+  const response = await fetch(getApiUrl(`/api/attachments/${encodeURIComponent(attachment.id)}/content`), {
+    headers: {
+      ...getApiRequestHeaders(),
+      'X-Xinxiangyi-Device-Id': getDeviceId(),
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`读取附件失败：${response.status}`)
+  }
+
+  return response.blob()
 }
 
 export const upsertJournalEntry = async (draft: EntryDraft, files: File[]) => {
@@ -355,9 +470,9 @@ export const upsertJournalEntry = async (draft: EntryDraft, files: File[]) => {
     return upsertNativeJournalEntry(draft, files)
   }
 
-  const mood = analyzeMood(draft.moodText)
+  const mood = analyzeMood(draft.body)
   const filePayloads = await Promise.all(files.map(fileToPayload))
-  const { entry } = await apiFetch<{ entry: JournalEntry }>('/api/entries/upsert', {
+  const result = await apiFetch<JournalEntryMutationResult>('/api/entries/upsert', {
     method: 'POST',
     body: JSON.stringify({
       draft,
@@ -366,7 +481,7 @@ export const upsertJournalEntry = async (draft: EntryDraft, files: File[]) => {
     }),
   })
 
-  return entry
+  return result
 }
 
 export const deleteJournalEntry = async (entry: JournalEntry) => {
@@ -420,13 +535,17 @@ export const addBoardLane = async (label: string, colorId: string) => {
 
 export const deleteBoardLane = async (lane: BoardLaneRecord) => {
   if (shouldUseNativeDatabase()) {
-    await deleteNativeBoardLane(lane)
-    return
+    return deleteNativeBoardLane(lane)
   }
 
-  await apiFetch<{ ok: true }>(`/api/board-lanes/${encodeURIComponent(lane.id)}`, {
-    method: 'DELETE',
-  })
+  const { movedTodos } = await apiFetch<{ ok: true; movedTodos: TodoItem[] }>(
+    `/api/board-lanes/${encodeURIComponent(lane.id)}`,
+    {
+      method: 'DELETE',
+    },
+  )
+
+  return movedTodos
 }
 
 export const setTodoDone = async (todo: TodoItem, done: boolean) => {
@@ -434,12 +553,12 @@ export const setTodoDone = async (todo: TodoItem, done: boolean) => {
     return setNativeTodoDone(todo, done)
   }
 
-  const { todo: next } = await apiFetch<{ todo: TodoItem }>(`/api/todos/${encodeURIComponent(todo.id)}`, {
+  const result = await apiFetch<TodoDoneMutationResult>(`/api/todos/${encodeURIComponent(todo.id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ done }),
   })
 
-  return next
+  return { ...result, createdTodos: normalizeTodos(result.createdTodos ?? []) }
 }
 
 export const updateTodoDetails = async (todo: TodoItem, details: TodoDetailUpdate) => {
@@ -483,6 +602,17 @@ export const pushWebDavSnapshot = async (config: WebDavSyncConfig) => {
   }
 
   return apiFetch<WebDavSyncResult>('/api/webdav/push', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  })
+}
+
+export const replaceWebDavSnapshot = async (config: WebDavSyncConfig) => {
+  if (shouldUseNativeDatabase()) {
+    return replaceNativeWebDavSnapshot(config)
+  }
+
+  return apiFetch<WebDavSyncResult>('/api/webdav/replace', {
     method: 'POST',
     body: JSON.stringify(config),
   })

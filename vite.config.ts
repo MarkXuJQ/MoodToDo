@@ -8,11 +8,17 @@ const require = createRequire(import.meta.url)
 const { brandConfig } = require('./config/brand.cjs')
 const { getLocalApiBaseUrl, localApiDefaults } = require('./config/local-api.cjs')
 const localApiPort = process.env.XINXIANGYI_API_PORT ?? localApiDefaults.browserPort
+const localApiToken = process.env.XINXIANGYI_API_TOKEN ?? ''
 
 const localApiProxy = {
   '/api': {
     target: getLocalApiBaseUrl({ port: localApiPort }),
     changeOrigin: true,
+    headers: localApiToken
+      ? {
+          'X-Xinxiangyi-API-Token': localApiToken,
+        }
+      : undefined,
   },
 }
 

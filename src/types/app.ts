@@ -1,6 +1,6 @@
 import type { JournalEntry, TodoItem } from '../lib/db'
 
-export type ActiveView = 'dashboard' | 'journal' | 'board' | 'summary' | 'settings'
+export type ActiveView = 'dashboard' | 'journal' | 'board' | 'garden' | 'summary' | 'settings'
 
 export type SettingsSection = 'overview' | 'cards' | 'appearance' | 'database' | 'ai' | 'webdav' | 'engine'
 
@@ -26,8 +26,7 @@ export type SettingsSectionGroup = {
 
 export type DraftState = {
   title: string
-  body: string
-  moodText: string
+  journal: string
   tags: string
 }
 
@@ -63,6 +62,7 @@ export type DatabaseStatus = {
   syncBundlePath?: string
   apiBaseUrl: string
   schemaVersion: number
+  webDavRecoveryRequired: boolean
   lastLoadedAt: string
 }
 

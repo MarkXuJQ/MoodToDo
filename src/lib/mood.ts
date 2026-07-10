@@ -53,14 +53,24 @@ const clarityWords: WeightedWord[] = [
 const loadWords: WeightedWord[] = [
   { word: '焦虑', weight: 9 },
   { word: '压力', weight: 8 },
-  { word: '烦', weight: 6 },
+  { word: '心烦', weight: 6 },
+  { word: '烦躁', weight: 7 },
+  { word: '烦恼', weight: 6 },
+  { word: '很烦', weight: 6 },
+  { word: '太烦', weight: 6 },
+  { word: '有点烦', weight: 5 },
   { word: '崩溃', weight: 12 },
   { word: '紧张', weight: 7 },
   { word: '难受', weight: 8 },
   { word: '委屈', weight: 7 },
   { word: '失落', weight: 7 },
   { word: '疲惫', weight: 8 },
-  { word: '累', weight: 6 },
+  { word: '很累', weight: 6 },
+  { word: '好累', weight: 6 },
+  { word: '太累', weight: 6 },
+  { word: '累了', weight: 6 },
+  { word: '累到', weight: 7 },
+  { word: '有点累', weight: 5 },
   { word: '混乱', weight: 7 },
   { word: '糟糕', weight: 9 },
   { word: '孤独', weight: 8 },
@@ -87,7 +97,9 @@ const recoveryWords: WeightedWord[] = [
   { word: '散步', weight: 6 },
   { word: '睡', weight: 6 },
   { word: '呼吸', weight: 5 },
-  { word: '整理', weight: 5 },
+  { word: '整理思绪', weight: 6 },
+  { word: '整理心情', weight: 6 },
+  { word: '整理状态', weight: 6 },
   { word: '放下', weight: 7 },
   { word: '恢复', weight: 8 },
   { word: '调整', weight: 6 },
@@ -97,8 +109,7 @@ const recoveryWords: WeightedWord[] = [
   { word: 'walk', weight: 5 },
 ]
 
-const negationWords = ['不', '没', '没有', '无', '别', 'not', 'no']
-const algorithmVersion = 'xinxiang-v0.2-lexical-vector'
+const algorithmVersion = 'xinxiang-v0.3-journal-vector'
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -107,10 +118,28 @@ const sigmoid = (value: number, slope = 1) => 1 / (1 + Math.exp(-value * slope))
 
 const scaleToUnit = (value: number, max: number) => clamp(value / max, 0, 1)
 
+const isNegated = (text: string, matchIndex: number) => {
+  const prefix = text.slice(Math.max(0, matchIndex - 10), matchIndex)
+
+  return /(?:并没有|并不|没有|不再|不太|不怎么|没|不|not|no)\s*$/.test(prefix)
+}
+
+const isEmbeddedFalsePositive = (text: string, matchIndex: number, word: string) =>
+  word.startsWith('累') && text[matchIndex - 1] === '积'
+
 const countMatches = (text: string, words: WeightedWord[]) => {
   const hits: string[] = []
   const total = words.reduce((sum, item) => {
-    const count = text.split(item.word).length - 1
+    let count = 0
+    let cursor = 0
+
+    while (count < 3) {
+      const matchIndex = text.indexOf(item.word, cursor)
+      if (matchIndex < 0) break
+      if (!isNegated(text, matchIndex) && !isEmbeddedFalsePositive(text, matchIndex, item.word)) count += 1
+      cursor = matchIndex + item.word.length
+    }
+
     if (count > 0) {
       hits.push(item.word)
     }
@@ -121,17 +150,12 @@ const countMatches = (text: string, words: WeightedWord[]) => {
 }
 
 const getReflectionScore = (text: string) => {
-  const lengthScore = clamp(text.trim().length / 8, 0, 12)
-  const hasCause = /因为|所以|但是|不过|虽然|如果|原因|发现|意识到|想/.test(text)
-    ? 8
-    : 0
-  const hasAction = /准备|决定|计划|明天|下次|先|继续|调整/.test(text) ? 8 : 0
+  const hasCause = /因为|所以|但是|不过|虽然|如果|原因|发现|意识到/.test(text) ? 7 : 0
+  const hasAction = /准备|决定|计划|明天|下次|先|继续|调整/.test(text) ? 7 : 0
+  const hasObservation = /我觉得|我想|我需要|我注意到|对我来说|回头看|复盘/.test(text) ? 6 : 0
 
-  return clamp(lengthScore + hasCause + hasAction, 0, 24)
+  return clamp(hasCause + hasAction + hasObservation, 0, 20)
 }
-
-const getNegationPenalty = (text: string) =>
-  negationWords.reduce((sum, word) => sum + (text.includes(word) ? 3 : 0), 0)
 
 const getLevel = (score: number): MoodLevel => {
   if (score < 35) return '低谷'
@@ -142,9 +166,12 @@ const getLevel = (score: number): MoodLevel => {
 }
 
 const getQuadrant = (vector: MoodVector): MoodQuadrant => {
-  if (vector.arousal < 0 && vector.valence < 0) return '低能承压'
-  if (vector.arousal >= 0 && vector.valence < 0) return '高能紧绷'
-  if (vector.arousal < 0 && vector.valence >= 0) return '低能修复'
+  const isHighEnergy = vector.arousal >= 0.12
+  const isUnderPressure = vector.valence <= -0.08
+
+  if (!isHighEnergy && isUnderPressure) return '低能承压'
+  if (isHighEnergy && isUnderPressure) return '高能紧绷'
+  if (!isHighEnergy) return '低能修复'
   return '高能舒展'
 }
 
@@ -190,14 +217,13 @@ export const analyzeMood = (sourceText: string): MoodAnalysis => {
   const energy = countMatches(text, energyWords)
   const recovery = countMatches(text, recoveryWords)
   const reflection = getReflectionScore(text)
-  const negationPenalty = getNegationPenalty(text)
   const punctuationLift = clamp((text.match(/[!！]/g)?.length ?? 0) * 2, 0, 6)
 
-  const clarityScore = clamp(clarity.total - negationPenalty, 0, 35)
-  const loadScore = clamp(load.total + negationPenalty, 0, 40)
+  const clarityScore = clamp(clarity.total, 0, 35)
+  const loadScore = clamp(load.total, 0, 40)
   const energyScore = clamp(energy.total + punctuationLift, 0, 28)
   const recoveryScore = clamp(recovery.total, 0, 28)
-  const reflectionScore = Math.round(reflection)
+  const reflectionScore = Math.round((reflection / 20) * 24)
 
   const valence =
     scaleToUnit(clarityScore, 35) * 1.25 +
@@ -206,9 +232,9 @@ export const analyzeMood = (sourceText: string): MoodAnalysis => {
   const arousal = scaleToUnit(energyScore, 28) * 1.35 - scaleToUnit(recoveryScore, 28) * 0.7 - scaleToUnit(loadScore, 40) * 0.25
   const resilience =
     scaleToUnit(recoveryScore, 28) * 1.2 +
-    scaleToUnit(reflection, 24) * 0.8 -
+    scaleToUnit(reflection, 20) * 0.45 -
     scaleToUnit(loadScore, 40) * 0.65
-  const clarityAxis = scaleToUnit(clarityScore, 35) * 1.1 + scaleToUnit(reflection, 24) * 0.65
+  const clarityAxis = scaleToUnit(clarityScore, 35) * 1.1 + scaleToUnit(reflection, 20) * 0.3
 
   const vector: MoodVector = {
     valence: Number(clamp(valence, -1, 1).toFixed(3)),
@@ -229,7 +255,11 @@ export const analyzeMood = (sourceText: string): MoodAnalysis => {
 
   const score = Math.round(clamp(curvedScore, 0, 100))
   const quadrant = getQuadrant(vector)
-  const confidence = Math.round(clamp(text.length / 60, 0.2, 1) * 100)
+  const relevantSignalTotal = clarityScore + loadScore + energyScore + recoveryScore + reflection
+  const hasMoodEvidence = relevantSignalTotal > 0
+  const lengthConfidence = hasMoodEvidence ? clamp(text.length / 480, 0.15, 0.3) : 0.15
+  const signalConfidence = clamp(relevantSignalTotal / 55, 0, 0.7)
+  const confidence = Math.round(clamp(lengthConfidence + signalConfidence, 0.15, 1) * 100)
 
   return {
     score,
