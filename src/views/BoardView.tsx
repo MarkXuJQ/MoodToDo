@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
-import { Archive, ArchiveRestore, Bell, Check, Plus, Repeat2, Search, SlidersHorizontal, Trash2, X } from 'lucide-react'
+import { Bell, Check, ChevronLeft, Plus, Repeat2, Search, Trash2, X } from 'lucide-react'
 
 import { DatePickerButton } from '../components/ui/date-picker-button'
 import { useDialogA11y } from '../hooks/use-dialog-a11y'
@@ -26,9 +26,10 @@ type BoardLane = {
   items: TodoItem[]
   custom?: boolean
   done?: boolean
-  archived?: boolean
   record?: BoardLaneRecord
 }
+
+type TodoDialogStep = 'main' | 'description' | 'options'
 
 type BoardViewProps = {
   todos: TodoItem[]
@@ -46,7 +47,6 @@ type BoardViewProps = {
   onUpdateTodoDetails: (todo: TodoItem, details: TodoDetailUpdate) => void
   onAddBoardLane: (label: string, colorId: string) => void
   onDeleteBoardLane: (lane: BoardLaneRecord) => void
-  onArchiveTodo: (todo: TodoItem, archived: boolean) => void
   onToggleTodo: (todo: TodoItem) => void
   onDeleteTodo: (todo: TodoItem) => void
   onLoadMoreTodos: () => void
@@ -88,6 +88,12 @@ const repeatOptions: Array<{ id: TodoRepeatFrequency; label: string }> = [
   { id: 'monthly', label: '每月' },
 ]
 
+const getPriorityIndex = (priority: TodoPriority) => Math.max(0, priorityOptions.findIndex((option) => option.id === priority))
+
+const getPriorityByIndex = (index: number) => priorityOptions[Math.min(priorityOptions.length - 1, Math.max(0, index))]?.id ?? 'normal'
+
+const getPriorityLabel = (priority: TodoPriority) => priorityOptions.find((option) => option.id === priority)?.label ?? '普通'
+
 const getLaneColor = (colorId?: string) => laneColors.find((color) => color.id === colorId) ?? defaultInboxColor
 
 const getLaneStyle = (color: LaneColor) =>
@@ -127,13 +133,12 @@ export function BoardView({
   onUpdateTodoDetails,
   onAddBoardLane,
   onDeleteBoardLane,
-  onArchiveTodo,
   onToggleTodo,
   onDeleteTodo,
   onLoadMoreTodos,
 }: BoardViewProps) {
   const [isTodoDialogOpen, setIsTodoDialogOpen] = useState(false)
-  const [isTodoAdvancedOpen, setIsTodoAdvancedOpen] = useState(false)
+  const [todoDialogStep, setTodoDialogStep] = useState<TodoDialogStep>('main')
   const [isLaneDialogOpen, setIsLaneDialogOpen] = useState(false)
   const [dialogTodoDate, setDialogTodoDate] = useState(selectedDate)
   const [todoDraftPriority, setTodoDraftPriority] = useState<TodoPriority>('normal')
@@ -150,8 +155,8 @@ export function BoardView({
   const [draggingTodoId, setDraggingTodoId] = useState<string | null>(null)
   const [isTrashActive, setIsTrashActive] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
-  const [showArchived, setShowArchived] = useState(false)
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null)
+  const [isDetailDescriptionOpen, setIsDetailDescriptionOpen] = useState(false)
   const [detailDescription, setDetailDescription] = useState('')
   const [detailPriority, setDetailPriority] = useState<TodoPriority>('normal')
   const [detailLaneId, setDetailLaneId] = useState('inbox')
@@ -161,11 +166,10 @@ export function BoardView({
   const [detailReminderEnabled, setDetailReminderEnabled] = useState(false)
   const [detailReminderTime, setDetailReminderTime] = useState('09:00')
   const activeTodoCount = filteredBoardTodos.filter((todo) => !todo.done).length
-  const archivedTodoCount = todos.filter((todo) => Boolean(todo.archivedAt)).length
   const todoDraftOptionSummary = useMemo(() => {
     const summary = [
-      priorityOptions.find((option) => option.id === todoDraftPriority)?.label ?? '普通',
-      todoDraftBoardVisible ? '显示看板' : '隐藏看板',
+      getPriorityLabel(todoDraftPriority),
+      todoDraftBoardVisible ? '看板显示' : '看板隐藏',
     ]
 
     if (todoDraftCountdownEnabled) summary.push('倒计时')
@@ -221,28 +225,6 @@ export function BoardView({
     })
   }, [entryByDate, filteredBoardTodos, laneLabelById, searchKeyword])
 
-  const visibleArchivedTodos = useMemo(() => {
-    const keyword = searchKeyword.trim().toLowerCase()
-
-    return todos.filter((todo) => {
-      if (!todo.archivedAt) return false
-      if (!keyword) return true
-
-      const entry = entryByDate.get(todo.dateKey)
-      const haystack = [
-        todo.title,
-        todo.dateKey,
-        todo.description,
-        entry?.title ?? '',
-        getJournalText(entry ?? { body: '', moodText: '' }),
-      ]
-        .join(' ')
-        .toLowerCase()
-
-      return haystack.includes(keyword)
-    })
-  }, [entryByDate, searchKeyword, todos])
-
   const boardLanes = useMemo<BoardLane[]>(() => {
     const activeTodos = sortByDate(visibleBoardTodos.filter((todo) => !todo.done))
     const doneTodos = sortByDate(visibleBoardTodos.filter((todo) => todo.done))
@@ -263,18 +245,8 @@ export function BoardView({
       { id: 'done', label: '已完成', color: defaultDoneColor, items: doneTodos, done: true },
     ]
 
-    if (showArchived) {
-      lanes.push({
-        id: 'archived',
-        label: '已归档',
-        color: getLaneColor('slate'),
-        items: sortByDate(visibleArchivedTodos),
-        archived: true,
-      })
-    }
-
     return lanes
-  }, [customLanes, showArchived, visibleArchivedTodos, visibleBoardTodos])
+  }, [customLanes, visibleBoardTodos])
 
   const expandedLaneIds = useMemo(() => {
     const laneIds = boardLanes.map((lane) => lane.id)
@@ -338,6 +310,7 @@ export function BoardView({
 
   const openTodoDetail = (todo: TodoItem) => {
     setEditingTodo(todo)
+    setIsDetailDescriptionOpen(Boolean(todo.description.trim()))
     setDetailDescription(todo.description)
     setDetailPriority(todo.priority)
     setDetailLaneId(todo.laneId || 'inbox')
@@ -382,11 +355,6 @@ export function BoardView({
       return
     }
 
-    if (lane.archived) {
-      onArchiveTodo(todo, true)
-      return
-    }
-
     assignTodoToLane(todo, lane.id)
   }
 
@@ -410,17 +378,32 @@ export function BoardView({
     setTodoDraftBoardVisible(true)
     setTodoDraftReminderEnabled(false)
     setTodoDraftReminderTime('09:00')
-    setIsTodoAdvancedOpen(false)
+    setTodoDialogStep('main')
     setIsTodoDialogOpen(true)
   }
 
   const closeTodoDialog = () => {
     setIsTodoDialogOpen(false)
+    setTodoDialogStep('main')
   }
+
+  const returnToTodoDialogMain = () => setTodoDialogStep('main')
 
   const laneDialogRef = useDialogA11y<HTMLFormElement>(isLaneDialogOpen, closeLaneDialog)
   const todoDetailDialogRef = useDialogA11y<HTMLFormElement>(Boolean(editingTodo), closeTodoDetail)
   const todoDialogRef = useDialogA11y<HTMLFormElement>(isTodoDialogOpen, closeTodoDialog)
+
+  useEffect(() => {
+    if (!isTodoDialogOpen) return
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      const dialog = document.getElementById('todo-add-dialog')
+      const focusTarget = dialog?.querySelector<HTMLElement>('[data-dialog-step-focus], [data-dialog-initial-focus]')
+      focusTarget?.focus()
+    })
+
+    return () => window.cancelAnimationFrame(focusFrame)
+  }, [isTodoDialogOpen, todoDialogStep])
 
   const handleDialogDateChange = (dateKey: string) => {
     setDialogTodoDate(dateKey)
@@ -429,6 +412,12 @@ export function BoardView({
 
   const handleDialogTodoSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+
+    if (todoDialogStep !== 'main') {
+      returnToTodoDialogMain()
+      return
+    }
+
     const title = todoTitle.trim()
     if (title) {
       onAddTodoWithDetails(dialogTodoDate, title, {
@@ -455,20 +444,11 @@ export function BoardView({
             Todo 看板
           </h2>
           <span className="hidden min-w-0 truncate text-sm font-bold text-ink-400 md:inline">
-            {activeTodoCount} 个待做 · {filteredBoardTodos.length} 个看板事项 · {archivedTodoCount} 个已归档
+            {activeTodoCount} 个待做 · {filteredBoardTodos.length} 个看板事项
           </span>
         </div>
 
         <div className="flex shrink-0 gap-2">
-          <button
-            className="button-secondary min-h-10 px-3"
-            type="button"
-            aria-pressed={showArchived}
-            onClick={() => setShowArchived((current) => !current)}
-          >
-            <Archive size={17} aria-hidden="true" />
-            归档 {archivedTodoCount}
-          </button>
           <button className="button-primary min-h-10 px-3" type="button" onClick={openTodoDialog}>
             <Plus size={18} aria-hidden="true" />
             添加
@@ -733,20 +713,27 @@ export function BoardView({
             </div>
 
             <div className="grid gap-3">
-              <label className="input-label">
-                <span>描述</span>
-                <textarea
-                  className="text-area min-h-28"
-                  data-dialog-initial-focus
-                  value={detailDescription}
-                  onChange={(event) => setDetailDescription(event.target.value)}
-                  placeholder="补充背景、下一步、验收标准"
-                  rows={4}
-                />
-              </label>
+              {isDetailDescriptionOpen ? (
+                <label className="input-label">
+                  <span>描述</span>
+                  <textarea
+                    className="text-area min-h-28"
+                    data-dialog-initial-focus
+                    value={detailDescription}
+                    onChange={(event) => setDetailDescription(event.target.value)}
+                    placeholder="补充背景、下一步、验收标准"
+                    rows={4}
+                  />
+                </label>
+              ) : (
+                <button className="todo-secondary-trigger" type="button" data-dialog-initial-focus onClick={() => setIsDetailDescriptionOpen(true)}>
+                  <Plus size={16} aria-hidden="true" />
+                  添加描述
+                </button>
+              )}
               <label className="input-label">
                 <span>分类</span>
-                <select className="board-detail-select" value={detailLaneId} onChange={(event) => setDetailLaneId(event.target.value)} disabled={editingTodo.done || Boolean(editingTodo.archivedAt)}>
+                <select className="board-detail-select" value={detailLaneId} onChange={(event) => setDetailLaneId(event.target.value)} disabled={editingTodo.done}>
                   <option value="inbox">待做</option>
                   {customLanes.map((customLane) => (
                     <option value={customLane.id} key={customLane.id}>
@@ -805,49 +792,41 @@ export function BoardView({
                     <small>{detailReminderEnabled ? detailReminderTime : '未开启'}</small>
                   </span>
                 </label>
-                <label className="input-label">
-                  <span>时间</span>
-                  <input
-                    className="text-input"
-                    type="time"
-                    value={detailReminderTime}
-                    disabled={!detailReminderEnabled}
-                    onChange={(event) => setDetailReminderTime(event.target.value)}
-                  />
-                </label>
+                {detailReminderEnabled && (
+                  <label className="input-label">
+                    <span>时间</span>
+                    <input
+                      className="text-input"
+                      type="time"
+                      value={detailReminderTime}
+                      onChange={(event) => setDetailReminderTime(event.target.value)}
+                    />
+                  </label>
+                )}
               </div>
-              <fieldset className="todo-priority-field">
-                <legend>重要级</legend>
-                <div className="todo-priority-options">
+              <label className="todo-priority-slider">
+                <span>
+                  <strong>重要级</strong>
+                  <small>{getPriorityLabel(detailPriority)}</small>
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="1"
+                  value={getPriorityIndex(detailPriority)}
+                  onChange={(event) => setDetailPriority(getPriorityByIndex(Number(event.target.value)))}
+                />
+                <div aria-hidden="true">
                   {priorityOptions.map((option) => (
-                    <button
-                      className={`todo-priority-option todo-priority-option-${option.id} ${detailPriority === option.id ? 'todo-priority-option-active' : ''}`}
-                      type="button"
-                      aria-pressed={detailPriority === option.id}
-                      key={option.id}
-                      onClick={() => setDetailPriority(option.id)}
-                    >
-                      <span aria-hidden="true">{option.shortLabel}</span>
-                      <small>{option.label}</small>
-                    </button>
+                    <small key={option.id}>{option.label}</small>
                   ))}
                 </div>
-              </fieldset>
+              </label>
             </div>
 
-            <div className="mt-4 flex flex-wrap justify-between gap-2">
+            <div className="todo-dialog-actions mt-4 flex flex-wrap justify-between gap-2">
               <div className="flex flex-wrap gap-2">
-                <button
-                  className="button-secondary"
-                  type="button"
-                  onClick={() => {
-                    onArchiveTodo(editingTodo, !editingTodo.archivedAt)
-                    closeTodoDetail()
-                  }}
-                >
-                  {editingTodo.archivedAt ? <ArchiveRestore size={16} aria-hidden="true" /> : <Archive size={16} aria-hidden="true" />}
-                  {editingTodo.archivedAt ? '恢复' : '归档'}
-                </button>
                 <button
                   className="button-secondary todo-detail-delete-button"
                   type="button"
@@ -876,169 +855,234 @@ export function BoardView({
       {isTodoDialogOpen && (
         <div className="dialog-backdrop" role="presentation">
           <form
-            className="todo-dialog"
+            className={`todo-dialog ${todoDialogStep === 'main' ? 'todo-dialog-primary' : 'todo-dialog-secondary'}`}
             ref={todoDialogRef}
             role="dialog"
             aria-modal="true"
+            id="todo-add-dialog"
             aria-labelledby="todo-dialog-title"
+            aria-describedby="todo-dialog-description"
             tabIndex={-1}
             onSubmit={handleDialogTodoSubmit}
           >
-            <div className="section-head mb-3">
-              <div>
+            <div className="todo-dialog-head">
+              <div className="todo-dialog-heading">
+                {todoDialogStep !== 'main' && (
+                  <button className="todo-dialog-back" type="button" onClick={returnToTodoDialogMain}>
+                    <ChevronLeft size={16} aria-hidden="true" />
+                    一级菜单
+                  </button>
+                )}
                 <h3 className="section-title text-lg" id="todo-dialog-title">
-                  添加事项
+                  {todoDialogStep === 'description' ? '添加详情描述' : todoDialogStep === 'options' ? '事项设置' : '添加事项'}
                 </h3>
+                <p className="todo-dialog-description" id="todo-dialog-description">
+                  {todoDialogStep === 'description'
+                    ? '只记录必要背景、下一步或验收标准；留空也可以。'
+                    : todoDialogStep === 'options'
+                      ? '把低频选项集中在这里，设置完成后回到一级菜单添加。'
+                      : '先写事项和日期，其他内容需要时再进入二级弹窗。'}
+                </p>
               </div>
               <button className="icon-button" type="button" aria-label="关闭添加 Todo" onClick={closeTodoDialog}>
                 <X size={18} aria-hidden="true" />
               </button>
             </div>
 
-            <div className="grid gap-3">
-              <div className="input-label">
-                <span>日期</span>
-                <DatePickerButton
-                  label="Todo 日期"
-                  value={dialogTodoDate}
-                  valueLabel={dialogTodoDate.replaceAll('-', '/')}
-                  onChange={handleDialogDateChange}
-                  compact
-                />
-              </div>
-              <label className="input-label">
-                <span>事项</span>
-                <input
-                  className="text-input"
-                  value={todoTitle}
-                  onChange={(event) => onTodoTitleChange(event.target.value)}
-                  placeholder="写下要推进的一件事"
-                  data-dialog-initial-focus
-                />
-              </label>
-              <label className="input-label">
-                <span>描述</span>
-                <textarea
-                  className="text-area min-h-24"
-                  value={todoDraftDescription}
-                  onChange={(event) => setTodoDraftDescription(event.target.value)}
-                  placeholder="可选：补充背景、下一步或验收标准"
-                  rows={3}
-                />
-              </label>
-              <div className="todo-advanced-shell">
-                <button
-                  className="todo-advanced-toggle"
-                  type="button"
-                  aria-expanded={isTodoAdvancedOpen}
-                  onClick={() => setIsTodoAdvancedOpen((current) => !current)}
-                >
-                  <span>
-                    <SlidersHorizontal size={16} aria-hidden="true" />
-                    <strong>更多设置</strong>
-                  </span>
-                  <small>{todoDraftOptionSummary}</small>
-                </button>
+            {todoDialogStep === 'main' ? (
+              <>
+                <div className="todo-dialog-body grid gap-3">
+                  <label className="input-label">
+                    <span>事项</span>
+                    <input
+                      className="text-input"
+                      value={todoTitle}
+                      onChange={(event) => onTodoTitleChange(event.target.value)}
+                      placeholder="写下要推进的一件事"
+                      data-dialog-initial-focus
+                    />
+                  </label>
+                  <div className="input-label">
+                    <span>日期</span>
+                    <DatePickerButton
+                      label="Todo 日期"
+                      value={dialogTodoDate}
+                      valueLabel={dialogTodoDate.replaceAll('-', '/')}
+                      onChange={handleDialogDateChange}
+                      compact
+                    />
+                  </div>
 
-                {isTodoAdvancedOpen && (
-                  <div className="todo-advanced-panel">
-                    <fieldset className="todo-priority-field">
-                      <legend>重要级</legend>
-                      <div className="todo-priority-options">
+                  <div className="todo-settings-list" aria-label="补充设置">
+                    <button className="todo-setting-row" type="button" onClick={() => setTodoDialogStep('description')}>
+                      <span className="todo-setting-row-copy">
+                        <strong>详情描述</strong>
+                        <small>补充背景、下一步或验收标准</small>
+                      </span>
+                      <span className="todo-setting-row-value">
+                        {todoDraftDescription.trim() ? '已填写' : '未添加'}
+                        <span aria-hidden="true">›</span>
+                      </span>
+                    </button>
+                    <button className="todo-setting-row" type="button" onClick={() => setTodoDialogStep('options')}>
+                      <span className="todo-setting-row-copy">
+                        <strong>高级设置</strong>
+                        <small>重要级、看板显示、倒计时、重复、提醒</small>
+                      </span>
+                      <span className="todo-setting-row-value">
+                        {todoDraftOptionSummary}
+                        <span aria-hidden="true">›</span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="todo-dialog-actions mt-4 flex justify-end gap-2">
+                  <button className="button-secondary" type="button" onClick={closeTodoDialog}>
+                    取消
+                  </button>
+                  <button className="button-primary" type="submit">
+                    <Plus size={18} aria-hidden="true" />
+                    添加
+                  </button>
+                </div>
+              </>
+            ) : todoDialogStep === 'description' ? (
+              <>
+                <div className="todo-dialog-body grid gap-3">
+                  <label className="input-label">
+                    <span>描述</span>
+                    <textarea
+                      className="text-area min-h-44"
+                      value={todoDraftDescription}
+                      onChange={(event) => setTodoDraftDescription(event.target.value)}
+                      placeholder="可选：补充背景、下一步或验收标准"
+                      rows={6}
+                      data-dialog-initial-focus
+                    />
+                  </label>
+                </div>
+
+                <div className="todo-dialog-actions mt-4 flex justify-between gap-2">
+                  <button className="button-secondary" type="button" onClick={returnToTodoDialogMain}>
+                    返回
+                  </button>
+                  <button className="button-primary" type="button" onClick={returnToTodoDialogMain}>
+                    完成
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="todo-settings-panel" aria-label="高级设置">
+                  <section className="todo-settings-section" aria-labelledby="todo-settings-display-title">
+                    <h4 id="todo-settings-display-title">优先级与展示</h4>
+                    <label className="todo-priority-slider">
+                      <span>
+                        <strong>重要级</strong>
+                        <small>{getPriorityLabel(todoDraftPriority)}</small>
+                      </span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="2"
+                        step="1"
+                        value={getPriorityIndex(todoDraftPriority)}
+                        onChange={(event) => setTodoDraftPriority(getPriorityByIndex(Number(event.target.value)))}
+                        data-dialog-step-focus
+                      />
+                      <div aria-hidden="true">
                         {priorityOptions.map((option) => (
-                          <button
-                            className={`todo-priority-option todo-priority-option-${option.id} ${todoDraftPriority === option.id ? 'todo-priority-option-active' : ''}`}
-                            type="button"
-                            aria-pressed={todoDraftPriority === option.id}
-                            key={option.id}
-                            onClick={() => setTodoDraftPriority(option.id)}
-                          >
-                            <span aria-hidden="true">{option.shortLabel}</span>
-                            <small>{option.label}</small>
-                          </button>
+                          <small key={option.id}>{option.label}</small>
                         ))}
                       </div>
-                    </fieldset>
+                    </label>
 
-                    <div className="todo-option-grid">
-                      <label className="countdown-toggle">
-                        <input
-                          type="checkbox"
-                          checked={todoDraftCountdownEnabled}
-                          onChange={(event) => setTodoDraftCountdownEnabled(event.target.checked)}
-                        />
-                        <span>
-                          <strong>倒计时</strong>
-                          <small>按日期计算</small>
-                        </span>
-                      </label>
-                      <label className="todo-toggle-row">
-                        <input
-                          type="checkbox"
-                          checked={todoDraftBoardVisible}
-                          onChange={(event) => setTodoDraftBoardVisible(event.target.checked)}
-                        />
-                        <span>
-                          <strong>看板</strong>
-                          <small>{todoDraftBoardVisible ? '显示' : '隐藏'}</small>
-                        </span>
-                      </label>
-                    </div>
+                    <label className="todo-form-row">
+                      <span className="todo-form-row-copy">
+                        <strong>显示在看板</strong>
+                        <small>{todoDraftBoardVisible ? '会出现在 Todo 看板' : '仅保存在对应日期里'}</small>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={todoDraftBoardVisible}
+                        onChange={(event) => setTodoDraftBoardVisible(event.target.checked)}
+                      />
+                    </label>
+                  </section>
 
-                    <fieldset className="todo-repeat-field">
-                      <legend>重复</legend>
-                      <div className="todo-repeat-options">
+                  <section className="todo-settings-section" aria-labelledby="todo-settings-date-title">
+                    <h4 id="todo-settings-date-title">日期行为</h4>
+                    <label className="todo-form-row">
+                      <span className="todo-form-row-copy">
+                        <strong>倒计时</strong>
+                        <small>{todoDraftCountdownEnabled ? '会按 Todo 日期显示剩余天数' : '不开启倒计时标记'}</small>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={todoDraftCountdownEnabled}
+                        onChange={(event) => setTodoDraftCountdownEnabled(event.target.checked)}
+                      />
+                    </label>
+
+                    <label className="todo-form-row todo-form-row-stacked">
+                      <span className="todo-form-row-copy">
+                        <strong>重复</strong>
+                        <small>重复事项默认可从看板隐藏，避免每天刷屏</small>
+                      </span>
+                      <select
+                        className="select-input"
+                        value={todoDraftRepeatFrequency}
+                        onChange={(event) => handleTodoDraftRepeatChange(event.target.value as TodoRepeatFrequency)}
+                      >
                         {repeatOptions.map((option) => (
-                          <button
-                            className={`todo-repeat-option ${todoDraftRepeatFrequency === option.id ? 'todo-repeat-option-active' : ''}`}
-                            type="button"
-                            aria-pressed={todoDraftRepeatFrequency === option.id}
-                            key={option.id}
-                            onClick={() => handleTodoDraftRepeatChange(option.id)}
-                          >
+                          <option value={option.id} key={option.id}>
                             {option.label}
-                          </button>
+                          </option>
                         ))}
-                      </div>
-                    </fieldset>
+                      </select>
+                    </label>
+                  </section>
 
-                    <div className="todo-reminder-grid">
-                      <label className="todo-toggle-row">
+                  <section className="todo-settings-section" aria-labelledby="todo-settings-reminder-title">
+                    <h4 id="todo-settings-reminder-title">提醒</h4>
+                    <div className="todo-form-row todo-form-row-stacked">
+                      <label className="todo-form-row-inline">
+                        <span className="todo-form-row-copy">
+                          <strong>本地提醒</strong>
+                          <small>{todoDraftReminderEnabled ? `提醒时间 ${todoDraftReminderTime}` : '未开启'}</small>
+                        </span>
                         <input
                           type="checkbox"
                           checked={todoDraftReminderEnabled}
                           onChange={(event) => setTodoDraftReminderEnabled(event.target.checked)}
                         />
-                        <span>
-                          <strong>本地提醒</strong>
-                          <small>{todoDraftReminderEnabled ? todoDraftReminderTime : '未开启'}</small>
-                        </span>
                       </label>
-                      <label className="input-label">
-                        <span>时间</span>
-                        <input
-                          className="text-input"
-                          type="time"
-                          value={todoDraftReminderTime}
-                          disabled={!todoDraftReminderEnabled}
-                          onChange={(event) => setTodoDraftReminderTime(event.target.value)}
-                        />
-                      </label>
+                      {todoDraftReminderEnabled && (
+                        <label className="input-label">
+                          <span>提醒时间</span>
+                          <input
+                            className="text-input"
+                            type="time"
+                            value={todoDraftReminderTime}
+                            onChange={(event) => setTodoDraftReminderTime(event.target.value)}
+                          />
+                        </label>
+                      )}
                     </div>
-                  </div>
-                )}
-              </div>
-            </div>
+                  </section>
+                </div>
 
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="button-secondary" type="button" onClick={closeTodoDialog}>
-                取消
-              </button>
-              <button className="button-primary" type="submit">
-                <Plus size={18} aria-hidden="true" />
-                添加
-              </button>
-            </div>
+                <div className="todo-dialog-actions mt-4 flex justify-between gap-2">
+                  <button className="button-secondary" type="button" onClick={returnToTodoDialogMain}>
+                    返回
+                  </button>
+                  <button className="button-primary" type="button" onClick={returnToTodoDialogMain}>
+                    完成
+                  </button>
+                </div>
+              </>
+            )}
           </form>
         </div>
       )}

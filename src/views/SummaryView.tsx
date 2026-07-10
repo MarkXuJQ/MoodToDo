@@ -18,10 +18,7 @@ type SummaryViewProps = {
   calendarCells: CalendarCell[]
   selectedDate: string
   selectedWeek: string
-  selectedWeekScore: number
   selectedWeekEntryCount: number
-  selectedWeekCompletionRate: number
-  selectedWeekDays: string[]
   entries: JournalEntry[]
   todos: TodoItem[]
   aiConfigured: boolean
@@ -58,10 +55,7 @@ export function SummaryView({
   calendarCells,
   selectedDate,
   selectedWeek,
-  selectedWeekScore,
   selectedWeekEntryCount,
-  selectedWeekCompletionRate,
-  selectedWeekDays,
   entries,
   todos,
   aiConfigured,
@@ -138,10 +132,11 @@ export function SummaryView({
             ))}
           </div>
 
-          <div className="grid grid-cols-7 gap-2">
+          <div className="summary-calendar-grid">
             {calendarCells.map((cell) => {
               const dayNumber = Number(cell.dateKey.slice(-2))
               const completion = getCompletionRate(cell.todos)
+              const completedTodoCount = cell.todos.filter((todo) => todo.done).length
 
               return (
                 <button
@@ -151,11 +146,11 @@ export function SummaryView({
                   onClick={() => onFocusDate(cell.dateKey)}
                   aria-label={`${cell.dateKey}，${cell.entry ? `心象分 ${cell.entry.mood.score}` : '未打卡'}，完成率 ${completion}%`}
                 >
-                  <span className="text-xs font-black">{dayNumber}</span>
-                  {cell.entry && <strong className="self-center text-lg font-black leading-none">{cell.entry.mood.score}</strong>}
+                  <span className="text-[11px] font-black">{dayNumber}</span>
+                  {cell.entry && <strong className="calendar-score-badge">{cell.entry.mood.score}</strong>}
                   {cell.todos.length > 0 && (
-                    <small className="calendar-todo-chip">
-                      {cell.todos.filter((todo) => todo.done).length}/{cell.todos.length}
+                    <small className="calendar-todo-chip" aria-label={`${completedTodoCount} 个 Todo 已完成，共 ${cell.todos.length} 个`}>
+                      ✓{completedTodoCount}
                     </small>
                   )}
                 </button>
@@ -259,35 +254,6 @@ export function SummaryView({
             />
           </div>
 
-          <div className="mb-3 grid gap-3 sm:grid-cols-3">
-            <Metric label="本周心象" value={`${selectedWeekScore || 0}`} />
-            <Metric label="本周打卡" value={`${selectedWeekEntryCount}/7`} />
-            <Metric label="事项完成" value={`${selectedWeekCompletionRate}%`} />
-          </div>
-
-          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-7 lg:grid-cols-2 xl:grid-cols-7">
-            {selectedWeekDays.map((dateKey) => {
-              const entry = entries.find((item) => item.dateKey === dateKey)
-              const dayItems = todos.filter((todo) => todo.dateKey === dateKey)
-
-              return (
-                <button
-                  className="week-day-card"
-                  type="button"
-                  key={dateKey}
-                  onClick={() => onFocusDate(dateKey)}
-                >
-                  <span className="text-xs font-black text-ink-950">{dateKey.slice(5)}</span>
-                  <strong className="text-xl font-black leading-none text-ink-950">{entry?.mood.score ?? '-'}</strong>
-                  <small className="truncate text-xs font-bold text-ink-400">{entry?.mood.quadrant ?? '未打卡'}</small>
-                  <em className="truncate text-xs not-italic font-bold text-ink-400">
-                    {dayItems.length ? `${dayItems.filter((todo) => todo.done).length}/${dayItems.length}` : '无事项'}
-                  </em>
-                </button>
-              )
-            })}
-          </div>
-
           <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-field-200 bg-field-50 p-3 text-sm font-bold text-ink-600">
             <Settings2 size={17} aria-hidden="true" />
             <span className="truncate">{aiConfigured ? `${aiModel} 已配置` : '在设置页配置大模型 API 后可生成周总结'}</span>
@@ -310,9 +276,9 @@ export function SummaryView({
           {summaryError && <p className="mb-3 rounded-lg border border-coral-500/30 bg-[#fff1ee] px-3 py-2 font-black text-coral-500">{summaryError}</p>}
 
           <label className="input-label">
-            <span>周总结</span>
+            <span>AI 周总结</span>
             <textarea
-              className="text-area min-h-56"
+              className="text-area summary-week-textarea min-h-56"
               value={summaryDraft}
               onChange={(event) => onSummaryDraftChange(event.target.value)}
               placeholder={selectedWeekEntryCount ? '生成后可继续手动修改。' : '本周还没有打卡记录。'}

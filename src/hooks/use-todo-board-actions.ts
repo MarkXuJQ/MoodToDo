@@ -11,12 +11,11 @@ import {
   type TodoDetailUpdate,
   type TodoItem,
 } from '../lib/db'
-import { completedTodoRetentionMs, getTodoCompletedAt, sortTodosByDateThenCreatedAt } from '../utils/todo'
+import { sortTodosByDateThenCreatedAt } from '../utils/todo'
 import { getErrorMessage } from '../utils/errors'
 import type { ToastState } from './use-toast'
 
 type UseTodoBoardActionsOptions = {
-  hasLoadedLocalState: boolean
   refreshCore: () => Promise<unknown>
   selectedDate: string
   setBoardLanes: Dispatch<SetStateAction<BoardLaneRecord[]>>
@@ -24,11 +23,9 @@ type UseTodoBoardActionsOptions = {
   setTodos: Dispatch<SetStateAction<TodoItem[]>>
   showToast: (message: string, tone?: ToastState['tone'], options?: { actionLabel?: string; onAction?: () => void; durationMs?: number }) => void
   todoTitle: string
-  todos: TodoItem[]
 }
 
 export const useTodoBoardActions = ({
-  hasLoadedLocalState,
   refreshCore,
   selectedDate,
   setBoardLanes,
@@ -36,10 +33,8 @@ export const useTodoBoardActions = ({
   setTodos,
   showToast,
   todoTitle,
-  todos,
 }: UseTodoBoardActionsOptions) => {
   const pendingTodoDeleteTimersRef = useRef<Map<string, number>>(new Map())
-  const completedTodoArchiveRef = useRef<Set<string>>(new Set())
 
   useEffect(
     () => () => {
@@ -49,51 +44,6 @@ export const useTodoBoardActions = ({
     },
     [],
   )
-
-  useEffect(() => {
-    if (!hasLoadedLocalState) return
-
-    const cutoff = Date.now() - completedTodoRetentionMs
-    const staleTodos = todos.filter((todo) => {
-      if (
-        !todo.done ||
-        todo.archivedAt ||
-        pendingTodoDeleteTimersRef.current.has(todo.id) ||
-        completedTodoArchiveRef.current.has(todo.id)
-      ) {
-        return false
-      }
-
-      const completedAt = getTodoCompletedAt(todo)
-
-      return completedAt != null && completedAt < cutoff
-    })
-
-    if (staleTodos.length === 0) return
-
-    for (const todo of staleTodos) {
-      completedTodoArchiveRef.current.add(todo.id)
-    }
-
-    void (async () => {
-      try {
-        const archivedTodos = await Promise.all(
-          staleTodos.map((todo) => updateTodoDetails(todo, { archived: true })),
-        )
-        const archivedById = new Map(archivedTodos.map((todo) => [todo.id, todo]))
-        setTodos((current) => current.map((todo) => archivedById.get(todo.id) ?? todo))
-        await refreshCore()
-        showToast(`已归档 ${staleTodos.length} 个 14 天前完成的事项`, 'info')
-      } catch (error) {
-        for (const todo of staleTodos) {
-          completedTodoArchiveRef.current.delete(todo.id)
-        }
-
-        const message = getErrorMessage(error, '自动归档已完成事项失败。')
-        showToast(message, 'error')
-      }
-    })()
-  }, [hasLoadedLocalState, refreshCore, setTodos, showToast, todos])
 
   const handleAddTodo = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -135,18 +85,6 @@ export const useTodoBoardActions = ({
       await refreshCore()
     } catch (error) {
       const message = getErrorMessage(error, '更新事项详情失败。')
-      showToast(message, 'error')
-    }
-  }
-
-  const handleArchiveTodo = async (todo: TodoItem, archived: boolean) => {
-    try {
-      const next = await updateTodoDetails(todo, { archived })
-      setTodos((current) => current.map((item) => (item.id === next.id ? next : item)))
-      await refreshCore()
-      showToast(archived ? '事项已归档' : '事项已恢复', 'success')
-    } catch (error) {
-      const message = getErrorMessage(error, archived ? '归档事项失败。' : '恢复事项失败。')
       showToast(message, 'error')
     }
   }
@@ -241,7 +179,6 @@ export const useTodoBoardActions = ({
     handleAddBoardLane,
     handleAddTodo,
     handleAddTodoWithDetails,
-    handleArchiveTodo,
     handleDeleteBoardLane,
     handleDeleteTodo,
     handleToggleTodo,

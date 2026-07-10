@@ -24,7 +24,7 @@ export function NavDrawer({
   onToggleCollapse,
 }: NavDrawerProps) {
   const compact = isDesktop && isCollapsed
-  const primaryItems = navigationItems.filter((item) => item.id !== 'settings')
+  const primaryItems = orderDesktopNavigationItems(navigationItems.filter((item) => item.id !== 'settings'))
   const settingsItem = navigationItems.find((item) => item.id === 'settings')
 
   return (
@@ -44,7 +44,7 @@ export function NavDrawer({
 
           {isDesktop && (
             <button
-              className="nav-collapse-button"
+              className={`nav-collapse-button ${compact ? 'nav-collapse-button-compact' : ''}`}
               type="button"
               aria-label={compact ? '展开侧栏' : '收起侧栏'}
               aria-expanded={!compact}
@@ -57,6 +57,7 @@ export function NavDrawer({
 
         <nav className="nav-list">
           {primaryItems.map((item) => {
+            const isGameEntry = item.id === 'garden'
             const icon =
               item.id === 'dashboard' ? (
                 <BarChart3 size={18} aria-hidden="true" />
@@ -74,7 +75,7 @@ export function NavDrawer({
 
             return (
               <button
-                className={`nav-link ${activeView === item.id ? 'nav-link-active' : ''} ${compact ? 'nav-link-compact' : ''}`}
+                className={`nav-link ${isGameEntry ? 'nav-link-game' : ''} ${activeView === item.id ? 'nav-link-active' : ''} ${compact ? 'nav-link-compact' : ''}`}
                 type="button"
                 key={item.id}
                 aria-label={item.label}
@@ -112,4 +113,15 @@ export function NavDrawer({
       </aside>
     </>
   )
+}
+
+function orderDesktopNavigationItems(primaryItems: NavItem[]) {
+  const gardenItem = primaryItems.find((item) => item.id === 'garden')
+
+  if (!gardenItem) return primaryItems
+
+  return [
+    gardenItem,
+    ...primaryItems.filter((item) => item.id !== 'garden'),
+  ]
 }

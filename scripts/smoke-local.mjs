@@ -110,6 +110,15 @@ const assert = (condition, message) => {
   if (!condition) throw new Error(message)
 }
 
+const getExpectedHeatColor = (score) => {
+  if (score < 35) return 'rgb(255, 242, 168)'
+  if (score < 50) return 'rgb(244, 211, 94)'
+  if (score < 66) return 'rgb(155, 233, 168)'
+  if (score < 82) return 'rgb(64, 196, 99)'
+
+  return 'rgb(33, 110, 57)'
+}
+
 spawnChild(process.execPath, [
   '--disable-warning=ExperimentalWarning',
   'server/local-api.mjs',
@@ -232,25 +241,16 @@ try {
   const todoMutation = await todoResponse.json()
   assert(todoResponse.ok, todoMutation.error ?? '隔离 Todo 写入失败。')
 
-  const archivedResponse = await apiFetch(`/api/todos/${encodeURIComponent(todoMutation.todo.id)}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ archived: true }),
-  })
-  const archivedMutation = await archivedResponse.json()
-  assert(archivedResponse.ok && archivedMutation.todo.archivedAt, 'Todo 归档失败。')
-
+  const secondTodoTitle = `分页 Todo ${suffix}`
   const secondTodoResponse = await apiFetch('/api/todos', {
     method: 'POST',
-    body: JSON.stringify({ dateKey: formatLocalDateKey(new Date(Date.now() + 86_400_000)), title: `分页 Todo ${suffix}` }),
+    body: JSON.stringify({ dateKey: formatLocalDateKey(new Date(Date.now() + 86_400_000)), title: secondTodoTitle }),
   })
   assert(secondTodoResponse.ok, '第二条隔离 Todo 写入失败。')
 
   const todoPage = await getJson('/api/todos?offset=0&limit=1')
   assert(todoPage.total === 2 && todoPage.items.length === 1, 'Todo 分页大小异常。')
   assert(todoPage.hasMore, 'Todo 分页应报告还有下一页。')
-
-  const archivedState = await getJson('/api/state')
-  assert(archivedState.counts.archivedTodos === 1, '归档计数没有更新。')
 
   browser = await chromium.launch({ headless: true, executablePath: chromePath })
   const context = await browser.newContext()
@@ -329,6 +329,27 @@ try {
   assert((await page.locator('.garden-achievements').innerText()).includes('第一粒心种'), '花园没有生成首次打卡成就。')
   assert((await page.locator('.garden-achievements').innerText()).includes('已获得'), '首次打卡成就没有解锁。')
 
+  await page.getByRole('button', { name: '记录', exact: true }).click()
+  await page.getByRole('heading', { name: '年度心象', exact: true }).waitFor({ state: 'visible' })
+  const yearHeatCell = page.getByRole('button', {
+    name: `${todayKey}，心象 ${updatedEntriesPage.items[0].mood.score}`,
+    exact: true,
+  })
+  assert(
+    (await yearHeatCell.evaluate((element) => getComputedStyle(element).backgroundColor)) ===
+      getExpectedHeatColor(updatedEntriesPage.items[0].mood.score),
+    '年度心象热力图没有使用绿色/黄色新色阶。',
+  )
+
+  await page.getByRole('button', { name: '回顾', exact: true }).click()
+  await page.getByRole('heading', { name: '心情日历', exact: true }).waitFor({ state: 'visible' })
+  const selectedCalendarCell = page.locator('.calendar-heat-cell-selected')
+  assert(
+    (await selectedCalendarCell.evaluate((element) => getComputedStyle(element).outlineColor)) ===
+      'rgb(227, 179, 65)',
+    '月历当前日期没有使用黄色选中描边。',
+  )
+
   await page.getByRole('button', { name: 'Todo', exact: true }).click()
   const addButton = page.getByRole('button', { name: '添加', exact: true })
   await addButton.focus()
@@ -341,6 +362,24 @@ try {
       '写下要推进的一件事',
     '添加 Todo 弹窗没有聚焦主要输入框。',
   )
+  assert((await addDialog.locator('textarea').count()) === 0, '添加 Todo 一级弹窗不应直接显示描述输入框。')
+  assert((await addDialog.locator('.todo-priority-slider').count()) === 0, '添加 Todo 一级弹窗不应直接显示高级设置。')
+  await addDialog.getByRole('button').filter({ hasText: '描述' }).click()
+  const descriptionDialog = page.getByRole('dialog', { name: '添加描述' })
+  await descriptionDialog.waitFor({ state: 'visible' })
+  assert((await descriptionDialog.locator('textarea').count()) === 1, '描述应在二级弹窗中编辑。')
+  await descriptionDialog.getByRole('button', { name: '完成', exact: true }).click()
+  await addDialog.waitFor({ state: 'visible' })
+  await addDialog.getByRole('button').filter({ hasText: '设置' }).click()
+  const optionsDialog = page.getByRole('dialog', { name: '事项设置' })
+  await optionsDialog.waitFor({ state: 'visible' })
+  assert((await optionsDialog.locator('.todo-priority-slider input[type="range"]').count()) === 1, '重要级应以滑块展示。')
+  assert((await optionsDialog.locator('select').count()) >= 1, '重复设置应使用规整选择控件。')
+  assert((await optionsDialog.locator('input[type="time"]').count()) === 0, '未开启本地提醒前不应显示时间输入。')
+  await optionsDialog.locator('.todo-form-row-inline input[type="checkbox"]').check()
+  assert((await optionsDialog.locator('input[type="time"]').count()) === 1, '开启本地提醒后应显示时间输入。')
+  await optionsDialog.getByRole('button', { name: '完成', exact: true }).click()
+  await addDialog.waitFor({ state: 'visible' })
   await page.keyboard.press('Escape')
   await addDialog.waitFor({ state: 'hidden' })
   assert(await addButton.evaluate((element) => element === document.activeElement), '关闭后没有恢复到添加按钮。')
@@ -355,10 +394,7 @@ try {
   await laneDialog.waitFor({ state: 'hidden' })
   assert(await laneButton.evaluate((element) => element === document.activeElement), '栏目弹窗关闭后没有恢复焦点。')
 
-  const archivedToggle = page.getByRole('button', { name: '归档 1' })
-  await archivedToggle.click()
-  const archivedRail = page.getByRole('button', { name: '1 已归档' })
-  await archivedRail.click()
+  assert((await page.getByRole('button', { name: /归档/ }).count()) === 0, '看板不应再显示归档入口。')
   const todoCard = page.locator('article.board-card').filter({ hasText: todoTitle })
   try {
     await todoCard.waitFor({ state: 'visible', timeout: 5_000 })

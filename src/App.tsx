@@ -151,13 +151,11 @@ function App() {
     handleAddBoardLane,
     handleAddTodo,
     handleAddTodoWithDetails,
-    handleArchiveTodo,
     handleDeleteBoardLane,
     handleDeleteTodo,
     handleToggleTodo,
     handleUpdateTodoDetails,
   } = useTodoBoardActions({
-    hasLoadedLocalState,
     refreshCore,
     selectedDate,
     setBoardLanes,
@@ -165,7 +163,6 @@ function App() {
     setTodos,
     showToast,
     todoTitle,
-    todos,
   })
 
   const {
@@ -192,10 +189,7 @@ function App() {
     selectedAttachments,
     selectedCountdownTodo,
     selectedMoodTrendIndex,
-    selectedWeekCompletionRate,
-    selectedWeekDays,
     selectedWeekEntries,
-    selectedWeekScore,
     selectedWeekSummary,
     selectedWeekTodos,
     visibleDashboardCards,
@@ -396,7 +390,6 @@ function App() {
           onUpdateTodoDetails={(todo, details) => void handleUpdateTodoDetails(todo, details)}
           onAddBoardLane={(label, colorId) => void handleAddBoardLane(label, colorId)}
           onDeleteBoardLane={(lane) => void handleDeleteBoardLane(lane)}
-          onArchiveTodo={(todo, archived) => void handleArchiveTodo(todo, archived)}
           onToggleTodo={(todo) => void handleToggleTodo(todo)}
           onDeleteTodo={(todo) => void handleDeleteTodo(todo)}
           onLoadMoreTodos={() => void loadMoreTodos()}
@@ -413,10 +406,7 @@ function App() {
           calendarCells={calendarCells}
           selectedDate={selectedDate}
           selectedWeek={selectedWeek}
-          selectedWeekScore={selectedWeekScore}
           selectedWeekEntryCount={selectedWeekEntries.length}
-          selectedWeekCompletionRate={selectedWeekCompletionRate}
-          selectedWeekDays={selectedWeekDays}
           entries={entries}
           todos={todos}
           aiConfigured={Boolean(aiConfig.apiKey)}
