@@ -17,6 +17,7 @@ const localApiProxy = {
 }
 
 export default defineConfig({
+  base: './',
   server: {
     host: 'localhost',
     port: 5173,

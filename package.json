@@ -1,7 +1,7 @@
 {
   "name": "xinxiangyi",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -24,6 +24,9 @@
   "build": {
     "appId": "com.markxu.xinxiangyi",
     "productName": "心象仪",
+    "compression": "maximum",
+    "npmRebuild": false,
+    "afterPack": "scripts/after-pack-electron.cjs",
     "directories": {
       "output": "release"
     },

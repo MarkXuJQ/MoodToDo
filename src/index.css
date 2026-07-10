@@ -1673,6 +1673,34 @@
     @apply cursor-not-allowed opacity-55;
   }
 
+  .todo-advanced-shell {
+    @apply grid gap-2;
+  }
+
+  .todo-advanced-toggle {
+    @apply grid min-h-12 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md border border-field-200 bg-field-50 px-3 text-left transition-colors hover:border-xin-700;
+  }
+
+  .todo-advanced-toggle > span {
+    @apply inline-flex min-w-0 items-center gap-2 text-sm font-black text-ink-950;
+  }
+
+  .todo-advanced-toggle > span svg {
+    @apply shrink-0 text-xin-700;
+  }
+
+  .todo-advanced-toggle > small {
+    @apply min-w-0 truncate text-right text-xs font-black text-ink-400;
+  }
+
+  .todo-advanced-panel {
+    @apply grid gap-3 rounded-md border border-field-200 bg-white/55 p-3;
+  }
+
+  .todo-option-grid {
+    @apply grid gap-2 sm:grid-cols-2;
+  }
+
   .todo-mini-meta {
     @apply flex min-w-0 flex-wrap items-center justify-end gap-2 text-[11px] font-black text-ink-400;
   }
@@ -2468,7 +2496,9 @@
   :root[data-theme='dark'] .board-detail-select,
   :root[data-theme='dark'] .board-drop-empty,
   :root[data-theme='dark'] .todo-inline-countdown,
-  :root[data-theme='dark'] .todo-repeat-option {
+  :root[data-theme='dark'] .todo-repeat-option,
+  :root[data-theme='dark'] .todo-advanced-toggle,
+  :root[data-theme='dark'] .todo-advanced-panel {
     border-color: rgba(126, 151, 142, 0.3);
     background-color: rgba(12, 20, 18, 0.56);
   }

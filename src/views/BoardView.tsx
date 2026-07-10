@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
-import { Bell, Check, Plus, Repeat2, Search, Trash2, X } from 'lucide-react'
+import { Bell, Check, Plus, Repeat2, Search, SlidersHorizontal, Trash2, X } from 'lucide-react'
 
 import { DatePickerButton } from '../components/ui/date-picker-button'
 import type { BoardLaneRecord, JournalEntry, TodoDetailUpdate, TodoItem, TodoPriority, TodoRepeatFrequency } from '../lib/db'
@@ -120,6 +120,7 @@ export function BoardView({
   onDeleteTodo,
 }: BoardViewProps) {
   const [isTodoDialogOpen, setIsTodoDialogOpen] = useState(false)
+  const [isTodoAdvancedOpen, setIsTodoAdvancedOpen] = useState(false)
   const [isLaneDialogOpen, setIsLaneDialogOpen] = useState(false)
   const [dialogTodoDate, setDialogTodoDate] = useState(selectedDate)
   const [todoDraftPriority, setTodoDraftPriority] = useState<TodoPriority>('normal')
@@ -146,6 +147,25 @@ export function BoardView({
   const [detailReminderEnabled, setDetailReminderEnabled] = useState(false)
   const [detailReminderTime, setDetailReminderTime] = useState('09:00')
   const activeTodoCount = filteredBoardTodos.filter((todo) => !todo.done).length
+  const todoDraftOptionSummary = useMemo(() => {
+    const summary = [
+      priorityOptions.find((option) => option.id === todoDraftPriority)?.label ?? '普通',
+      todoDraftBoardVisible ? '显示看板' : '隐藏看板',
+    ]
+
+    if (todoDraftCountdownEnabled) summary.push('倒计时')
+    if (todoDraftRepeatFrequency !== 'none') summary.push(getTodoRepeatLabel(todoDraftRepeatFrequency))
+    if (todoDraftReminderEnabled) summary.push(todoDraftReminderTime)
+
+    return summary.join(' · ')
+  }, [
+    todoDraftBoardVisible,
+    todoDraftCountdownEnabled,
+    todoDraftPriority,
+    todoDraftReminderEnabled,
+    todoDraftReminderTime,
+    todoDraftRepeatFrequency,
+  ])
 
   useEffect(() => {
     const handleResize = () => setVisibleLaneLimit(getVisibleLaneLimit())
@@ -337,6 +357,7 @@ export function BoardView({
     setTodoDraftBoardVisible(true)
     setTodoDraftReminderEnabled(false)
     setTodoDraftReminderTime('09:00')
+    setIsTodoAdvancedOpen(false)
     setIsTodoDialogOpen(true)
   }
 
@@ -746,7 +767,6 @@ export function BoardView({
           <form className="todo-dialog" aria-labelledby="todo-dialog-title" onSubmit={handleDialogTodoSubmit}>
             <div className="section-head mb-3">
               <div>
-                <p className="eyebrow">Todo</p>
                 <h3 className="section-title text-lg" id="todo-dialog-title">
                   添加事项
                 </h3>
@@ -787,84 +807,108 @@ export function BoardView({
                   rows={3}
                 />
               </label>
-              <label className="countdown-toggle">
-                <input
-                  type="checkbox"
-                  checked={todoDraftCountdownEnabled}
-                  onChange={(event) => setTodoDraftCountdownEnabled(event.target.checked)}
-                />
-                <span>
-                  <strong>开启倒计时</strong>
-                  <small>按上方 Todo 日期计算剩余天数</small>
-                </span>
-              </label>
-              <fieldset className="todo-repeat-field">
-                <legend>重复</legend>
-                <div className="todo-repeat-options">
-                  {repeatOptions.map((option) => (
-                    <button
-                      className={`todo-repeat-option ${todoDraftRepeatFrequency === option.id ? 'todo-repeat-option-active' : ''}`}
-                      type="button"
-                      aria-pressed={todoDraftRepeatFrequency === option.id}
-                      key={option.id}
-                      onClick={() => handleTodoDraftRepeatChange(option.id)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-              <label className="todo-toggle-row">
-                <input
-                  type="checkbox"
-                  checked={todoDraftBoardVisible}
-                  onChange={(event) => setTodoDraftBoardVisible(event.target.checked)}
-                />
-                <span>
-                  <strong>显示在看板</strong>
-                  <small>{todoDraftBoardVisible ? '已显示' : '已隐藏'}</small>
-                </span>
-              </label>
-              <div className="todo-reminder-grid">
-                <label className="todo-toggle-row">
-                  <input
-                    type="checkbox"
-                    checked={todoDraftReminderEnabled}
-                    onChange={(event) => setTodoDraftReminderEnabled(event.target.checked)}
-                  />
+              <div className="todo-advanced-shell">
+                <button
+                  className="todo-advanced-toggle"
+                  type="button"
+                  aria-expanded={isTodoAdvancedOpen}
+                  onClick={() => setIsTodoAdvancedOpen((current) => !current)}
+                >
                   <span>
-                    <strong>本地提醒</strong>
-                    <small>{todoDraftReminderEnabled ? todoDraftReminderTime : '未开启'}</small>
+                    <SlidersHorizontal size={16} aria-hidden="true" />
+                    <strong>更多设置</strong>
                   </span>
-                </label>
-                <label className="input-label">
-                  <span>时间</span>
-                  <input
-                    className="text-input"
-                    type="time"
-                    value={todoDraftReminderTime}
-                    disabled={!todoDraftReminderEnabled}
-                    onChange={(event) => setTodoDraftReminderTime(event.target.value)}
-                  />
-                </label>
+                  <small>{todoDraftOptionSummary}</small>
+                </button>
+
+                {isTodoAdvancedOpen && (
+                  <div className="todo-advanced-panel">
+                    <fieldset className="todo-priority-field">
+                      <legend>重要级</legend>
+                      <div className="todo-priority-options">
+                        {priorityOptions.map((option) => (
+                          <button
+                            className={`todo-priority-option todo-priority-option-${option.id} ${todoDraftPriority === option.id ? 'todo-priority-option-active' : ''}`}
+                            type="button"
+                            aria-pressed={todoDraftPriority === option.id}
+                            key={option.id}
+                            onClick={() => setTodoDraftPriority(option.id)}
+                          >
+                            <span aria-hidden="true">{option.shortLabel}</span>
+                            <small>{option.label}</small>
+                          </button>
+                        ))}
+                      </div>
+                    </fieldset>
+
+                    <div className="todo-option-grid">
+                      <label className="countdown-toggle">
+                        <input
+                          type="checkbox"
+                          checked={todoDraftCountdownEnabled}
+                          onChange={(event) => setTodoDraftCountdownEnabled(event.target.checked)}
+                        />
+                        <span>
+                          <strong>倒计时</strong>
+                          <small>按日期计算</small>
+                        </span>
+                      </label>
+                      <label className="todo-toggle-row">
+                        <input
+                          type="checkbox"
+                          checked={todoDraftBoardVisible}
+                          onChange={(event) => setTodoDraftBoardVisible(event.target.checked)}
+                        />
+                        <span>
+                          <strong>看板</strong>
+                          <small>{todoDraftBoardVisible ? '显示' : '隐藏'}</small>
+                        </span>
+                      </label>
+                    </div>
+
+                    <fieldset className="todo-repeat-field">
+                      <legend>重复</legend>
+                      <div className="todo-repeat-options">
+                        {repeatOptions.map((option) => (
+                          <button
+                            className={`todo-repeat-option ${todoDraftRepeatFrequency === option.id ? 'todo-repeat-option-active' : ''}`}
+                            type="button"
+                            aria-pressed={todoDraftRepeatFrequency === option.id}
+                            key={option.id}
+                            onClick={() => handleTodoDraftRepeatChange(option.id)}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </fieldset>
+
+                    <div className="todo-reminder-grid">
+                      <label className="todo-toggle-row">
+                        <input
+                          type="checkbox"
+                          checked={todoDraftReminderEnabled}
+                          onChange={(event) => setTodoDraftReminderEnabled(event.target.checked)}
+                        />
+                        <span>
+                          <strong>本地提醒</strong>
+                          <small>{todoDraftReminderEnabled ? todoDraftReminderTime : '未开启'}</small>
+                        </span>
+                      </label>
+                      <label className="input-label">
+                        <span>时间</span>
+                        <input
+                          className="text-input"
+                          type="time"
+                          value={todoDraftReminderTime}
+                          disabled={!todoDraftReminderEnabled}
+                          onChange={(event) => setTodoDraftReminderTime(event.target.value)}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
               </div>
-              <fieldset className="todo-priority-field">
-                <legend>重要级</legend>
-                <div className="todo-priority-options">
-                  {priorityOptions.map((option) => (
-                    <button
-                      className={`todo-priority-option todo-priority-option-${option.id} ${todoDraftPriority === option.id ? 'todo-priority-option-active' : ''}`}
-                      type="button"
-                      aria-pressed={todoDraftPriority === option.id}
-                      key={option.id}
-                      onClick={() => setTodoDraftPriority(option.id)}
-                    >
-                      <span aria-hidden="true">{option.shortLabel}</span>
-                      <small>{option.label}</small>
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
             </div>
 
             <div className="mt-4 flex justify-end gap-2">

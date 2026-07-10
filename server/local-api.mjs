@@ -175,27 +175,32 @@ db.exec(`
     FOREIGN KEY(metric_id) REFERENCES metric_definitions(id) ON DELETE CASCADE
   );
 
-  CREATE INDEX IF NOT EXISTS idx_entries_date_key ON entries(date_key);
-  CREATE INDEX IF NOT EXISTS idx_todos_date_key ON todos(date_key);
-  CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
-  CREATE INDEX IF NOT EXISTS idx_todos_lane_done_created_at ON todos(lane_id, done, created_at);
-  CREATE INDEX IF NOT EXISTS idx_todos_date_done ON todos(date_key, done);
-  CREATE INDEX IF NOT EXISTS idx_todos_repeat_group_date ON todos(repeat_group_id, date_key);
-  CREATE INDEX IF NOT EXISTS idx_attachments_entry_id ON attachments(entry_id);
-  CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
-  CREATE INDEX IF NOT EXISTS idx_board_lanes_created_at ON board_lanes(created_at);
-  CREATE INDEX IF NOT EXISTS idx_changes_changed_at ON changes(changed_at);
-  CREATE INDEX IF NOT EXISTS idx_changes_sync_state ON changes(sync_state);
-  CREATE INDEX IF NOT EXISTS idx_changes_entity_id_changed_at ON changes(entity, entity_id, changed_at);
-  CREATE INDEX IF NOT EXISTS idx_weekly_summaries_updated_at ON weekly_summaries(updated_at);
-  CREATE INDEX IF NOT EXISTS idx_metric_records_metric_id ON metric_records(metric_id);
-  CREATE INDEX IF NOT EXISTS idx_metric_records_date_key ON metric_records(date_key);
 `)
 
 const ensureColumn = (table, column, definition) => {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all()
   if (columns.some((item) => item.name === column)) return
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`)
+}
+
+const createIndexes = () => {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_entries_date_key ON entries(date_key);
+    CREATE INDEX IF NOT EXISTS idx_todos_date_key ON todos(date_key);
+    CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
+    CREATE INDEX IF NOT EXISTS idx_todos_lane_done_created_at ON todos(lane_id, done, created_at);
+    CREATE INDEX IF NOT EXISTS idx_todos_date_done ON todos(date_key, done);
+    CREATE INDEX IF NOT EXISTS idx_todos_repeat_group_date ON todos(repeat_group_id, date_key);
+    CREATE INDEX IF NOT EXISTS idx_attachments_entry_id ON attachments(entry_id);
+    CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at);
+    CREATE INDEX IF NOT EXISTS idx_board_lanes_created_at ON board_lanes(created_at);
+    CREATE INDEX IF NOT EXISTS idx_changes_changed_at ON changes(changed_at);
+    CREATE INDEX IF NOT EXISTS idx_changes_sync_state ON changes(sync_state);
+    CREATE INDEX IF NOT EXISTS idx_changes_entity_id_changed_at ON changes(entity, entity_id, changed_at);
+    CREATE INDEX IF NOT EXISTS idx_weekly_summaries_updated_at ON weekly_summaries(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_metric_records_metric_id ON metric_records(metric_id);
+    CREATE INDEX IF NOT EXISTS idx_metric_records_date_key ON metric_records(date_key);
+  `)
 }
 
 ensureColumn('entries', 'weather_text', `weather_text TEXT NOT NULL DEFAULT ''`)
@@ -210,6 +215,7 @@ ensureColumn('todos', 'board_visible', `board_visible INTEGER NOT NULL DEFAULT 1
 ensureColumn('todos', 'reminder_enabled', `reminder_enabled INTEGER NOT NULL DEFAULT 0`)
 ensureColumn('todos', 'reminder_time', `reminder_time TEXT NOT NULL DEFAULT '09:00'`)
 ensureColumn('changes', 'payload_json', `payload_json TEXT NOT NULL DEFAULT 'null'`)
+createIndexes()
 db.prepare(`UPDATE changes SET payload_json = ? WHERE payload_json <> ?`).run(
   compactChangePayloadJson,
   compactChangePayloadJson,
@@ -1632,6 +1638,7 @@ const pullWebDavSnapshot = async (request, response) => {
       ensureColumn('todos', 'board_visible', `board_visible INTEGER NOT NULL DEFAULT 1`)
       ensureColumn('todos', 'reminder_enabled', `reminder_enabled INTEGER NOT NULL DEFAULT 0`)
       ensureColumn('todos', 'reminder_time', `reminder_time TEXT NOT NULL DEFAULT '09:00'`)
+      createIndexes()
       db.exec(`PRAGMA user_version = ${schemaVersion}`)
     } catch (error) {
       if (existsSync(backupPath)) {

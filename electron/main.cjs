@@ -73,6 +73,17 @@ const createWindow = async () => {
     void shell.openExternal(url)
     return { action: 'deny' }
   })
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    log('renderer failed to load', { errorCode, errorDescription, validatedURL })
+  })
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    log('renderer process gone', details)
+  })
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level >= 2) {
+      log('renderer console', { level, message, line, sourceId })
+    }
+  })
 
   if (process.env.ELECTRON_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.ELECTRON_DEV_SERVER_URL)
