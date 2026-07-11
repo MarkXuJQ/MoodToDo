@@ -9,6 +9,7 @@ export type GameEngineSettings = {
 export type GardenPlantKind = 'moonFern' | 'windBell' | 'dewBud' | 'sunBloom'
 
 export type GameEngineDaySample = {
+  entryId: string
   dateKey: string
   moodScore: number
   moodLevel: string
@@ -112,7 +113,7 @@ export const defaultGameEngineSettings: GameEngineSettings = {
 }
 
 const phaseThresholds = [0, 80, 190, 340, 540, 800, 1120, 1520]
-const phaseNames = ['一粒心种', '初生嫩芽', '枝叶渐丰', '含苞时节', '心花盛放', '四季花园', '星光秘境', '长青之庭']
+const phaseNames = ['一粒心种', '初生嫩芽', '枝叶渐丰', '含苞时节', '林间盛放', '四季森林', '星光秘境', '长青之庭']
 
 const plantProfiles: Record<
   string,
@@ -123,7 +124,7 @@ const plantProfiles: Record<
     name: '守夜蕨',
     color: '#7d72c8',
     climate: '静夜细雨',
-    climateNote: '低落不是失败。花园正在替你收住今天的重量。',
+    climateNote: '低落不是失败。森林正在替你收住今天的重量。',
   },
   高能紧绷: {
     kind: 'windBell',
@@ -276,6 +277,7 @@ export const createGameEngineSnapshot = (
     const profile = plantProfiles[entry.mood.quadrant] ?? defaultPlantProfile
 
     return {
+      entryId: entry.id,
       dateKey: entry.dateKey,
       moodScore: entry.mood.score,
       moodLevel: entry.mood.level,

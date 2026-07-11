@@ -279,7 +279,7 @@ export function SettingsView({
                 <section className="section" aria-labelledby="overview-engine-title">
                   <div className="section-head">
                     <div>
-                      <p className="eyebrow">Game Adapter</p>
+                      <p className="eyebrow">Growth Adapter</p>
                       <h2 className="section-title" id="overview-engine-title">
                         引擎快照
                       </h2>
@@ -301,7 +301,7 @@ export function SettingsView({
                   </div>
 
                   <p className="note mt-3">
-                    心象花园已经在应用内消费这份稳定快照；外部引擎仍可继续读取同一份数据契约。
+                    成长系统已经在应用内消费这份稳定快照；外部引擎仍可继续读取同一份数据契约。
                   </p>
 
                   <button className="button-secondary mt-3 min-h-9 px-3" type="button" onClick={() => handleSettingsSectionChange('engine')}>
@@ -635,9 +635,9 @@ export function SettingsView({
             <section className="section" aria-labelledby="engine-settings-title">
               <div className="section-head">
                 <div>
-                  <p className="eyebrow">Game Engine Adapter</p>
+                  <p className="eyebrow">Growth Engine Adapter</p>
                   <h2 className="section-title" id="engine-settings-title">
-                    游戏引擎接口
+                    成长引擎接口
                   </h2>
                 </div>
                 <span className="section-icon">
@@ -646,9 +646,9 @@ export function SettingsView({
               </div>
 
               <div className="rounded-lg border border-field-200 bg-field-50 p-3">
-                <strong>心象花园已接入应用。</strong>
+                <strong>成长系统已接入应用。</strong>
                 <p className="m-0 mt-1 text-sm font-bold text-ink-600">
-                  当前内置花园和未来 Phaser、Pixi、Three.js 或 WebAssembly/Godot 引擎共用同一份快照。游戏进度由日记和心象数据推导，不需要维护第二份云端存档。
+                  当前内置成长页和未来 Phaser、Pixi、Three.js 或 WebAssembly/Godot 引擎共用同一份快照。成长进度由日记和心象数据推导，不需要维护第二份云端存档。
                 </p>
               </div>
 

@@ -5,11 +5,12 @@ import type { ActiveView, NavItem } from '../../types/app'
 
 type BottomNavProps = {
   activeView: ActiveView
+  immersive?: boolean
   navigationItems: NavItem[]
   onNavigate: (view: ActiveView) => void
 }
 
-export function BottomNav({ activeView, navigationItems, onNavigate }: BottomNavProps) {
+export function BottomNav({ activeView, immersive = false, navigationItems, onNavigate }: BottomNavProps) {
   const primaryItems = orderBottomNavigationItems(navigationItems)
   const [gamePressPhase, setGamePressPhaseState] = useState<'idle' | 'pressing' | 'releasing'>('idle')
   const gamePressPhaseRef = useRef(gamePressPhase)
@@ -46,7 +47,7 @@ export function BottomNav({ activeView, navigationItems, onNavigate }: BottomNav
   useEffect(() => clearReleaseTimer, [])
 
   return (
-    <nav className="bottom-nav" aria-label="底部主导航" style={{ gridTemplateColumns: `repeat(${primaryItems.length}, minmax(0, 1fr))` }}>
+    <nav className={`bottom-nav ${immersive ? 'bottom-nav-immersive' : ''}`} aria-label="底部主导航" style={{ gridTemplateColumns: `repeat(${primaryItems.length}, minmax(0, 1fr))` }}>
       {primaryItems.map((item) => {
         const isActive = activeView === item.id
         const isGameEntry = item.id === 'garden'
@@ -84,7 +85,7 @@ export function BottomNav({ activeView, navigationItems, onNavigate }: BottomNav
             onPointerUp={isGameEntry ? releaseGamePress : undefined}
           >
             {icon}
-            <span>{isGameEntry ? '花园' : item.label}</span>
+            <span>{item.label}</span>
           </button>
         )
       })}

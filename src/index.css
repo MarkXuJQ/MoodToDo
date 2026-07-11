@@ -131,6 +131,33 @@
     @apply relative z-10 mx-auto w-full max-w-[1320px] px-4 pb-10 sm:px-6 lg:px-8;
   }
 
+  .shell-growth {
+    background: #16251d;
+  }
+
+  .app-shell-growth {
+    @apply fixed inset-0 block overflow-hidden;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    height: var(--app-viewport-height, 100dvh);
+  }
+
+  .app-shell-growth .content-shell {
+    @apply h-svh overflow-y-auto;
+    height: 100vh;
+    height: 100dvh;
+    height: var(--app-viewport-height, 100dvh);
+    max-height: 100vh;
+    max-height: 100dvh;
+    max-height: var(--app-viewport-height, 100dvh);
+    overscroll-behavior: contain;
+  }
+
+  .app-shell-growth .page {
+    @apply max-w-none px-0 pb-0;
+  }
+
   .app-shell-desktop-nav .page {
     @apply px-5 lg:px-8;
   }
@@ -380,6 +407,12 @@
     align-items: center;
     bottom: max(0.45rem, env(safe-area-inset-bottom));
     min-height: 3.45rem;
+  }
+
+  .bottom-nav-immersive {
+    @apply border-[#41663e] bg-[#f6f0cf]/92 shadow-[0_12px_0_rgba(48,75,45,0.22),0_24px_60px_rgba(0,0,0,0.28)] lg:grid;
+    left: max(0.75rem, calc(50% - 320px));
+    right: max(0.75rem, calc(50% - 320px));
   }
 
   .garden-page {
@@ -670,6 +703,389 @@
   .garden-achievement p,
   .garden-achievement small {
     @apply mt-1 text-xs font-bold leading-5 text-ink-400;
+  }
+
+  .garden-page-game {
+    @apply min-h-svh gap-4 px-3 pb-24 pt-3 text-[#233326] sm:px-5 lg:px-7;
+    background:
+      linear-gradient(180deg, rgba(22, 37, 29, 0.88), rgba(28, 51, 35, 0.66)),
+      radial-gradient(circle at 18% 8%, rgba(255, 231, 151, 0.24), transparent 28%),
+      linear-gradient(180deg, #2f5f45 0%, #618b4f 42%, #a8864d 100%);
+    image-rendering: pixelated;
+  }
+
+  .garden-hud {
+    @apply mx-auto grid w-full max-w-[1440px] gap-3 rounded-md border-4 border-[#314d32] bg-[#f3eac4] p-3 shadow-[0_8px_0_#213621,0_18px_40px_rgba(0,0,0,0.22)] md:grid-cols-[minmax(0,1fr)_auto] md:items-center;
+  }
+
+  .garden-title-block h1 {
+    @apply text-2xl font-black tracking-tight text-[#172717] sm:text-3xl;
+  }
+
+  .garden-title-block > span {
+    @apply mt-1 block text-sm font-black text-[#59634a];
+  }
+
+  .garden-hud-pills {
+    @apply grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-end;
+  }
+
+  .garden-hud-pill {
+    @apply inline-flex min-h-10 items-center justify-center gap-1 rounded-sm border-2 border-[#44643e] bg-[#fff8d9] px-2 text-xs font-black text-[#31452d] shadow-[0_3px_0_#b7a86d] sm:px-3 sm:text-sm;
+  }
+
+  button.garden-hud-pill {
+    @apply transition-transform active:translate-y-0.5 active:shadow-[0_1px_0_#b7a86d];
+  }
+
+  .garden-hud-pill-coins {
+    @apply bg-[#ffe082] text-[#65460e];
+  }
+
+  .garden-achievement-entry {
+    @apply bg-[#fff4bc] text-[#6a4a0f];
+  }
+
+  .garden-game-layout {
+    @apply mx-auto grid w-full max-w-[1440px] gap-4 xl:grid-cols-[minmax(0,1fr)_360px];
+  }
+
+  .garden-scene-card,
+  .garden-command-card,
+  .garden-panel-card {
+    @apply relative overflow-hidden rounded-md border-4 border-[#314d32] bg-[#f3eac4] shadow-[0_8px_0_#213621,0_22px_48px_rgba(0,0,0,0.22)];
+  }
+
+  .garden-scene-card {
+    @apply min-h-[620px] p-3 sm:p-4;
+    background:
+      linear-gradient(180deg, rgba(175, 221, 218, 0.96) 0%, rgba(210, 226, 166, 0.95) 34%, rgba(100, 154, 78, 0.96) 35%, rgba(70, 124, 64, 0.98) 100%);
+  }
+
+  .garden-weather-rain .garden-scene-card {
+    background:
+      linear-gradient(180deg, rgba(109, 137, 154, 0.96) 0%, rgba(143, 164, 155, 0.95) 34%, rgba(75, 122, 86, 0.96) 35%, rgba(50, 88, 67, 0.98) 100%);
+  }
+
+  .garden-weather-dew .garden-scene-card {
+    background:
+      linear-gradient(180deg, rgba(196, 232, 221, 0.96) 0%, rgba(216, 237, 183, 0.95) 34%, rgba(111, 171, 108, 0.96) 35%, rgba(70, 132, 83, 0.98) 100%);
+  }
+
+  .garden-weather-wind .garden-scene-card {
+    background:
+      linear-gradient(180deg, rgba(179, 203, 207, 0.96) 0%, rgba(205, 216, 159, 0.95) 34%, rgba(109, 151, 84, 0.96) 35%, rgba(72, 109, 62, 0.98) 100%);
+  }
+
+  .garden-weather-sun .garden-scene-card {
+    background:
+      linear-gradient(180deg, rgba(194, 231, 236, 0.96) 0%, rgba(244, 225, 145, 0.95) 34%, rgba(128, 177, 80, 0.96) 35%, rgba(83, 137, 65, 0.98) 100%);
+  }
+
+  .garden-scene-sky {
+    @apply pointer-events-none absolute inset-0 overflow-hidden;
+  }
+
+  .garden-weather-lines {
+    @apply absolute inset-x-0 top-0 h-full opacity-0;
+    background-image: repeating-linear-gradient(105deg, rgba(255,255,255,0.38) 0 2px, transparent 2px 28px);
+  }
+
+  .garden-weather-rain .garden-weather-lines,
+  .garden-weather-wind .garden-weather-lines {
+    @apply opacity-45;
+  }
+
+  .garden-scene-head {
+    @apply relative z-10 flex items-start justify-between gap-3 rounded-sm border-2 border-[#40643b] bg-[#fff5cf]/80 p-3 text-[#223323] shadow-[0_4px_0_rgba(49,77,50,0.35)];
+  }
+
+  .garden-scene-head > span {
+    @apply rounded-sm bg-[#2f5131] px-2 py-1 text-xs font-black text-[#fff4bc];
+  }
+
+  .garden-board {
+    @apply relative z-10 mx-auto mt-10 grid max-w-[780px] grid-cols-6 gap-1 rounded-md border-4 border-[#4b6438] bg-[#38562f] p-2 shadow-[inset_0_0_0_4px_rgba(255,255,255,0.08),0_16px_35px_rgba(35,55,30,0.28)];
+  }
+
+  .garden-cell {
+    @apply relative aspect-square min-h-14 overflow-hidden rounded-sm border-2 border-[#557241] bg-[#79a857] text-[#f7edc4] sm:min-h-20;
+    box-shadow: inset 0 -5px 0 rgba(47, 76, 39, 0.25);
+  }
+
+  .garden-cell:nth-child(2n) {
+    @apply bg-[#86b964];
+  }
+
+  .garden-cell-locked {
+    @apply grid place-items-center border-[#46513a] bg-[#45523d] text-[#c9c0a0] opacity-70;
+  }
+
+  .garden-cell-ground {
+    @apply absolute inset-2 rounded-sm border border-[#9ac574]/60 bg-[#6f9d4f]/70;
+  }
+
+  .garden-cell-plant {
+    @apply absolute inset-0 grid place-items-center bg-transparent p-0 text-center text-[10px] font-black text-[#173018];
+  }
+
+  .garden-cell-plant-selected {
+    @apply outline outline-4 outline-[#ffe082];
+  }
+
+  .garden-cell-plant > span:last-child {
+    @apply absolute inset-x-1 bottom-1 truncate rounded-sm bg-[#fff6cf]/82 px-1 py-0.5;
+  }
+
+  .garden-cell .garden-plant-figure {
+    @apply h-16 w-14 sm:h-20 sm:w-16;
+  }
+
+  .garden-cell .garden-plant-glow {
+    @apply top-3 size-11 sm:size-14;
+  }
+
+  .garden-cell .garden-plant-stem {
+    @apply bottom-4;
+    height: calc(1.45rem + var(--growth-stage, 1) * 0.32rem);
+  }
+
+  .garden-cell .garden-plant-leaf {
+    @apply bottom-8 h-4 w-7 sm:h-5 sm:w-9;
+  }
+
+  .garden-cell .garden-plant-bloom {
+    @apply top-2 size-9 sm:size-11;
+  }
+
+  .garden-cell .garden-plant-bloom i {
+    @apply h-4 w-3 sm:h-5 sm:w-3.5;
+  }
+
+  .garden-cell .garden-plant-bloom b {
+    @apply size-3 sm:size-4;
+  }
+
+  .garden-cell .garden-plant-soil {
+    @apply bottom-2 h-3 w-11;
+  }
+
+  .garden-command-card {
+    @apply grid content-start gap-3 p-3;
+  }
+
+  .garden-command-primary {
+    @apply grid gap-1 rounded-sm border-2 border-[#d0bd79] bg-[#fff8d9] p-2;
+  }
+
+  .garden-command-primary small {
+    @apply px-1 text-xs font-black text-[#6f6848];
+  }
+
+  .garden-pixel-button,
+  .garden-expand-button {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-sm border-2 border-[#30562d] bg-[#92d36a] px-3 text-sm font-black text-[#173018] shadow-[0_4px_0_#30562d] transition-transform active:translate-y-1 active:shadow-[0_1px_0_#30562d];
+  }
+
+  .garden-pixel-button-gold {
+    @apply border-[#765819] bg-[#ffd45f] text-[#5b3f0c] shadow-[0_4px_0_#765819] active:shadow-[0_1px_0_#765819];
+  }
+
+  .garden-feedback {
+    @apply rounded-sm border-2 border-[#40643b] bg-[#253c29] p-3 text-sm font-black leading-6 text-[#fff1b4];
+  }
+
+  .garden-card-head {
+    @apply mb-2 flex items-center justify-between gap-2;
+  }
+
+  .garden-card-head strong {
+    @apply text-sm font-black text-[#172717];
+  }
+
+  .garden-card-head span {
+    @apply rounded-sm bg-[#314d32] px-2 py-0.5 text-xs font-black text-[#fff4bc];
+  }
+
+  .garden-merge-list,
+  .garden-selected-card,
+  .garden-panel-body article {
+    @apply rounded-sm border-2 border-[#d0bd79] bg-[#fff8d9] p-3;
+  }
+
+  .garden-merge-button {
+    @apply mb-2 grid w-full gap-0.5 rounded-sm border-2 border-[#7da15e] bg-[#eef7bf] p-2 text-left text-xs font-black text-[#2e4528] shadow-[0_3px_0_#7da15e];
+  }
+
+  .garden-merge-button strong {
+    @apply text-[#93690b];
+  }
+
+  .garden-muted {
+    @apply m-0 text-xs font-black leading-5 text-[#756b4d];
+  }
+
+  .garden-selected-card {
+    @apply grid gap-3 sm:grid-cols-[96px_minmax(0,1fr)] xl:grid-cols-1;
+  }
+
+  .garden-selected-card h3 {
+    @apply text-lg font-black text-[#172717];
+  }
+
+  .garden-selected-card p {
+    @apply m-0 mt-1 text-xs font-black leading-5 text-[#59634a];
+  }
+
+  .garden-selected-actions {
+    @apply mt-3 flex flex-wrap gap-2;
+  }
+
+  .garden-selected-empty {
+    @apply col-span-full grid place-items-center gap-1 py-4 text-center text-[#59634a];
+  }
+
+  .garden-selected-empty strong {
+    @apply text-base font-black text-[#172717];
+  }
+
+  .garden-selected-empty span {
+    @apply text-xs font-black;
+  }
+
+  .garden-expand-button {
+    @apply w-full bg-[#c7e38c];
+  }
+
+  .garden-storage-upgrade-button {
+    @apply mt-3;
+  }
+
+  .garden-panel-card {
+    @apply mx-auto w-full max-w-[1440px] p-3;
+  }
+
+  .garden-panel-tabs {
+    @apply grid grid-cols-3 gap-2;
+  }
+
+  .garden-panel-tabs button {
+    @apply min-h-10 rounded-sm border-2 border-[#40643b] bg-[#d7c78a] text-sm font-black text-[#31452d] shadow-[0_3px_0_#40643b];
+  }
+
+  .garden-panel-tabs .garden-panel-tab-active {
+    @apply translate-y-0.5 bg-[#fff4bc] shadow-[0_1px_0_#40643b];
+  }
+
+  .garden-panel-body {
+    @apply mt-3;
+  }
+
+  .garden-inventory-grid {
+    @apply grid gap-3 lg:grid-cols-2;
+  }
+
+  .garden-seed-list,
+  .garden-storage-list {
+    @apply grid gap-2 sm:grid-cols-2;
+  }
+
+  .garden-seed-box,
+  .garden-storage-plant {
+    @apply flex min-h-14 items-center gap-2 rounded-sm border-2 border-[#d0bd79] bg-[#fffdf0] p-2 text-left font-black text-[#31452d] shadow-[0_3px_0_#d0bd79];
+  }
+
+  .garden-seed-box small {
+    @apply block text-xs text-[#756b4d];
+  }
+
+  .garden-storage-plant .garden-plant-figure {
+    @apply h-12 w-12 shrink-0;
+  }
+
+  .garden-storage-plant .garden-plant-stem {
+    height: calc(1.2rem + var(--growth-stage, 1) * 0.26rem);
+  }
+
+  .garden-codex-grid {
+    @apply grid gap-2 sm:grid-cols-3 lg:grid-cols-5;
+  }
+
+  .garden-codex-node {
+    @apply grid min-h-32 place-items-center gap-1 rounded-sm border-2 border-[#d0bd79] bg-[#d8cfaa] p-3 text-center opacity-75;
+  }
+
+  .garden-codex-node-discovered {
+    @apply bg-[#fff8d9] opacity-100;
+  }
+
+  .garden-codex-sprite {
+    @apply grid size-10 place-items-center rounded-sm border-2 border-[#40643b] bg-[#314d32] text-[#fff4bc];
+  }
+
+  .garden-codex-node-discovered .garden-codex-sprite {
+    background: var(--plant-color);
+  }
+
+  .garden-codex-node strong {
+    @apply text-sm font-black text-[#172717];
+  }
+
+  .garden-codex-node small,
+  .garden-codex-node em {
+    @apply text-xs not-italic font-black text-[#756b4d];
+  }
+
+  .garden-page-game .garden-achievement-grid {
+    @apply grid gap-2 md:grid-cols-2 xl:grid-cols-4;
+  }
+
+  .garden-page-game .garden-achievement {
+    @apply min-h-28 border-2 border-[#d0bd79] bg-[#d8cfaa] opacity-75;
+  }
+
+  .garden-page-game .garden-achievement-unlocked {
+    @apply bg-[#fff8d9] opacity-100;
+  }
+
+  .garden-page-game .garden-achievement-icon {
+    @apply rounded-sm border-2 border-[#40643b] bg-[#314d32] text-[#fff4bc];
+  }
+
+  .garden-footer-note {
+    @apply mx-auto flex w-full max-w-[1440px] items-center justify-center gap-2 rounded-sm border-2 border-[#314d32] bg-[#f3eac4] p-3 text-center text-xs font-black text-[#59634a];
+  }
+
+  .garden-plant-family-moon .garden-plant-leaf {
+    @apply bg-[#6d78ad];
+  }
+
+  .garden-plant-family-moon .garden-plant-bloom {
+    @apply opacity-85;
+  }
+
+  .garden-plant-family-dew .garden-plant-bloom b {
+    @apply bg-[#d6fff4];
+  }
+
+  .garden-plant-family-sun .garden-plant-bloom {
+    @apply scale-105;
+  }
+
+  .garden-plant-bloom i {
+    background: var(--plant-color);
+  }
+
+  .garden-plant-bloom b {
+    background: var(--plant-accent);
+  }
+
+  .garden-plant-stage-5 {
+    --growth-stage: 5;
+  }
+
+  .garden-plant-stage-5 .garden-plant-bloom {
+    @apply scale-125;
   }
 
   .bottom-nav-item {

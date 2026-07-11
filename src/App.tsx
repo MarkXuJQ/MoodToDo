@@ -11,6 +11,7 @@ import { useAppPreferences } from './hooks/use-app-preferences'
 import { useAppDerivedState } from './hooks/use-app-derived-state'
 import { useJournalActions } from './hooks/use-journal-actions'
 import { useLocalData } from './hooks/use-local-data'
+import { useGrowthGame } from './hooks/use-growth-game'
 import { usePullRefresh } from './hooks/use-pull-refresh'
 import { useResponsiveNav } from './hooks/use-responsive-nav'
 import { useSummaryActions } from './hooks/use-summary-actions'
@@ -211,6 +212,15 @@ function App() {
   })
 
   const todayKey = getTodayKey()
+  const {
+    collectCoins: handleCollectGrowthCoins,
+    growthGame,
+    mergePlants: handleMergeGrowthPlants,
+    movePlant: handleMoveGrowthPlant,
+    openSeedBox: handleOpenGrowthSeedBox,
+    unlockCell: handleUnlockGrowthCell,
+    upgradeStorage: handleUpgradeGrowthStorage,
+  } = useGrowthGame(gameEngineSnapshot)
 
   const navigateTo = useCallback((view: ActiveView) => {
     setActiveView(view)
@@ -368,9 +378,16 @@ function App() {
         />
       ) : activeView === 'garden' ? (
         <GardenView
+          growthGame={growthGame}
           snapshot={gameEngineSnapshot}
+          onCollectCoins={handleCollectGrowthCoins}
           onCheckIn={() => focusDate(todayKey, 'dashboard')}
+          onMergePlants={handleMergeGrowthPlants}
+          onMovePlant={handleMoveGrowthPlant}
+          onOpenSeedBox={handleOpenGrowthSeedBox}
           onOpenJournalDate={(dateKey) => focusDate(dateKey, 'dashboard')}
+          onUnlockCell={handleUnlockGrowthCell}
+          onUpgradeStorage={handleUpgradeGrowthStorage}
         />
       ) : activeView === 'board' ? (
         <BoardView

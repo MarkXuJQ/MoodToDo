@@ -67,15 +67,19 @@ export function AppChrome({
   onToggleNavCollapse,
 }: AppChromeProps) {
   const activeNavItem = navigationItems.find((item) => item.id === activeView)
+  const isGrowthView = activeView === 'garden'
+  const appShellClassName = isGrowthView
+    ? 'app-shell app-shell-growth'
+    : `app-shell ${isDesktopNav ? 'app-shell-desktop-nav' : 'app-shell-bottom-nav'}`
 
   return (
-    <main className="shell">
-      <DynamicBackground mode={resolvedThemeMode} />
+    <main className={`shell ${isGrowthView ? 'shell-growth' : ''}`}>
+      {!isGrowthView && <DynamicBackground mode={resolvedThemeMode} />}
       <div
-        className={`app-shell ${isDesktopNav ? 'app-shell-desktop-nav' : 'app-shell-bottom-nav'}`}
+        className={appShellClassName}
         style={{ ['--nav-width' as string]: isNavCollapsed ? '88px' : '296px' }}
       >
-        {isDesktopNav && (
+        {isDesktopNav && !isGrowthView && (
           <NavDrawer
             isDesktop={isDesktopNav}
             isOpen={isNavOpen}
@@ -98,14 +102,16 @@ export function AppChrome({
             pullRefreshDistance={pullRefreshDistance}
           />
           <div className="page">
-            <AppHeader
-              isDesktopNav={isDesktopNav}
-              todayLabel={todayLabel}
-              activeViewLabel={activeNavItem?.label ?? '仪表盘'}
-              isWebDavSyncing={isWebDavSyncing}
-              onSyncWebDav={onSyncWebDav}
-              onOpenSettings={onOpenSettings}
-            />
+            {!isGrowthView && (
+              <AppHeader
+                isDesktopNav={isDesktopNav}
+                todayLabel={todayLabel}
+                activeViewLabel={activeNavItem?.label ?? '仪表盘'}
+                isWebDavSyncing={isWebDavSyncing}
+                onSyncWebDav={onSyncWebDav}
+                onOpenSettings={onOpenSettings}
+              />
+            )}
             {children}
           </div>
         </div>
@@ -119,7 +125,7 @@ export function AppChrome({
           onCopyDetails={onCopyDiagnosticDetails}
         />
       )}
-      {!isDesktopNav && <BottomNav activeView={activeView} navigationItems={navigationItems} onNavigate={onNavigate} />}
+      {(!isDesktopNav || isGrowthView) && <BottomNav activeView={activeView} immersive={isGrowthView} navigationItems={navigationItems} onNavigate={onNavigate} />}
     </main>
   )
 }

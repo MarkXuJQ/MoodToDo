@@ -322,12 +322,19 @@ try {
   assert(updatedEntriesPage.items[0].mood.keywords.includes('压力'), '心象算法没有从完整日记提取压力线索。')
   assert(updatedEntriesPage.items[0].mood.keywords.includes('恢复'), '心象算法没有从完整日记提取恢复线索。')
 
-  await page.getByRole('button', { name: '心象花园', exact: true }).click()
-  await page.getByRole('heading', { name: '心象花园', exact: true }).waitFor({ state: 'visible' })
-  assert((await page.locator('.garden-plant-button').count()) === 1, '一天的日记必须只生成一株植物。')
-  assert((await page.locator('.garden-selected-plant').innerText()).includes('成长'), '植物详情没有显示成长 XP。')
-  assert((await page.locator('.garden-achievements').innerText()).includes('第一粒心种'), '花园没有生成首次打卡成就。')
-  assert((await page.locator('.garden-achievements').innerText()).includes('已获得'), '首次打卡成就没有解锁。')
+  await page.getByRole('button', { name: '成长', exact: true }).click()
+  await page.getByRole('heading', { name: '心象森林', exact: true }).waitFor({ state: 'visible' })
+  assert((await page.locator('.garden-hud').innerText()).includes('金币'), '成长页 HUD 没有显示金币。')
+  assert((await page.locator('.garden-hud').innerText()).includes('心种匣'), '成长页 HUD 没有显示心种匣。')
+  const openSeedButton = page.getByRole('button').filter({ hasText: '打开' })
+  await openSeedButton.click()
+  assert((await page.locator('.garden-cell-filled').count()) === 1, '打开一枚心种匣后必须只生成一株植物。')
+  assert((await page.locator('.garden-selected-card').innerText()).includes('金币/小时'), '植物详情没有显示金币收益。')
+  await page.getByRole('tab', { name: '图谱', exact: true }).click()
+  assert((await page.locator('.garden-codex-node-discovered').count()) >= 1, '打开植物后图谱没有点亮。')
+  await page.getByRole('button').filter({ hasText: '成就' }).click()
+  assert((await page.locator('.garden-achievement-grid').innerText()).includes('第一枚心种匣'), '成长页没有生成首次心种匣成就。')
+  assert((await page.locator('.garden-achievement-grid').innerText()).includes('已获得'), '首次成长成就没有解锁。')
 
   await page.getByRole('button', { name: '记录', exact: true }).click()
   await page.getByRole('heading', { name: '年度心象', exact: true }).waitFor({ state: 'visible' })
@@ -359,13 +366,13 @@ try {
   assert((await addDialog.getAttribute('aria-modal')) === 'true', '添加 Todo 弹窗缺少 aria-modal。')
   assert(
     (await page.evaluate(() => document.activeElement?.getAttribute('placeholder'))) ===
-      '写下要推进的一件事',
+      '事项名称',
     '添加 Todo 弹窗没有聚焦主要输入框。',
   )
   assert((await addDialog.locator('textarea').count()) === 0, '添加 Todo 一级弹窗不应直接显示描述输入框。')
   assert((await addDialog.locator('.todo-priority-slider').count()) === 0, '添加 Todo 一级弹窗不应直接显示高级设置。')
   await addDialog.getByRole('button').filter({ hasText: '描述' }).click()
-  const descriptionDialog = page.getByRole('dialog', { name: '添加描述' })
+  const descriptionDialog = page.getByRole('dialog', { name: '添加详情描述' })
   await descriptionDialog.waitFor({ state: 'visible' })
   assert((await descriptionDialog.locator('textarea').count()) === 1, '描述应在二级弹窗中编辑。')
   await descriptionDialog.getByRole('button', { name: '完成', exact: true }).click()

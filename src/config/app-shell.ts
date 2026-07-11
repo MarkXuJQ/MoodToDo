@@ -50,7 +50,7 @@ export const defaultDashboardCards: DashboardCardConfig[] = [
 export const navigationItems: NavItem[] = [
   { id: 'dashboard', label: '仪表盘', note: '今日记录、心象与事项' },
   { id: 'board', label: 'Todo', note: '事项看板与推进状态' },
-  { id: 'garden', label: '心象花园', note: '让每日打卡长成一座花园' },
+  { id: 'garden', label: '成长', note: '记录的可见收获' },
   { id: 'journal', label: '记录', note: '历史日记与年度热力图' },
   { id: 'summary', label: '回顾', note: '热力图、周回顾与 AI 总结' },
   { id: 'settings', label: '设置', note: '系统总览、同步与接口配置' },
@@ -63,7 +63,7 @@ export const settingsSections: SettingsSectionOption[] = [
   { id: 'database', label: '本地数据库', note: 'SQLite 与持久化状态' },
   { id: 'ai', label: '大模型 API', note: '周总结代理与模型配置' },
   { id: 'webdav', label: 'WebDAV', note: '坚果云快照同步' },
-  { id: 'engine', label: '游戏接口', note: '外部引擎消费快照' },
+  { id: 'engine', label: '成长接口', note: '外部引擎消费快照' },
 ]
 
 export const settingsSectionGroups: SettingsSectionGroup[] = [

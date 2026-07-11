@@ -45,6 +45,10 @@ export const useDialogA11y = <T extends HTMLElement>(isOpen: boolean, onClose: (
     const container = dialogRef.current
     if (!container) return
 
+    if (document.activeElement instanceof HTMLElement && !container.contains(document.activeElement)) {
+      previousFocusRef.current = document.activeElement
+    }
+
     const focusInitialElement = window.requestAnimationFrame(() => {
       const preferred = container.querySelector<HTMLElement>('[data-dialog-initial-focus]')
       const firstFocusable = getFocusableElements(container)[0]
@@ -95,11 +99,12 @@ export const useDialogA11y = <T extends HTMLElement>(isOpen: boolean, onClose: (
       window.cancelAnimationFrame(focusInitialElement)
       document.removeEventListener('keydown', handleKeyDown, true)
       document.removeEventListener('focusin', keepFocusInside, true)
-      window.requestAnimationFrame(() => {
-        if (previousFocusRef.current?.isConnected) {
-          previousFocusRef.current.focus()
-        }
-      })
+      const previousFocus = previousFocusRef.current
+
+      if (previousFocus?.isConnected) {
+        previousFocus.focus()
+        window.requestAnimationFrame(() => previousFocus.focus())
+      }
     }
   }, [isOpen])
 
