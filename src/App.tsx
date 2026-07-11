@@ -215,8 +215,8 @@ function App() {
   const {
     collectCoins: handleCollectGrowthCoins,
     growthGame,
-    mergePlants: handleMergeGrowthPlants,
     movePlant: handleMoveGrowthPlant,
+    movePlantToCell: handleMoveGrowthPlantToCell,
     openSeedBox: handleOpenGrowthSeedBox,
     unlockCell: handleUnlockGrowthCell,
     upgradeStorage: handleUpgradeGrowthStorage,
@@ -381,11 +381,9 @@ function App() {
           growthGame={growthGame}
           snapshot={gameEngineSnapshot}
           onCollectCoins={handleCollectGrowthCoins}
-          onCheckIn={() => focusDate(todayKey, 'dashboard')}
-          onMergePlants={handleMergeGrowthPlants}
           onMovePlant={handleMoveGrowthPlant}
+          onMovePlantToCell={handleMoveGrowthPlantToCell}
           onOpenSeedBox={handleOpenGrowthSeedBox}
-          onOpenJournalDate={(dateKey) => focusDate(dateKey, 'dashboard')}
           onUnlockCell={handleUnlockGrowthCell}
           onUpgradeStorage={handleUpgradeGrowthStorage}
         />

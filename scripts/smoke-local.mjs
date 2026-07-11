@@ -110,6 +110,46 @@ const assert = (condition, message) => {
   if (!condition) throw new Error(message)
 }
 
+const assertNoGrowthPageScroll = async (page, label) => {
+  const metrics = await page.evaluate(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+
+    const viewportHeight = Math.round(window.visualViewport?.height ?? window.innerHeight)
+    const documentElement = document.scrollingElement ?? document.documentElement
+    const toMetrics = (selector) => {
+      const element = document.querySelector(selector)
+      if (!element) return null
+      const rect = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+
+      return {
+        clientHeight: Math.ceil(element.clientHeight),
+        scrollHeight: Math.ceil(element.scrollHeight),
+        rectHeight: Math.ceil(rect.height),
+        overflowY: style.overflowY,
+      }
+    }
+
+    return {
+      viewportHeight,
+      document: {
+        clientHeight: Math.ceil(documentElement.clientHeight),
+        scrollHeight: Math.ceil(documentElement.scrollHeight),
+      },
+      shell: toMetrics('.shell-growth'),
+      appShell: toMetrics('.app-shell-growth'),
+      contentShell: toMetrics('.app-shell-growth .content-shell'),
+      gamePage: toMetrics('.garden-page-game'),
+    }
+  })
+
+  const documentOverflow = metrics.document.scrollHeight - metrics.document.clientHeight
+  assert(documentOverflow <= 2, `${label} 成长页产生了文档滚动：${JSON.stringify(metrics)}`)
+  assert(metrics.shell?.overflowY === 'hidden', `${label} 成长页外壳没有禁用滚动。`)
+  assert(metrics.contentShell?.overflowY === 'hidden', `${label} 成长页内容容器没有禁用滚动。`)
+  assert((metrics.gamePage?.rectHeight ?? 0) <= metrics.viewportHeight + 2, `${label} 成长页画面高度超过视口。`)
+}
+
 const getExpectedHeatColor = (score) => {
   if (score < 35) return 'rgb(255, 242, 168)'
   if (score < 50) return 'rgb(244, 211, 94)'
@@ -255,6 +295,8 @@ try {
   browser = await chromium.launch({ headless: true, executablePath: chromePath })
   const context = await browser.newContext()
   await context.addInitScript(() => {
+    const now = new Date().toISOString()
+
     window.localStorage.setItem(
       'xinxiangyi-webdav-config-v1',
       JSON.stringify({
@@ -263,6 +305,92 @@ try {
         password: 'isolated',
         remotePath: '/isolated-smoke',
         autoSyncDaily: false,
+      }),
+    )
+    window.localStorage.setItem(
+      'xinxiangyi-growth-game-v1',
+      JSON.stringify({
+        version: 1,
+        coins: 0,
+        seedBoxes: [],
+        plants: [
+          {
+            id: 'merge-smoke-a',
+            family: 'dew',
+            stage: 1,
+            placement: 'board',
+            cellIndex: 6,
+            sourceDateKey: '2026-07-01',
+            sourceMoodScore: 62,
+            sourceQuadrant: '低能修复',
+            createdAt: now,
+          },
+          {
+            id: 'merge-smoke-b',
+            family: 'dew',
+            stage: 1,
+            placement: 'board',
+            cellIndex: 7,
+            sourceDateKey: '2026-07-02',
+            sourceMoodScore: 64,
+            sourceQuadrant: '低能修复',
+            createdAt: now,
+          },
+          {
+            id: 'merge-smoke-c',
+            family: 'dew',
+            stage: 1,
+            placement: 'board',
+            cellIndex: 10,
+            sourceDateKey: '2026-07-03',
+            sourceMoodScore: 66,
+            sourceQuadrant: '低能修复',
+            createdAt: now,
+          },
+          {
+            id: 'merge-smoke-d',
+            family: 'moon',
+            stage: 1,
+            placement: 'board',
+            cellIndex: 18,
+            sourceDateKey: '2026-07-04',
+            sourceMoodScore: 48,
+            sourceQuadrant: '低能承压',
+            createdAt: now,
+          },
+          {
+            id: 'merge-smoke-e',
+            family: 'moon',
+            stage: 1,
+            placement: 'board',
+            cellIndex: 19,
+            sourceDateKey: '2026-07-05',
+            sourceMoodScore: 46,
+            sourceQuadrant: '低能承压',
+            createdAt: now,
+          },
+          {
+            id: 'merge-smoke-f',
+            family: 'moon',
+            stage: 1,
+            placement: 'board',
+            cellIndex: 20,
+            sourceDateKey: '2026-07-06',
+            sourceMoodScore: 44,
+            sourceQuadrant: '低能承压',
+            createdAt: now,
+          },
+        ],
+        grantedRewardKeys: ['merge-smoke'],
+        discoveredCodexIds: ['dew-1', 'moon-1'],
+        unlockedCells: 24,
+        storageLimit: 12,
+        lastCollectedAt: now,
+        lifetimeCoins: 0,
+        mergeCount: 0,
+        nextPlantSerial: 20,
+        createdAt: now,
+        updatedAt: now,
       }),
     )
   })
@@ -323,18 +451,57 @@ try {
   assert(updatedEntriesPage.items[0].mood.keywords.includes('恢复'), '心象算法没有从完整日记提取恢复线索。')
 
   await page.getByRole('button', { name: '成长', exact: true }).click()
-  await page.getByRole('heading', { name: '心象森林', exact: true }).waitFor({ state: 'visible' })
-  assert((await page.locator('.garden-hud').innerText()).includes('金币'), '成长页 HUD 没有显示金币。')
-  assert((await page.locator('.garden-hud').innerText()).includes('心种匣'), '成长页 HUD 没有显示心种匣。')
+  await page.getByRole('grid', { name: '心象森林棋盘', exact: true }).waitFor({ state: 'visible' })
+  assert((await page.getByRole('heading', { name: '心象森林', exact: true }).count()) === 0, '成长页不应再显示左上角标题牌。')
+  assert(await page.locator('.nav-drawer').isVisible(), '宽屏成长页应保留左侧导航。')
+  assert((await page.locator('.bottom-nav').count()) === 0, '宽屏成长页不应显示底部导航。')
+  assert((await page.locator('.garden-overlay-hud').innerText()).includes('金币'), '成长页 HUD 没有显示金币。')
+  assert((await page.locator('.garden-overlay-hud').innerText()).includes('菜单'), '成长页 HUD 没有收起游戏菜单入口。')
+  await assertNoGrowthPageScroll(page, '桌面宽屏')
+  assert((await page.locator('.garden-plant-popover').count()) === 0, '未选中植物时不应显示底部植物提示。')
+  assert((await page.locator('.garden-cell-plant-mergeable').count()) >= 6, '已有三株同系同阶植物时没有显示可融合材料线索。')
+  await page.locator('.garden-cell').nth(18).click()
+  assert((await page.locator('.garden-cell-merge-target').count()) >= 1, '已排成线的植物没有显示可直接融合目标。')
+  await page.locator('.garden-cell').nth(18).click()
+  await page.getByRole('gridcell', { name: '月影蕨类' }).waitFor({ state: 'visible' })
   const openSeedButton = page.getByRole('button').filter({ hasText: '打开' })
   await openSeedButton.click()
-  assert((await page.locator('.garden-cell-filled').count()) === 1, '打开一枚心种匣后必须只生成一株植物。')
-  assert((await page.locator('.garden-selected-card').innerText()).includes('金币/小时'), '植物详情没有显示金币收益。')
+  assert((await page.locator('.garden-cell-filled').count()) === 5, '已有森林加一枚心种匣后植物数量异常。')
+  assert((await page.locator('.garden-plant-popover').innerText()).includes('金币/小时'), '植物详情没有显示金币收益。')
+  assert(!(await page.locator('.garden-plant-popover').innerText()).includes('这一天'), '植物详情不应再跳转到某天记录。')
+  await page.locator('.garden-cell').nth(10).click()
+  assert((await page.locator('.garden-cell-merge-target').count()) >= 1, '选中可融合植物后没有高亮融合目标格。')
+  await page.locator('.garden-cell').nth(8).click()
+  await page.getByRole('gridcell', { name: '晨露蕨类' }).waitFor({ state: 'visible' })
+  assert((await page.locator('.garden-cell-filled').count()) === 3, '三株同系同阶植物没有融合成一株新植物。')
+  assert((await page.locator('.garden-cell-plant-merged').count()) === 1, '融合后没有播放像素反馈动画。')
+  const growthSaveAfterMerge = await page.evaluate(() => JSON.parse(window.localStorage.getItem('xinxiangyi-growth-game-v1') ?? '{}'))
+  assert(growthSaveAfterMerge.mergeCount === 2, '融合次数没有写入成长存档。')
+  assert(
+    growthSaveAfterMerge.plants.some((plant) => plant.family === 'dew' && plant.stage === 2 && plant.placement === 'board'),
+    '成长存档中没有生成二阶植物。',
+  )
+  await page.getByRole('button', { name: '菜单', exact: true }).click()
+  const growthMenu = page.getByRole('dialog', { name: '库存' })
+  await growthMenu.waitFor({ state: 'visible' })
+  assert((await growthMenu.getAttribute('aria-modal')) === 'true', '成长菜单缺少 aria-modal。')
   await page.getByRole('tab', { name: '图谱', exact: true }).click()
   assert((await page.locator('.garden-codex-node-discovered').count()) >= 1, '打开植物后图谱没有点亮。')
-  await page.getByRole('button').filter({ hasText: '成就' }).click()
+  await page.getByRole('tab', { name: '成就', exact: true }).click()
   assert((await page.locator('.garden-achievement-grid').innerText()).includes('第一枚心种匣'), '成长页没有生成首次心种匣成就。')
   assert((await page.locator('.garden-achievement-grid').innerText()).includes('已获得'), '首次成长成就没有解锁。')
+  await page.keyboard.press('Escape')
+  await growthMenu.waitFor({ state: 'hidden' })
+  await page.setViewportSize({ width: 390, height: 780 })
+  await page.locator('.bottom-nav').waitFor({ state: 'visible' })
+  assert((await page.locator('.nav-drawer').count()) === 0, '手机成长页不应显示左侧导航。')
+  assert((await page.locator('.bottom-nav').innerText()).includes('成长'), '手机成长页应保留底部导航。')
+  await assertNoGrowthPageScroll(page, '手机竖屏')
+  await page.setViewportSize({ width: 844, height: 390 })
+  await page.locator('.bottom-nav').waitFor({ state: 'visible' })
+  await assertNoGrowthPageScroll(page, '手机横屏')
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.locator('.nav-drawer').waitFor({ state: 'visible' })
 
   await page.getByRole('button', { name: '记录', exact: true }).click()
   await page.getByRole('heading', { name: '年度心象', exact: true }).waitFor({ state: 'visible' })

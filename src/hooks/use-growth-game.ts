@@ -5,8 +5,8 @@ import {
   collectGrowthCoins,
   createGrowthGameView,
   grantGrowthSeedBoxes,
-  mergeGrowthPlants,
   moveGrowthPlant,
+  moveGrowthPlantToCell,
   openGrowthSeedBox,
   readGrowthGameSave,
   unlockGrowthCell,
@@ -15,8 +15,6 @@ import {
   type GrowthActionResult,
   type GrowthGameSave,
   type GrowthPlacement,
-  type GrowthPlantFamily,
-  type GrowthPlantStage,
 } from '../lib/growthGame'
 
 const fallbackResult: GrowthActionResult = {
@@ -64,15 +62,15 @@ export const useGrowthGame = (snapshot: GameEngineSnapshot) => {
     [runMutation],
   )
 
-  const mergePlants = useCallback(
-    (family: GrowthPlantFamily, stage: GrowthPlantStage) =>
-      runMutation((current) => mergeGrowthPlants(current, family, stage)),
-    [runMutation],
-  )
-
   const movePlant = useCallback(
     (plantId: string, placement: GrowthPlacement) =>
       runMutation((current) => moveGrowthPlant(current, plantId, placement)),
+    [runMutation],
+  )
+
+  const movePlantToCell = useCallback(
+    (plantId: string, cellIndex: number) =>
+      runMutation((current) => moveGrowthPlantToCell(current, plantId, cellIndex)),
     [runMutation],
   )
 
@@ -91,8 +89,8 @@ export const useGrowthGame = (snapshot: GameEngineSnapshot) => {
   return {
     growthGame: view,
     collectCoins,
-    mergePlants,
     movePlant,
+    movePlantToCell,
     openSeedBox,
     unlockCell,
     upgradeStorage,

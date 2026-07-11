@@ -68,9 +68,7 @@ export function AppChrome({
 }: AppChromeProps) {
   const activeNavItem = navigationItems.find((item) => item.id === activeView)
   const isGrowthView = activeView === 'garden'
-  const appShellClassName = isGrowthView
-    ? 'app-shell app-shell-growth'
-    : `app-shell ${isDesktopNav ? 'app-shell-desktop-nav' : 'app-shell-bottom-nav'}`
+  const appShellClassName = `app-shell ${isDesktopNav ? 'app-shell-desktop-nav' : 'app-shell-bottom-nav'} ${isGrowthView ? 'app-shell-growth' : ''}`
 
   return (
     <main className={`shell ${isGrowthView ? 'shell-growth' : ''}`}>
@@ -79,7 +77,7 @@ export function AppChrome({
         className={appShellClassName}
         style={{ ['--nav-width' as string]: isNavCollapsed ? '88px' : '296px' }}
       >
-        {isDesktopNav && !isGrowthView && (
+        {isDesktopNav && (
           <NavDrawer
             isDesktop={isDesktopNav}
             isOpen={isNavOpen}
@@ -125,7 +123,7 @@ export function AppChrome({
           onCopyDetails={onCopyDiagnosticDetails}
         />
       )}
-      {(!isDesktopNav || isGrowthView) && <BottomNav activeView={activeView} immersive={isGrowthView} navigationItems={navigationItems} onNavigate={onNavigate} />}
+      {!isDesktopNav && <BottomNav activeView={activeView} immersive={isGrowthView} navigationItems={navigationItems} onNavigate={onNavigate} />}
     </main>
   )
 }

@@ -116,6 +116,7 @@ export type GrowthActionResult = {
   ok: boolean
   message: string
   selectedPlantId?: string
+  effect?: 'coins' | 'merge' | 'seed'
 }
 
 type GrowthMutationResult = {
@@ -136,6 +137,7 @@ type StageMeta = {
 }
 
 const boardCellCount = 36
+const boardColumnCount = 6
 const initialUnlockedCells = 24
 const initialStorageLimit = 12
 const maxOfflineHours = 12
@@ -179,27 +181,21 @@ const familyWeightsByQuadrant: Record<string, Array<[GrowthPlantFamily, number]>
   高能紧绷: [['sun', 0.42], ['moon', 0.34], ['dew', 0.24]],
 }
 
-const weatherByQuadrant: Record<string, GrowthWeather> = {
-  低能承压: {
-    name: '雾雨',
-    tone: '低能承压',
-    description: '森林压低了颜色，替这一天收住重量。',
-    className: 'garden-weather-rain',
-  },
+const steadyWeatherByQuadrant: Record<string, GrowthWeather> = {
   低能修复: {
-    name: '晨露',
+    name: '多云',
     tone: '低能修复',
-    description: '水珠停在叶尖，慢慢恢复也是进度。',
-    className: 'garden-weather-dew',
+    description: '云层放慢了光线，慢慢恢复也是进度。',
+    className: 'garden-weather-cloud',
   },
   高能紧绷: {
-    name: '风影',
+    name: '大风',
     tone: '高能紧绷',
     description: '风线掠过树冠，能量正在寻找出口。',
     className: 'garden-weather-wind',
   },
   高能舒展: {
-    name: '晴光',
+    name: '晴天',
     tone: '高能舒展',
     description: '光落在林间，今天的舒展被好好留下。',
     className: 'garden-weather-sun',
@@ -211,6 +207,42 @@ const defaultWeather: GrowthWeather = {
   tone: '平稳',
   description: '天气平稳，森林保持自己的节奏。',
   className: 'garden-weather-cloud',
+}
+
+const getRainWeather = (day: Pick<GameEngineDaySample, 'moodScore' | 'moodQuadrant'>): GrowthWeather => {
+  if (day.moodScore <= 34) {
+    return {
+      name: '暴雨',
+      tone: day.moodQuadrant,
+      description: '雨势压低森林，但根系会替这一天站稳。',
+      className: 'garden-weather-rain garden-weather-rain-heavy',
+    }
+  }
+
+  if (day.moodScore <= 48) {
+    return {
+      name: '中雨',
+      tone: day.moodQuadrant,
+      description: '雨线持续落下，森林把今天的重量慢慢接住。',
+      className: 'garden-weather-rain garden-weather-rain-medium',
+    }
+  }
+
+  if (day.moodScore <= 62) {
+    return {
+      name: '小雨',
+      tone: day.moodQuadrant,
+      description: '细雨落在叶面，沉一点的心情也被留下来了。',
+      className: 'garden-weather-rain garden-weather-rain-light',
+    }
+  }
+
+  return {
+    name: '雾雨',
+    tone: day.moodQuadrant,
+    description: '雾气贴着森林，替这一天收住还没散开的情绪。',
+    className: 'garden-weather-rain garden-weather-rain-mist',
+  }
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -429,6 +461,16 @@ export const grantGrowthSeedBoxes = (
 const getBoardPlants = (save: GrowthGameSave) =>
   save.plants.filter((plant) => plant.placement === 'board' && typeof plant.cellIndex === 'number')
 
+const getBoardPlantByCell = (save: GrowthGameSave) => {
+  const plantByCell = new Map<number, GrowthPlant>()
+
+  for (const plant of getBoardPlants(save)) {
+    if (plant.cellIndex != null) plantByCell.set(plant.cellIndex, plant)
+  }
+
+  return plantByCell
+}
+
 const getCoinRate = (save: GrowthGameSave) =>
   getBoardPlants(save).reduce((sum, plant) => sum + getGrowthPlantCoinRate(plant.stage), 0)
 
@@ -462,6 +504,154 @@ const findEmptyBoardCell = (save: GrowthGameSave) => {
   }
 
   return undefined
+}
+
+const getLineCandidateIndexes = (cellIndex: number) => {
+  const row = Math.floor(cellIndex / boardColumnCount)
+  const column = cellIndex % boardColumnCount
+  const lines: number[][] = []
+
+  for (const startColumn of [column - 2, column - 1, column]) {
+    if (startColumn < 0 || startColumn + 2 >= boardColumnCount) continue
+    lines.push([
+      row * boardColumnCount + startColumn,
+      row * boardColumnCount + startColumn + 1,
+      row * boardColumnCount + startColumn + 2,
+    ])
+  }
+
+  for (const startRow of [row - 2, row - 1, row]) {
+    if (startRow < 0 || startRow + 2 >= boardCellCount / boardColumnCount) continue
+    lines.push([
+      startRow * boardColumnCount + column,
+      (startRow + 1) * boardColumnCount + column,
+      (startRow + 2) * boardColumnCount + column,
+    ])
+  }
+
+  return lines
+}
+
+type BoardLineMerge = {
+  anchorCellIndex: number
+  anchorPlant: GrowthPlant
+  linePlants: GrowthPlant[]
+}
+
+type BoardMergeAnchor = {
+  cellIndex: number
+  plantId: string
+}
+
+const findBoardLineMerge = (
+  save: GrowthGameSave,
+  anchorPlantId: string,
+  anchorCellIndex: number,
+): BoardLineMerge | null => {
+  const plantByCell = getBoardPlantByCell(save)
+  const anchorPlant = save.plants.find((plant) => plant.id === anchorPlantId)
+
+  if (!anchorPlant || anchorPlant.stage >= 5) return null
+
+  for (const lineIndexes of getLineCandidateIndexes(anchorCellIndex)) {
+    const linePlants = lineIndexes.map((index) => plantByCell.get(index))
+
+    if (
+      linePlants.every((plant): plant is GrowthPlant => Boolean(plant)) &&
+      linePlants.some((plant) => plant.id === anchorPlantId) &&
+      linePlants.every((plant) => plant.family === anchorPlant.family && plant.stage === anchorPlant.stage)
+    ) {
+      return {
+        anchorCellIndex,
+        anchorPlant,
+        linePlants,
+      }
+    }
+  }
+
+  return null
+}
+
+const findAnyBoardLineMerge = (save: GrowthGameSave, anchors: BoardMergeAnchor[] = []) => {
+  for (const anchor of anchors) {
+    const merge = findBoardLineMerge(save, anchor.plantId, anchor.cellIndex)
+    if (merge) return merge
+  }
+
+  for (const plant of getBoardPlants(save)) {
+    if (plant.cellIndex == null) continue
+    const merge = findBoardLineMerge(save, plant.id, plant.cellIndex)
+    if (merge) return merge
+  }
+
+  return null
+}
+
+const applyBoardLineMerge = (
+  save: GrowthGameSave,
+  merge: BoardLineMerge,
+  nowIso: string,
+) => {
+  const consumedIds = new Set(merge.linePlants.map((plant) => plant.id))
+  const nextStage = getNextStage(merge.anchorPlant.stage)
+  const resultPlant: GrowthPlant = {
+    id: `growth-plant-${save.nextPlantSerial}`,
+    family: merge.anchorPlant.family,
+    stage: nextStage,
+    placement: 'board',
+    cellIndex: merge.anchorCellIndex,
+    sourceDateKey: merge.anchorPlant.sourceDateKey,
+    sourceMoodScore: merge.anchorPlant.sourceMoodScore,
+    sourceQuadrant: merge.anchorPlant.sourceQuadrant,
+    createdAt: nowIso,
+  }
+  const nextSave = rememberPlant({
+    ...save,
+    plants: [...save.plants.filter((plant) => !consumedIds.has(plant.id)), resultPlant],
+    mergeCount: save.mergeCount + 1,
+    nextPlantSerial: save.nextPlantSerial + 1,
+  }, resultPlant)
+
+  return {
+    save: touchSave(nextSave, nowIso),
+    plant: resultPlant,
+  }
+}
+
+const resolveBoardLineMerges = (
+  save: GrowthGameSave,
+  anchors: BoardMergeAnchor[],
+  nowIso: string,
+): GrowthMutationResult | null => {
+  let currentSave = save
+  let currentAnchors = anchors
+  let lastMergedPlant: GrowthPlant | null = null
+  let mergeSteps = 0
+
+  for (let guard = 0; guard < boardCellCount; guard += 1) {
+    const merge = findAnyBoardLineMerge(currentSave, currentAnchors)
+    if (!merge) break
+
+    const merged = applyBoardLineMerge(currentSave, merge, nowIso)
+    currentSave = merged.save
+    lastMergedPlant = merged.plant
+    mergeSteps += 1
+    currentAnchors = [{ cellIndex: merged.plant.cellIndex ?? merge.anchorCellIndex, plantId: merged.plant.id }]
+  }
+
+  if (!lastMergedPlant) return null
+
+  return {
+    save: currentSave,
+    result: {
+      ok: true,
+      effect: 'merge',
+      message: mergeSteps > 1
+        ? `连续融合，长成 ${getGrowthPlantName(lastMergedPlant)}。`
+        : `融合成 ${getGrowthPlantName(lastMergedPlant)}。`,
+      selectedPlantId: lastMergedPlant.id,
+    },
+  }
 }
 
 const getStorageUsed = (save: GrowthGameSave) =>
@@ -510,6 +700,7 @@ export const collectGrowthCoins = (
     save: settleCoins(save, nowIso),
     result: {
       ok: true,
+      effect: 'coins',
       message: `收取了 ${pendingCoins} 枚金币。`,
     },
   }
@@ -548,11 +739,16 @@ export const openGrowthSeedBox = (
     plants: [...settled.plants, plant],
     nextPlantSerial: settled.nextPlantSerial + 1,
   }, plant)
+  const touchedSave = touchSave(nextSave, nowIso)
+  const mergeResult = placement === 'board' && plant.cellIndex != null
+    ? resolveBoardLineMerges(touchedSave, [{ cellIndex: plant.cellIndex, plantId: plant.id }], nowIso)
+    : null
 
-  return {
-    save: touchSave(nextSave, nowIso),
+  return mergeResult ?? {
+    save: touchedSave,
     result: {
       ok: true,
+      effect: 'seed',
       message: `打开了心种匣，获得 ${getGrowthPlantName(plant)}。`,
       selectedPlantId: plant.id,
     },
@@ -654,14 +850,17 @@ export const moveGrowthPlant = (
       }
     }
 
-    return {
-      save: touchSave({
+    const movedSave = touchSave({
         ...settled,
         plants: settled.plants.map((item) =>
           item.id === plantId ? { ...item, placement: 'board', cellIndex } : item,
         ),
-      }, nowIso),
-      result: { ok: true, message: '已经放回森林。', selectedPlantId: plantId },
+      }, nowIso)
+    const mergeResult = resolveBoardLineMerges(movedSave, [{ cellIndex, plantId }], nowIso)
+
+    return mergeResult ?? {
+      save: movedSave,
+      result: { ok: true, message: '', selectedPlantId: plantId },
     }
   }
 
@@ -679,7 +878,74 @@ export const moveGrowthPlant = (
         item.id === plantId ? { ...item, placement: 'storage', cellIndex: undefined } : item,
       ),
     }, nowIso),
-    result: { ok: true, message: '已经收入仓库。', selectedPlantId: plantId },
+    result: { ok: true, message: '', selectedPlantId: plantId },
+  }
+}
+
+export const moveGrowthPlantToCell = (
+  save: GrowthGameSave,
+  plantId: string,
+  targetCellIndex: number,
+  nowIso = new Date().toISOString(),
+): GrowthMutationResult => {
+  const plant = save.plants.find((item) => item.id === plantId)
+
+  if (!plant) {
+    return {
+      save,
+      result: { ok: false, message: '没有找到这株植物。' },
+    }
+  }
+
+  if (targetCellIndex < 0 || targetCellIndex >= save.unlockedCells) {
+    return {
+      save,
+      result: { ok: false, message: '这块地还没有开放。', selectedPlantId: plantId },
+    }
+  }
+
+  const settled = settleCoins(save, nowIso)
+  const targetPlant = settled.plants.find(
+    (item) => item.placement === 'board' && item.cellIndex === targetCellIndex,
+  )
+  const targetPlantId = targetPlant?.id
+  const sourceCellIndex = plant.placement === 'board' ? plant.cellIndex : undefined
+
+  if (targetPlantId === plantId) {
+    const mergeResult = resolveBoardLineMerges(settled, [{ cellIndex: targetCellIndex, plantId }], nowIso)
+
+    return mergeResult ?? {
+      save: settled,
+      result: { ok: true, message: '', selectedPlantId: plantId },
+    }
+  }
+
+  const movedSave = touchSave({
+    ...settled,
+    plants: settled.plants.map((item) => {
+      if (item.id === plantId) {
+        return { ...item, placement: 'board', cellIndex: targetCellIndex }
+      }
+
+      if (item.id === targetPlantId) {
+        if (sourceCellIndex != null) return { ...item, placement: 'board', cellIndex: sourceCellIndex }
+        return { ...item, placement: 'storage', cellIndex: undefined }
+      }
+
+      return item
+    }),
+  }, nowIso)
+  const mergeAnchors: BoardMergeAnchor[] = [{ cellIndex: targetCellIndex, plantId }]
+  if (targetPlantId && sourceCellIndex != null) mergeAnchors.push({ cellIndex: sourceCellIndex, plantId: targetPlantId })
+  const mergeResult = resolveBoardLineMerges(movedSave, mergeAnchors, nowIso)
+
+  return mergeResult ?? {
+    save: movedSave,
+    result: {
+      ok: true,
+      message: '',
+      selectedPlantId: plantId,
+    },
   }
 }
 
@@ -822,7 +1088,10 @@ const createGrowthAchievements = (
 const getGrowthWeather = (snapshot: GameEngineSnapshot) => {
   const sourceDay = snapshot.timeline[1] ?? snapshot.timeline[0]
 
-  return sourceDay ? weatherByQuadrant[sourceDay.moodQuadrant] ?? defaultWeather : defaultWeather
+  if (!sourceDay) return defaultWeather
+  if (sourceDay.moodQuadrant === '低能承压') return getRainWeather(sourceDay)
+
+  return steadyWeatherByQuadrant[sourceDay.moodQuadrant] ?? defaultWeather
 }
 
 export const createGrowthGameView = (
