@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core'
 
 import { analyzeMood, type MoodAnalysis } from './mood'
+import type { GrowthGameSave } from './growthGame'
 import {
   addNativeTodo,
   addNativeBoardLane,
@@ -142,6 +143,11 @@ export type WebDavSyncConfig = {
   remotePath: string
 }
 
+export type WebDavSnapshotOptions = {
+  growthGameSave?: GrowthGameSave
+  allowRecoveryPull?: boolean
+}
+
 export type WebDavSyncResult = {
   ok: true
   direction: 'push' | 'pull'
@@ -152,6 +158,7 @@ export type WebDavSyncResult = {
   backupPath?: string
   migratedFile?: string
   migratedSize?: number
+  growthGameSave?: GrowthGameSave
 }
 
 export type WebDavConnectionTestResult = {
@@ -596,36 +603,36 @@ export const deleteAttachment = async (attachment: AttachmentRecord) => {
   })
 }
 
-export const pushWebDavSnapshot = async (config: WebDavSyncConfig) => {
+export const pushWebDavSnapshot = async (config: WebDavSyncConfig, options: WebDavSnapshotOptions = {}) => {
   if (shouldUseNativeDatabase()) {
-    return pushNativeWebDavSnapshot(config)
+    return pushNativeWebDavSnapshot({ ...config, ...options })
   }
 
   return apiFetch<WebDavSyncResult>('/api/webdav/push', {
     method: 'POST',
-    body: JSON.stringify(config),
+    body: JSON.stringify({ ...config, ...options }),
   })
 }
 
-export const replaceWebDavSnapshot = async (config: WebDavSyncConfig) => {
+export const replaceWebDavSnapshot = async (config: WebDavSyncConfig, options: WebDavSnapshotOptions = {}) => {
   if (shouldUseNativeDatabase()) {
-    return replaceNativeWebDavSnapshot(config)
+    return replaceNativeWebDavSnapshot({ ...config, ...options })
   }
 
   return apiFetch<WebDavSyncResult>('/api/webdav/replace', {
     method: 'POST',
-    body: JSON.stringify(config),
+    body: JSON.stringify({ ...config, ...options }),
   })
 }
 
-export const pullWebDavSnapshot = async (config: WebDavSyncConfig) => {
+export const pullWebDavSnapshot = async (config: WebDavSyncConfig, options: WebDavSnapshotOptions = {}) => {
   if (shouldUseNativeDatabase()) {
-    return pullNativeWebDavSnapshot(config)
+    return pullNativeWebDavSnapshot({ ...config, ...options })
   }
 
   return apiFetch<WebDavSyncResult>('/api/webdav/pull', {
     method: 'POST',
-    body: JSON.stringify(config),
+    body: JSON.stringify({ ...config, ...options }),
   })
 }
 
@@ -640,13 +647,14 @@ export const testWebDavConnection = async (config: WebDavSyncConfig) => {
   })
 }
 
-export const exportSyncBundle = async () => {
+export const exportSyncBundle = async (options: WebDavSnapshotOptions = {}) => {
   if (shouldUseNativeDatabase()) {
     throw new Error('Android 端暂无本地文件夹导出能力。请使用 WebDAV 同步，或在桌面端生成本地同步包。')
   }
 
   return apiFetch<SyncBundleExportResult>('/api/sync-bundle/export', {
     method: 'POST',
+    body: JSON.stringify(options),
   })
 }
 

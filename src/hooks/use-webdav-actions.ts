@@ -9,16 +9,30 @@ import {
   testWebDavConnection,
   type WebDavConnectionTestResult,
 } from '../lib/db'
+import { growthGameStorageKey, normalizeGrowthGameSave, type GrowthGameSave } from '../lib/growthGame'
 import type { WebDavConfig } from '../types/app'
 import { formatDiagnosticDetails, type DiagnosticDialogState } from '../utils/diagnostics'
 import { getErrorMessage } from '../utils/errors'
 import { formatWebDavSyncMessage, isMissingRemoteSnapshotMessage } from '../utils/webdav'
 import type { ToastState } from './use-toast'
 
+const readCurrentGrowthGameSave = () => {
+  const raw = window.localStorage.getItem(growthGameStorageKey)
+
+  if (!raw) return undefined
+
+  try {
+    return normalizeGrowthGameSave(JSON.parse(raw) as Partial<GrowthGameSave>)
+  } catch {
+    return undefined
+  }
+}
+
 type UseWebDavActionsOptions = {
   hasLoadedLocalState: boolean
   isWebDavConfigured: boolean
   onConfigureWebDav: () => void
+  onGrowthGameSaveSync: (save?: GrowthGameSave) => void
   pendingChangeCount: number
   reload: () => Promise<unknown>
   setDiagnosticDialog: Dispatch<SetStateAction<DiagnosticDialogState | null>>
@@ -32,6 +46,7 @@ export const useWebDavActions = ({
   hasLoadedLocalState,
   isWebDavConfigured,
   onConfigureWebDav,
+  onGrowthGameSaveSync,
   pendingChangeCount,
   reload,
   setDiagnosticDialog,
@@ -107,7 +122,9 @@ export const useWebDavActions = ({
     setIsExportingSyncBundle(true)
 
     try {
-      const result = await exportSyncBundle()
+      const result = await exportSyncBundle({
+        growthGameSave: readCurrentGrowthGameSave(),
+      })
       const files = result.files.map((file) => file.name).join('、')
 
       showToast(`本地同步包已生成：${result.path}；包含 ${files}`, 'success')
@@ -139,7 +156,7 @@ export const useWebDavActions = ({
 
     if (webDavRecoveryRequired) {
       if (source === 'manual') {
-        showToast('普通同步已暂停。请先在 WebDAV 设置中用本机数据重建云端。', 'error')
+        showToast('普通同步已暂停。云端是对的就用“从云端恢复”，本机是对的再用“重建云端”。', 'error')
         onConfigureWebDav()
       }
       return
@@ -149,9 +166,12 @@ export const useWebDavActions = ({
 
     try {
       const shouldPush = pendingChangeCount > 0
-      const result = await (shouldPush ? pushWebDavSnapshot(webDavConfig) : pullWebDavSnapshot(webDavConfig))
+      const result = await (shouldPush ? pushWebDavSnapshot(webDavConfig, {
+        growthGameSave: readCurrentGrowthGameSave(),
+      }) : pullWebDavSnapshot(webDavConfig))
 
       window.localStorage.setItem(webDavLastAutoSyncStorageKey, todayKey)
+      onGrowthGameSaveSync(result.growthGameSave)
       showToast(formatWebDavSyncMessage(result), 'success')
       await reload()
     } catch (error) {
@@ -159,9 +179,12 @@ export const useWebDavActions = ({
 
       if (source === 'manual' && pendingChangeCount === 0 && isMissingRemoteSnapshotMessage(message)) {
         try {
-          const result = await pushWebDavSnapshot(webDavConfig)
+          const result = await pushWebDavSnapshot(webDavConfig, {
+            growthGameSave: readCurrentGrowthGameSave(),
+          })
 
           window.localStorage.setItem(webDavLastAutoSyncStorageKey, todayKey)
+          onGrowthGameSaveSync(result.growthGameSave)
           showToast(`远端目录已初始化；${formatWebDavSyncMessage(result)}`, 'success')
           await reload()
           return
@@ -205,6 +228,7 @@ export const useWebDavActions = ({
     isWebDavConfigured,
     isWebDavSyncing,
     onConfigureWebDav,
+    onGrowthGameSaveSync,
     pendingChangeCount,
     reload,
     setDiagnosticDialog,
@@ -223,21 +247,20 @@ export const useWebDavActions = ({
       return
     }
 
-    if (webDavRecoveryRequired) {
-      showToast('云端恢复已暂停。请先用本机数据重建云端，避免受污染数据回流。', 'error')
-      onConfigureWebDav()
-      return
-    }
-
-    const confirmed = window.confirm('从云端恢复会用远端快照替换本机数据。本机尚未同步的记录可能丢失，确定继续吗？')
+    const confirmed = window.confirm(
+      webDavRecoveryRequired
+        ? '当前本机处于云端同步保护状态。确认云端数据是正确版本后，可以从云端恢复；恢复成功会替换本机数据并解除保护标记。确定继续吗？'
+        : '从云端恢复会用远端快照替换本机数据。本机尚未同步的记录可能丢失，确定继续吗？',
+    )
     if (!confirmed) return
 
     setIsWebDavSyncing(true)
 
     try {
-      const result = await pullWebDavSnapshot(webDavConfig)
+      const result = await pullWebDavSnapshot(webDavConfig, { allowRecoveryPull: webDavRecoveryRequired })
 
       window.localStorage.setItem(webDavLastAutoSyncStorageKey, todayKey)
+      onGrowthGameSaveSync(result.growthGameSave)
       showToast(formatWebDavSyncMessage(result), 'success')
       await reload()
     } catch (error) {
@@ -260,6 +283,7 @@ export const useWebDavActions = ({
     isWebDavConfigured,
     isWebDavSyncing,
     onConfigureWebDav,
+    onGrowthGameSaveSync,
     pendingChangeCount,
     reload,
     setDiagnosticDialog,
@@ -286,9 +310,12 @@ export const useWebDavActions = ({
     setIsWebDavSyncing(true)
 
     try {
-      const result = await replaceWebDavSnapshot(webDavConfig)
+      const result = await replaceWebDavSnapshot(webDavConfig, {
+        growthGameSave: readCurrentGrowthGameSave(),
+      })
 
       window.localStorage.setItem(webDavLastAutoSyncStorageKey, todayKey)
+      onGrowthGameSaveSync(result.growthGameSave)
       showToast(`云端已按本机数据重建；${formatWebDavSyncMessage(result)}`, 'success')
       await reload()
     } catch (error) {
@@ -310,6 +337,7 @@ export const useWebDavActions = ({
     isWebDavConfigured,
     isWebDavSyncing,
     onConfigureWebDav,
+    onGrowthGameSaveSync,
     reload,
     setDiagnosticDialog,
     showToast,

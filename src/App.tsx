@@ -32,6 +32,7 @@ import {
   getHeatLevel,
 } from './lib/insights'
 import { getAttachmentContent } from './lib/db'
+import type { GrowthGameSave } from './lib/growthGame'
 import type {
   ActiveView,
   SettingsSection,
@@ -218,6 +219,7 @@ function App() {
     movePlant: handleMoveGrowthPlant,
     movePlantToCell: handleMoveGrowthPlantToCell,
     openSeedBox: handleOpenGrowthSeedBox,
+    replaceGrowthGameSave: handleReplaceGrowthGameSave,
     unlockCell: handleUnlockGrowthCell,
     upgradeStorage: handleUpgradeGrowthStorage,
   } = useGrowthGame(gameEngineSnapshot)
@@ -248,6 +250,9 @@ function App() {
   }, [activeView, navigateTo])
 
   const openWebDavSettings = useCallback(() => openSettingsSection('webdav'), [openSettingsSection])
+  const handleSyncedGrowthGameSave = useCallback((save?: GrowthGameSave) => {
+    if (save) handleReplaceGrowthGameSave(save)
+  }, [handleReplaceGrowthGameSave])
 
   const {
     handleExportSyncBundle,
@@ -263,6 +268,7 @@ function App() {
     hasLoadedLocalState,
     isWebDavConfigured,
     onConfigureWebDav: openWebDavSettings,
+    onGrowthGameSaveSync: handleSyncedGrowthGameSave,
     pendingChangeCount,
     reload,
     setDiagnosticDialog,

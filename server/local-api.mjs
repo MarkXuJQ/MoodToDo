@@ -396,11 +396,12 @@ const getMeta = () => ({
   webDavRecoveryRequired: existsSync(webDavRecoveryMarkerPath),
 })
 
-const rejectUnsafeWebDavMerge = (response) => {
+const rejectUnsafeWebDavMerge = (response, { allowRecoveryPull = false } = {}) => {
   if (!existsSync(webDavRecoveryMarkerPath)) return false
+  if (allowRecoveryPull) return false
 
   sendJson(response, 409, {
-    error: '云端快照需要先由本机数据重建。为避免受污染数据回流，普通同步和云端恢复已暂时停用。',
+    error: '云端同步保护已开启，普通合并同步已暂停。若云端数据正确，请使用“从云端恢复”；若本机数据正确，再使用“用本机数据重建云端”。',
   })
   return true
 }
@@ -877,6 +878,41 @@ const mergeRowsByKey = (entity, rowGroups, tombstones, keyGetter, timestampGette
 
 const normalizeSnapshotArray = (snapshot, key) => (Array.isArray(snapshot?.[key]) ? snapshot[key] : [])
 
+const normalizePortableGrowthGameSave = (value) => {
+  if (!value || typeof value !== 'object') return undefined
+
+  const now = nowIso()
+  const normalized = {
+    version: 1,
+    coins: Math.max(0, Math.floor(Number(value.coins) || 0)),
+    seedBoxes: Array.isArray(value.seedBoxes) ? value.seedBoxes : [],
+    plants: Array.isArray(value.plants) ? value.plants : [],
+    grantedRewardKeys: Array.isArray(value.grantedRewardKeys) ? [...new Set(value.grantedRewardKeys)] : [],
+    discoveredCodexIds: Array.isArray(value.discoveredCodexIds) ? [...new Set(value.discoveredCodexIds)] : [],
+    unlockedCells: Math.min(36, Math.max(24, Math.floor(Number(value.unlockedCells) || 24))),
+    storageLimit: Math.min(99, Math.max(12, Math.floor(Number(value.storageLimit) || 12))),
+    lastCollectedAt: typeof value.lastCollectedAt === 'string' ? value.lastCollectedAt : now,
+    lifetimeCoins: Math.max(0, Math.floor(Number(value.lifetimeCoins) || 0)),
+    mergeCount: Math.max(0, Math.floor(Number(value.mergeCount) || 0)),
+    nextPlantSerial: Math.max(1, Math.floor(Number(value.nextPlantSerial) || 1)),
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt : now,
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : now,
+  }
+
+  return normalized
+}
+
+const getGrowthGameUpdatedAt = (save) => save?.updatedAt || save?.createdAt || ''
+
+const mergeGrowthGameSaves = (localSave, remoteSave) => {
+  if (!localSave) return remoteSave
+  if (!remoteSave) return localSave
+
+  return getGrowthGameUpdatedAt(remoteSave).localeCompare(getGrowthGameUpdatedAt(localSave)) > 0
+    ? remoteSave
+    : localSave
+}
+
 const mergePortableSnapshots = (localSnapshot, remoteSnapshot) => {
   const changes = compactChangeRows([
     ...getRetainedChangeRows(normalizeSnapshotArray(remoteSnapshot, 'changes')),
@@ -965,10 +1001,19 @@ const mergePortableSnapshots = (localSnapshot, remoteSnapshot) => {
     snapshot.metricRecords = metricRecords.map(toPortableBaseRow)
   }
 
+  const growthGame = mergeGrowthGameSaves(
+    normalizePortableGrowthGameSave(localSnapshot.growthGame),
+    normalizePortableGrowthGameSave(remoteSnapshot.growthGame),
+  )
+
+  if (growthGame) {
+    snapshot.growthGame = growthGame
+  }
+
   return snapshot
 }
 
-const createPortableSnapshot = () => {
+const createPortableSnapshot = (growthGameSave) => {
   materializeDueRecurringTodos()
 
   const entries = db.prepare(`SELECT * FROM entries ORDER BY date_key DESC`).all()
@@ -999,6 +1044,12 @@ const createPortableSnapshot = () => {
 
   if (metricRecords.length) {
     snapshot.metricRecords = metricRecords.map(toPortableBaseRow)
+  }
+
+  const growthGame = normalizePortableGrowthGameSave(growthGameSave)
+
+  if (growthGame) {
+    snapshot.growthGame = growthGame
   }
 
   return snapshot
@@ -1094,7 +1145,7 @@ const getSyncBundleGuide = (manifest) => `心象仪本地同步包
 ${manifest.recommendedRemotePath}
 
 需要上传的文件：
-- ${portableSnapshotFile}: 跨端数据快照，包含日记、Todo、周总结和附件元数据。
+- ${portableSnapshotFile}: 跨端数据快照，包含日记、Todo、周总结、成长游戏存档和附件元数据。
 - ${portableAttachmentDir}/: 附件内容文件，每个附件一个独立 .b64 文件。
 - ${portableManifestFile}: 同步清单，记录快照格式、schema、生成时间和大小。
 
@@ -1513,9 +1564,11 @@ const validateIncomingDatabase = (incomingPath) => {
 
 const pushWebDavSnapshot = async (request, response) => {
   let config
+  let payload
 
   try {
-    config = getWebDavConfig(await readJson(request))
+    payload = await readJson(request)
+    config = getWebDavConfig(payload)
   } catch (error) {
     sendJson(response, 400, { error: error instanceof Error ? error.message : 'WebDAV 配置无效。' })
     return
@@ -1525,7 +1578,7 @@ const pushWebDavSnapshot = async (request, response) => {
 
   try {
     await ensureWebDavCollection(config)
-    const localSnapshot = createPortableSnapshot()
+    const localSnapshot = createPortableSnapshot(payload.growthGameSave)
     const remote = await readRemotePortableSnapshot(config)
     const snapshot = remote ? mergePortableSnapshots(localSnapshot, remote.snapshot) : localSnapshot
     const manifest = await uploadPortableSnapshot(config, snapshot, [localSnapshot, remote?.snapshot].filter(Boolean))
@@ -1551,6 +1604,7 @@ const pushWebDavSnapshot = async (request, response) => {
       file: portableSnapshotFile,
       size: manifest.size,
       syncedAt: manifest.pushedAt,
+      growthGameSave: snapshot.growthGame,
     })
   } catch (error) {
     sendJson(response, 502, { error: error instanceof Error ? error.message : 'WebDAV Push 失败。' })
@@ -1559,9 +1613,11 @@ const pushWebDavSnapshot = async (request, response) => {
 
 const replaceWebDavSnapshot = async (request, response) => {
   let config
+  let payload
 
   try {
-    config = getWebDavConfig(await readJson(request))
+    payload = await readJson(request)
+    config = getWebDavConfig(payload)
   } catch (error) {
     sendJson(response, 400, { error: error instanceof Error ? error.message : 'WebDAV 配置无效。' })
     return
@@ -1569,7 +1625,7 @@ const replaceWebDavSnapshot = async (request, response) => {
 
   try {
     await ensureWebDavCollection(config)
-    const snapshot = createPortableSnapshot()
+    const snapshot = createPortableSnapshot(payload.growthGameSave)
     const manifest = await uploadPortableSnapshot(config, snapshot, [snapshot])
 
     rmSync(webDavRecoveryMarkerPath, { force: true })
@@ -1588,17 +1644,19 @@ const replaceWebDavSnapshot = async (request, response) => {
       file: portableSnapshotFile,
       size: manifest.size,
       syncedAt: manifest.pushedAt,
+      growthGameSave: snapshot.growthGame,
     })
   } catch (error) {
     sendJson(response, 502, { error: error instanceof Error ? error.message : '用本机数据重建云端失败。' })
   }
 }
 
-const exportSyncBundle = async (_request, response) => {
+const exportSyncBundle = async (request, response) => {
   try {
+    const payload = await readJson(request)
     const { manifest } = createLocalSyncBundle({
       source: 'manual-export',
-    })
+    }, createPortableSnapshot(payload.growthGameSave))
 
     sendJson(response, 200, {
       ok: true,
@@ -1615,15 +1673,19 @@ const exportSyncBundle = async (_request, response) => {
 
 const pullWebDavSnapshot = async (request, response) => {
   let config
+  let payload
 
   try {
-    config = getWebDavConfig(await readJson(request))
+    payload = await readJson(request)
+    config = getWebDavConfig(payload)
   } catch (error) {
     sendJson(response, 400, { error: error instanceof Error ? error.message : 'WebDAV 配置无效。' })
     return
   }
 
-  if (rejectUnsafeWebDavMerge(response)) return
+  const allowRecoveryPull = payload.allowRecoveryPull === true
+
+  if (rejectUnsafeWebDavMerge(response, { allowRecoveryPull })) return
 
   const incomingPath = resolve(syncDir, `incoming-${Date.now()}.sqlite`)
   const backupPath = resolve(syncDir, `local-backup-${Date.now()}.sqlite`)
@@ -1685,6 +1747,7 @@ const pullWebDavSnapshot = async (request, response) => {
         source: 'webdav-pull',
         mirroredAt: nowIso(),
       })
+      rmSync(webDavRecoveryMarkerPath, { force: true })
 
       sendJson(response, 200, {
         ok: true,
@@ -1694,6 +1757,7 @@ const pullWebDavSnapshot = async (request, response) => {
         size: Buffer.byteLength(raw, 'utf8'),
         backupPath: existsSync(backupPath) ? backupPath : '',
         syncedAt: nowIso(),
+        growthGameSave: normalizePortableGrowthGameSave(snapshot.growthGame),
       })
       return
     }
@@ -1752,6 +1816,7 @@ const pullWebDavSnapshot = async (request, response) => {
     }
 
     const manifest = await uploadPortableSnapshot(config)
+    rmSync(webDavRecoveryMarkerPath, { force: true })
 
     sendJson(response, 200, {
       ok: true,

@@ -7,6 +7,7 @@ import {
   grantGrowthSeedBoxes,
   moveGrowthPlant,
   moveGrowthPlantToCell,
+  normalizeGrowthGameSave,
   openGrowthSeedBox,
   readGrowthGameSave,
   unlockGrowthCell,
@@ -52,6 +53,14 @@ export const useGrowthGame = (snapshot: GameEngineSnapshot) => {
     return next.result ?? fallbackResult
   }, [])
 
+  const replaceGrowthGameSave = useCallback((nextSave: GrowthGameSave) => {
+    const normalized = normalizeGrowthGameSave(nextSave)
+
+    saveRef.current = normalized
+    setSave(normalized)
+    writeGrowthGameSave(normalized)
+  }, [])
+
   const collectCoins = useCallback(
     () => runMutation((current) => collectGrowthCoins(current)),
     [runMutation],
@@ -92,6 +101,7 @@ export const useGrowthGame = (snapshot: GameEngineSnapshot) => {
     movePlant,
     movePlantToCell,
     openSeedBox,
+    replaceGrowthGameSave,
     unlockCell,
     upgradeStorage,
   }

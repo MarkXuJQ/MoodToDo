@@ -544,7 +544,7 @@ export function SettingsView({
               {databaseStatus.webDavRecoveryRequired && (
                 <p className="webdav-test-result webdav-test-result-error mb-3" role="alert">
                   <strong>云端同步保护已开启</strong>
-                  <span>普通同步和云端恢复已暂停。确认本机数据无误后，请使用“用本机数据重建云端”。</span>
+                  <span>普通合并同步已暂停。云端数据正确时用“从云端恢复”；本机数据正确时再用“用本机数据重建云端”。</span>
                 </p>
               )}
 
@@ -626,7 +626,7 @@ export function SettingsView({
               </div>
 
               <p className="note mt-3">
-                本地仍使用 SQLite 保持读写稳定，WebDAV 上只放跨端同步文件。点击“生成本地同步包”会把需要上传的文件整理到 {databaseStatus.syncBundlePath || 'sync/xinxiangyi-sync'}。坚果云的公开邀请链接不能作为 WebDAV Server URL；Server URL 通常填写 https://dav.jianguoyun.com/dav/。Remote Path 建议使用专用目录 /xinxiangyi-sync，不要直接指向本机 data 文件夹。当前采用自用简单同步模式：编辑后点同步上传，换设备前先点同步拉取；迁移和排查时，可以用“从云端恢复”强制拉取远端快照。
+                本地仍使用 SQLite 保持读写稳定，WebDAV 上只放跨端同步文件，包含日记、Todo、附件索引和成长游戏存档。点击“生成本地同步包”会把需要上传的文件整理到 {databaseStatus.syncBundlePath || 'sync/xinxiangyi-sync'}。坚果云的公开邀请链接不能作为 WebDAV Server URL；Server URL 通常填写 https://dav.jianguoyun.com/dav/。Remote Path 建议使用专用目录 /xinxiangyi-sync，不要直接指向本机 data 文件夹。当前采用自用简单同步模式：编辑后点同步上传，换设备前先点同步拉取；迁移和排查时，可以用“从云端恢复”强制拉取远端快照。
               </p>
             </section>
           )}
@@ -648,7 +648,7 @@ export function SettingsView({
               <div className="rounded-lg border border-field-200 bg-field-50 p-3">
                 <strong>成长系统已接入应用。</strong>
                 <p className="m-0 mt-1 text-sm font-bold text-ink-600">
-                  当前内置成长页和未来 Phaser、Pixi、Three.js 或 WebAssembly/Godot 引擎共用同一份快照。成长进度由日记和心象数据推导，不需要维护第二份云端存档。
+                  当前内置成长页和未来 Phaser、Pixi、Three.js 或 WebAssembly/Godot 引擎共用同一份成长存档。日记和心象数据负责产生奖励，植物布局、金币和融合进度会随 WebDAV 快照同步。
                 </p>
               </div>
 

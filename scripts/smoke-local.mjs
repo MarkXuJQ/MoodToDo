@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -206,6 +206,57 @@ try {
     }),
   })
   assert(blockedSync.status === 409, '恢复标记存在时，普通 WebDAV 合并同步必须被阻止。')
+
+  const allowedRecoveryAttempt = await apiFetch('/api/webdav/pull', {
+    method: 'POST',
+    body: JSON.stringify({
+      url: 'http://127.0.0.1:1/',
+      username: 'isolated',
+      password: 'isolated',
+      remotePath: '/isolated-smoke',
+      allowRecoveryPull: true,
+    }),
+  })
+  assert(allowedRecoveryAttempt.status !== 409, '明确从云端恢复时不应被保护标记拦截。')
+
+  const growthSyncSave = {
+    version: 1,
+    coins: 777,
+    seedBoxes: [],
+    plants: [
+      {
+        id: 'sync-growth-a',
+        family: 'sun',
+        stage: 2,
+        placement: 'board',
+        cellIndex: 4,
+        sourceDateKey: todayKey,
+        sourceMoodScore: 72,
+        sourceQuadrant: '高能舒展',
+        createdAt: new Date().toISOString(),
+      },
+    ],
+    grantedRewardKeys: ['sync-growth'],
+    discoveredCodexIds: ['sun-2'],
+    unlockedCells: 24,
+    storageLimit: 12,
+    lastCollectedAt: new Date().toISOString(),
+    lifetimeCoins: 888,
+    mergeCount: 1,
+    nextPlantSerial: 9,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+  const bundleResponse = await apiFetch('/api/sync-bundle/export', {
+    method: 'POST',
+    body: JSON.stringify({ growthGameSave: growthSyncSave }),
+  })
+  assert(bundleResponse.ok, '生成本地同步包失败。')
+  const bundleSnapshot = JSON.parse(
+    await readFile(join(syncBundleDir, 'xinxiangyi-sync', 'xinxiangyi-native-snapshot.json'), 'utf8'),
+  )
+  assert(bundleSnapshot.growthGame?.coins === 777, 'WebDAV 同步包没有写入成长金币。')
+  assert(bundleSnapshot.growthGame?.plants?.[0]?.cellIndex === 4, 'WebDAV 同步包没有写入植物布局。')
 
   const initialState = await getJson('/api/state')
   assert(!('entries' in initialState), '/api/state 不应再返回日记正文。')

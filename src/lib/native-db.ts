@@ -17,10 +17,12 @@ import type {
   TodoDetailUpdate,
   TodoRepeatFrequency,
   WebDavConnectionTestResult,
+  WebDavSnapshotOptions,
   WebDavSyncConfig,
   WebDavSyncResult,
   WeeklySummary,
 } from './db'
+import { normalizeGrowthGameSave, type GrowthGameSave } from './growthGame'
 import { getJournalText } from '../utils/journal'
 
 type DbRow = Record<string, unknown>
@@ -47,7 +49,10 @@ type NativeSnapshot = {
   weeklySummaries: DbRow[]
   metricDefinitions?: DbRow[]
   metricRecords?: DbRow[]
+  growthGame?: GrowthGameSave
 }
+
+type NativeWebDavSyncPayload = WebDavSyncConfig & WebDavSnapshotOptions
 
 const schemaVersion = 7
 const nativeDatabaseId = 'xinxiangyi'
@@ -509,6 +514,24 @@ const snapshotArray = (snapshot: NativeSnapshot, key: keyof NativeSnapshot) => {
   return Array.isArray(value) ? value : []
 }
 
+const normalizeSnapshotGrowthGame = (value: unknown): GrowthGameSave | undefined => {
+  if (!value || typeof value !== 'object') return undefined
+
+  return normalizeGrowthGameSave(value as Partial<GrowthGameSave>)
+}
+
+const getGrowthGameUpdatedAt = (save?: GrowthGameSave) => save?.updatedAt || save?.createdAt || ''
+
+const mergeGrowthGameSaves = (localSave?: GrowthGameSave, remoteSave?: GrowthGameSave) => {
+  if (!localSave) return remoteSave
+  if (!remoteSave) return localSave
+
+  const localUpdatedAt = getGrowthGameUpdatedAt(localSave)
+  const remoteUpdatedAt = getGrowthGameUpdatedAt(remoteSave)
+
+  return remoteUpdatedAt.localeCompare(localUpdatedAt) > 0 ? remoteSave : localSave
+}
+
 const mergeNativeSnapshots = (localSnapshot: NativeSnapshot, remoteSnapshot: NativeSnapshot): NativeSnapshot => {
   const changes = compactChangeRows([
     ...getRetainedChangeRows(snapshotArray(remoteSnapshot, 'changes')),
@@ -592,6 +615,15 @@ const mergeNativeSnapshots = (localSnapshot: NativeSnapshot, remoteSnapshot: Nat
 
   if (metricRecords.length) {
     snapshot.metricRecords = metricRecords.map(toPortableBaseRow)
+  }
+
+  const growthGame = mergeGrowthGameSaves(
+    normalizeSnapshotGrowthGame(localSnapshot.growthGame),
+    normalizeSnapshotGrowthGame(remoteSnapshot.growthGame),
+  )
+
+  if (growthGame) {
+    snapshot.growthGame = growthGame
   }
 
   return snapshot
@@ -1840,7 +1872,7 @@ const ensureNativeWebDavCollection = async (config: WebDavSyncConfig, ...parts: 
   }
 }
 
-const createNativeSnapshot = async (): Promise<NativeSnapshot> => {
+const createNativeSnapshot = async (growthGameSave?: GrowthGameSave): Promise<NativeSnapshot> => {
   const db = await getDatabase()
   await materializeDueNativeRecurringTodos(db)
 
@@ -1874,6 +1906,12 @@ const createNativeSnapshot = async (): Promise<NativeSnapshot> => {
 
   if (metricRecords.length) {
     snapshot.metricRecords = metricRecords.map(toPortableBaseRow)
+  }
+
+  const growthGame = normalizeSnapshotGrowthGame(growthGameSave)
+
+  if (growthGame) {
+    snapshot.growthGame = growthGame
   }
 
   return snapshot
@@ -2354,10 +2392,10 @@ export const testNativeWebDavConnection = async (
   }
 }
 
-export const pushNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promise<WebDavSyncResult> => {
+export const pushNativeWebDavSnapshot = async (payload: NativeWebDavSyncPayload): Promise<WebDavSyncResult> => {
   const config = getWebDavConfig(payload)
   await ensureNativeWebDavCollection(config)
-  const localSnapshot = await createNativeSnapshot()
+  const localSnapshot = await createNativeSnapshot(payload.growthGameSave)
   const remoteSnapshot = await readRemoteNativeSnapshot(config)
   const snapshot = remoteSnapshot ? mergeNativeSnapshots(localSnapshot, remoteSnapshot) : localSnapshot
   const uploadedAttachments = await uploadNativeAttachmentFiles(config, snapshot, [
@@ -2393,13 +2431,14 @@ export const pushNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promi
     file: nativeSnapshotFile,
     size: manifest.size,
     syncedAt,
+    growthGameSave: snapshot.growthGame,
   }
 }
 
-export const replaceNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promise<WebDavSyncResult> => {
+export const replaceNativeWebDavSnapshot = async (payload: NativeWebDavSyncPayload): Promise<WebDavSyncResult> => {
   const config = getWebDavConfig(payload)
   await ensureNativeWebDavCollection(config)
-  const snapshot = await createNativeSnapshot()
+  const snapshot = await createNativeSnapshot(payload.growthGameSave)
   const uploadedAttachments = await uploadNativeAttachmentFiles(config, snapshot, [snapshot])
   const snapshotBody = JSON.stringify(snapshot)
   const syncedAt = nowIso()
@@ -2426,10 +2465,11 @@ export const replaceNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Pr
     file: nativeSnapshotFile,
     size: manifest.size,
     syncedAt,
+    growthGameSave: snapshot.growthGame,
   }
 }
 
-export const pullNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promise<WebDavSyncResult> => {
+export const pullNativeWebDavSnapshot = async (payload: NativeWebDavSyncPayload): Promise<WebDavSyncResult> => {
   const config = getWebDavConfig(payload)
   let raw = ''
 
@@ -2479,5 +2519,6 @@ export const pullNativeWebDavSnapshot = async (payload: WebDavSyncConfig): Promi
     file: nativeSnapshotFile,
     size: getUtf8Size(raw),
     syncedAt: nowIso(),
+    growthGameSave: normalizeSnapshotGrowthGame(snapshot.growthGame),
   }
 }
